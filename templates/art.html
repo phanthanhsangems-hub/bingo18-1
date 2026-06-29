@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Entropy Dự Đoán · Bingo18</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #05070f;
+  --bg-card: rgba(8,16,36,0.85);
+  --border: rgba(0,245,255,0.18);
+  --border-h: rgba(0,245,255,0.45);
+  --cyan: #00f5ff;
+  --gold: #ffb800;
+  --green: #00ff88;
+  --red: #ff4466;
+  --magenta: #ff00aa;
+  --purple: #bf80ff;
+  --text: #d0e8f0;
+  --muted: #3d6080;
+  --dim: #0f1c2e;
+  --r: 4px;
+}
+
+body {
+  background: var(--bg);
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,245,255,.009) 3px, rgba(0,245,255,.009) 4px);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── SIDEBAR ── */
+#sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: rgba(5,10,22,0.95);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,245,255,.3) transparent;
+}
+#sidebar::-webkit-scrollbar { width: 3px; }
+#sidebar::-webkit-scrollbar-thumb { background: rgba(0,245,255,.3); border-radius: 2px; }
+
+.sb-header {
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(5,10,22,0.98);
+  z-index: 10;
+}
+.sb-logo {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .2em;
+  color: var(--cyan);
+  text-shadow: 0 0 14px rgba(0,245,255,.7);
+  display: block;
+  margin-bottom: 2px;
+}
+.sb-sub {
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.sb-section {
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(0,245,255,.07);
+}
+.sb-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sb-label::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  background: var(--cyan);
+  border-radius: 50%;
+  box-shadow: 0 0 4px var(--cyan);
+}
+
+/* Seed controls */
+.seed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.seed-display {
+  flex: 1;
+  background: rgba(0,245,255,.04);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 7px 10px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(0,245,255,.5);
+  text-align: center;
+  letter-spacing: .1em;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.seed-display:hover { border-color: var(--border-h); }
+
+.sb-btn {
+  background: rgba(0,245,255,.06);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--cyan);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  text-shadow: 0 0 6px rgba(0,245,255,.4);
+}
+.sb-btn:hover {
+  background: rgba(0,245,255,.14);
+  border-color: var(--border-h);
+  box-shadow: 0 0 10px rgba(0,245,255,.2);
+}
+.sb-btn:active { opacity: .7; }
+.sb-btn.danger {
+  background: rgba(255,68,102,.06);
+  border-color: rgba(255,68,102,.3);
+  color: var(--red);
+  text-shadow: 0 0 6px rgba(255,68,102,.4);
+}
+.sb-btn.danger:hover {
+  background: rgba(255,68,102,.14);
+  border-color: rgba(255,68,102,.6);
+  box-shadow: 0 0 10px rgba(255,68,102,.2);
+}
+.sb-btn.gold {
+  background: rgba(255,184,0,.06);
+  border-color: rgba(255,184,0,.3);
+  color: var(--gold);
+  text-shadow: 0 0 6px rgba(255,184,0,.4);
+}
+.sb-btn.gold:hover {
+  background: rgba(255,184,0,.14);
+  border-color: rgba(255,184,0,.6);
+  box-shadow: 0 0 10px rgba(255,184,0,.2);
+}
+
+.seed-nav {
+  display: flex;
+  gap: 5px;
+}
+.seed-nav .sb-btn { flex: 1; padding: 6px 0; text-align: center; font-size: 14px; }
+
+/* Param sliders */
+.param-row {
+  margin-bottom: 10px;
+}
+.param-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+}
+.param-name {
+  font-size: 10px;
+  color: var(--text);
+  letter-spacing: .04em;
+}
+.param-val {
+  font-size: 10px;
+  color: var(--cyan);
+  font-weight: 600;
+  min-width: 32px;
+  text-align: right;
+}
+input[type=range] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 3px;
+  background: rgba(0,245,255,.12);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px rgba(0,245,255,.8);
+  cursor: pointer;
+}
+input[type=range]::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px rgba(0,245,255,.8);
+  border: none;
+  cursor: pointer;
+}
+
+/* Action buttons */
+.actions { display: flex; flex-direction: column; gap: 6px; }
+.action-btn {
+  background: rgba(0,245,255,.06);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--cyan);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: all .15s;
+  text-shadow: 0 0 8px rgba(0,245,255,.4);
+  box-shadow: 0 0 8px rgba(0,245,255,.06);
+  text-align: center;
+}
+.action-btn:hover {
+  background: rgba(0,245,255,.14);
+  border-color: var(--border-h);
+  box-shadow: 0 0 16px rgba(0,245,255,.25);
+}
+.action-btn.back {
+  background: rgba(255,184,0,.06);
+  border-color: rgba(255,184,0,.25);
+  color: var(--gold);
+  text-shadow: 0 0 8px rgba(255,184,0,.4);
+}
+.action-btn.back:hover {
+  background: rgba(255,184,0,.14);
+  border-color: rgba(255,184,0,.5);
+  box-shadow: 0 0 16px rgba(255,184,0,.2);
+}
+.action-btn.reset-btn {
+  background: rgba(255,68,102,.05);
+  border-color: rgba(255,68,102,.25);
+  color: var(--red);
+  text-shadow: 0 0 8px rgba(255,68,102,.4);
+}
+.action-btn.reset-btn:hover {
+  background: rgba(255,68,102,.12);
+  border-color: rgba(255,68,102,.5);
+}
+
+/* Frequency legend */
+.freq-legend {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.freq-item {
+  background: rgba(0,0,0,.3);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: var(--r);
+  padding: 6px 4px;
+  text-align: center;
+}
+.freq-num {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.freq-pct {
+  font-size: 8px;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+
+/* Status bar */
+.sb-status {
+  padding: 10px 14px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: .05em;
+}
+.status-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 5px var(--green);
+  margin-right: 5px;
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .3; }
+}
+
+/* ── CANVAS AREA ── */
+#canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#canvas-wrap canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Overlay labels */
+.corner-label {
+  position: absolute;
+  font-size: 9px;
+  color: rgba(0,245,255,.25);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+  pointer-events: none;
+}
+.corner-label.tl { top: 12px; left: 14px; }
+.corner-label.tr { top: 12px; right: 14px; text-align: right; }
+.corner-label.bl { bottom: 12px; left: 14px; }
+
+#frame-counter {
+  position: absolute;
+  bottom: 12px;
+  right: 14px;
+  font-size: 9px;
+  color: rgba(0,245,255,.2);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: .08em;
+  pointer-events: none;
+}
+
+/* Seed jump input modal overlay */
+#jump-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(5,7,15,.8);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+#jump-overlay.active { display: flex; }
+.jump-card {
+  background: rgba(8,16,36,.95);
+  border: 1px solid rgba(0,245,255,.4);
+  border-radius: var(--r);
+  padding: 24px 28px;
+  min-width: 240px;
+  box-shadow: 0 0 40px rgba(0,245,255,.15), inset 0 0 20px rgba(0,245,255,.03);
+}
+.jump-card h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  color: var(--cyan);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  text-shadow: 0 0 10px rgba(0,245,255,.6);
+}
+.jump-input {
+  width: 100%;
+  background: rgba(0,245,255,.04);
+  border: 1px solid rgba(0,245,255,.3);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 18px;
+  color: var(--cyan);
+  text-align: center;
+  letter-spacing: .1em;
+  outline: none;
+  margin-bottom: 12px;
+}
+.jump-input:focus { border-color: var(--cyan); box-shadow: 0 0 10px rgba(0,245,255,.2); }
+.jump-actions { display: flex; gap: 8px; }
+.jump-actions button { flex: 1; padding: 8px; }
+
+/* Pause overlay */
+#pause-badge {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--cyan);
+  letter-spacing: .3em;
+  text-shadow: 0 0 20px rgba(0,245,255,.8);
+  pointer-events: none;
+  opacity: .6;
+}
+
+/* Mobile fallback */
+@media (max-width: 600px) {
+  #sidebar { width: 200px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── SIDEBAR ── -->
+<aside id="sidebar">
+  <div class="sb-header">
+    <span class="sb-logo">ENTROPY DỰ ĐOÁN</span>
+    <span class="sb-sub">Bingo18 · Generative Art</span>
+  </div>
+
+  <!-- Seed -->
+  <div class="sb-section">
+    <div class="sb-label">Seed</div>
+    <div class="seed-row">
+      <div class="seed-display" id="seed-disp" title="Click to jump">42</div>
+    </div>
+    <div class="seed-nav">
+      <button class="sb-btn" id="btn-prev" title="Seed trước">◀</button>
+      <button class="sb-btn gold" id="btn-rand" title="Ngẫu nhiên">⟳</button>
+      <button class="sb-btn" id="btn-next" title="Seed tiếp">▶</button>
+    </div>
+  </div>
+
+  <!-- Parameters -->
+  <div class="sb-section">
+    <div class="sb-label">Parameters</div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Particles</span>
+        <span class="param-val" id="val-particles">800</span>
+      </div>
+      <input type="range" id="sl-particles" min="200" max="2000" step="100" value="800">
+    </div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Attraction</span>
+        <span class="param-val" id="val-attract">0.35</span>
+      </div>
+      <input type="range" id="sl-attract" min="0.05" max="1.2" step="0.05" value="0.35">
+    </div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Noise Scale</span>
+        <span class="param-val" id="val-noise">0.003</span>
+      </div>
+      <input type="range" id="sl-noise" min="0.001" max="0.012" step="0.001" value="0.003">
+    </div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Speed</span>
+        <span class="param-val" id="val-speed">1.0</span>
+      </div>
+      <input type="range" id="sl-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+    </div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Trail Fade</span>
+        <span class="param-val" id="val-fade">8</span>
+      </div>
+      <input type="range" id="sl-fade" min="2" max="30" step="1" value="8">
+    </div>
+
+    <div class="param-row">
+      <div class="param-header">
+        <span class="param-name">Orbit Radius</span>
+        <span class="param-val" id="val-orbit">0.72</span>
+      </div>
+      <input type="range" id="sl-orbit" min="0.3" max="1.2" step="0.02" value="0.72">
+    </div>
+  </div>
+
+  <!-- Frequency Legend -->
+  <div class="sb-section">
+    <div class="sb-label">Frequency Data</div>
+    <div class="freq-legend">
+      <div class="freq-item">
+        <div class="freq-num" style="color:#ff4466;text-shadow:0 0 8px rgba(255,68,102,.7)">1</div>
+        <div class="freq-pct">247 · 16.5%</div>
+      </div>
+      <div class="freq-item">
+        <div class="freq-num" style="color:#ffb800;text-shadow:0 0 8px rgba(255,184,0,.7)">2</div>
+        <div class="freq-pct">251 · 16.7%</div>
+      </div>
+      <div class="freq-item">
+        <div class="freq-num" style="color:#00ff88;text-shadow:0 0 8px rgba(0,255,136,.7)">3</div>
+        <div class="freq-pct">265 · 17.7%</div>
+      </div>
+      <div class="freq-item">
+        <div class="freq-num" style="color:#00f5ff;text-shadow:0 0 8px rgba(0,245,255,.7)">4</div>
+        <div class="freq-pct">271 · 18.1%</div>
+      </div>
+      <div class="freq-item">
+        <div class="freq-num" style="color:#bf80ff;text-shadow:0 0 8px rgba(191,128,255,.7)">5</div>
+        <div class="freq-pct">237 · 15.8%</div>
+      </div>
+      <div class="freq-item">
+        <div class="freq-num" style="color:#ff00aa;text-shadow:0 0 8px rgba(255,0,170,.7)">6</div>
+        <div class="freq-pct">229 · 15.3%</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="sb-section">
+    <div class="sb-label">Actions</div>
+    <div class="actions">
+      <button class="action-btn" id="btn-regen">⟳ Regenerate</button>
+      <button class="action-btn reset-btn" id="btn-reset">▣ Reset Canvas</button>
+      <button class="action-btn" id="btn-pause">⏸ Pause</button>
+      <button class="action-btn" id="btn-save">⬇ Download PNG</button>
+      <button class="action-btn back" onclick="location.href='/'">← Dashboard</button>
+    </div>
+  </div>
+
+  <div class="sb-status">
+    <span class="status-dot"></span>
+    <span id="status-txt">Initializing…</span>
+  </div>
+</aside>
+
+<!-- ── CANVAS ── -->
+<div id="canvas-wrap">
+  <div class="corner-label tl">BINGO18 · ENTROPY DỰ ĐOÁN</div>
+  <div class="corner-label tr" id="seed-corner">SEED: 42</div>
+  <div class="corner-label bl">p5.js · Particle Field</div>
+  <div id="frame-counter">FRAME: 0</div>
+  <div id="pause-badge">PAUSED</div>
+</div>
+
+<!-- Jump overlay -->
+<div id="jump-overlay">
+  <div class="jump-card">
+    <h3>Jump to Seed</h3>
+    <input class="jump-input" id="jump-input" type="number" min="0" max="999999" placeholder="0–999999">
+    <div class="jump-actions">
+      <button class="sb-btn" id="jump-ok">Go</button>
+      <button class="sb-btn danger" id="jump-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── FREQUENCY DATA (actual Bingo18 historical, 1500 draws) ──────────────────
+const NUM_FREQ = { 1: 247, 2: 251, 3: 265, 4: 271, 5: 237, 6: 229 };
+const TOTAL_FREQ = Object.values(NUM_FREQ).reduce((a, b) => a + b, 0);
+const NUM_COLORS = ['#ff4466', '#ffb800', '#00ff88', '#00f5ff', '#bf80ff', '#ff00aa'];
+
+// ── PARAMS (live, modified by sliders) ─────────────────────────────────────
+const P = {
+  particleCount: 800,
+  attractionStr: 0.35,
+  noiseScale:    0.003,
+  speed:         1.0,
+  trailFade:     8,
+  orbitRadius:   0.72,
+};
+
+let currentSeed = 42;
+let paused = false;
+let sketch = null;
+
+// ── SEEDED PRNG (mulberry32) ───────────────────────────────────────────────
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── p5.js SKETCH ───────────────────────────────────────────────────────────
+function makeSketch(seed) {
+  return function(p) {
+    let particles = [];
+    let attractors = [];
+    let frameCount = 0;
+    let rng = mulberry32(seed * 9973 + 1);
+    let offLayer;   // off-screen trail accumulator
+
+    const W = () => p.width;
+    const H = () => p.height;
+
+    // Hexagonal layout, center = canvas center
+    function hexPos(i, radius) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2;  // start at top
+      return {
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius
+      };
+    }
+
+    function buildAttractors() {
+      attractors = [];
+      const R = Math.min(W(), H()) * P.orbitRadius * 0.38;
+      for (let i = 0; i < 6; i++) {
+        const num = i + 1;
+        const freq = NUM_FREQ[num] / TOTAL_FREQ;
+        const pos = hexPos(i, R);
+        attractors.push({
+          x: W() / 2 + pos.x,
+          y: H() / 2 + pos.y,
+          strength: freq * 12.0,
+          color: NUM_COLORS[i],
+          num: num,
+          radius: 14 + freq * 60,
+        });
+      }
+    }
+
+    function buildParticles() {
+      particles = [];
+      for (let i = 0; i < P.particleCount; i++) {
+        // Spawn with slight radial scatter around center
+        const a = rng() * Math.PI * 2;
+        const r = rng() * 60 + 5;
+        particles.push({
+          x: W() / 2 + Math.cos(a) * r,
+          y: H() / 2 + Math.sin(a) * r,
+          vx: (rng() - 0.5) * 0.6,
+          vy: (rng() - 0.5) * 0.6,
+          color: NUM_COLORS[Math.floor(rng() * 6)],
+          alpha: 0.55 + rng() * 0.45,
+          size: 0.8 + rng() * 1.2,
+          noiseOff: rng() * 1000,
+        });
+      }
+    }
+
+    p.setup = function() {
+      const wrap = document.getElementById('canvas-wrap');
+      const cw = wrap.clientWidth;
+      const ch = wrap.clientHeight;
+      const cnv = p.createCanvas(cw, ch);
+      cnv.parent('canvas-wrap');
+
+      p.colorMode(p.RGB, 255, 255, 255, 255);
+      p.noSmooth();
+
+      offLayer = p.createGraphics(cw, ch);
+      offLayer.colorMode(p.RGB, 255, 255, 255, 255);
+      offLayer.pixelDensity(1);
+      offLayer.background(5, 7, 15);
+
+      buildAttractors();
+      buildParticles();
+
+      setStatus('Running · seed ' + seed);
+    };
+
+    p.draw = function() {
+      if (paused) return;
+      frameCount++;
+
+      // Fade trail layer
+      offLayer.noStroke();
+      offLayer.fill(5, 7, 15, P.trailFade);
+      offLayer.rect(0, 0, W(), H());
+
+      // Update & draw particles
+      offLayer.strokeWeight(1);
+      for (let i = 0; i < particles.length; i++) {
+        const pt = particles[i];
+
+        // Force accumulator
+        let fx = 0, fy = 0;
+
+        for (let j = 0; j < attractors.length; j++) {
+          const at = attractors[j];
+          const dx = at.x - pt.x;
+          const dy = at.y - pt.y;
+          const dist2 = dx * dx + dy * dy;
+          const dist = Math.sqrt(dist2) + 0.001;
+
+          // Primary attraction (inverse square, clamp near)
+          const fMag = (at.strength * P.attractionStr) / Math.max(dist2 * 0.0008, 0.5);
+          fx += (dx / dist) * fMag;
+          fy += (dy / dist) * fMag;
+
+          // Cross-attractor interference (subtle push from closest attractor)
+          if (dist < 80) {
+            fx -= (dx / dist) * fMag * 0.15;
+            fy -= (dy / dist) * fMag * 0.15;
+          }
+        }
+
+        // 3D Perlin noise (x, y, time-offset) as turbulence
+        const noiseVal = p.noise(
+          pt.x * P.noiseScale + pt.noiseOff,
+          pt.y * P.noiseScale + pt.noiseOff,
+          frameCount * 0.004
+        );
+        const noiseAngle = noiseVal * Math.PI * 4;
+        fx += Math.cos(noiseAngle) * 0.25;
+        fy += Math.sin(noiseAngle) * 0.25;
+
+        // Integrate
+        pt.vx = (pt.vx + fx * 0.016) * 0.97;
+        pt.vy = (pt.vy + fy * 0.016) * 0.97;
+
+        // Speed cap
+        const spd = Math.sqrt(pt.vx * pt.vx + pt.vy * pt.vy);
+        const maxSpd = 2.5 * P.speed;
+        if (spd > maxSpd) {
+          pt.vx = (pt.vx / spd) * maxSpd;
+          pt.vy = (pt.vy / spd) * maxSpd;
+        }
+
+        const px = pt.x;
+        const py = pt.y;
+        pt.x += pt.vx * P.speed;
+        pt.y += pt.vy * P.speed;
+
+        // Wrap edges
+        if (pt.x < 0)   pt.x += W();
+        if (pt.x > W()) pt.x -= W();
+        if (pt.y < 0)   pt.y += H();
+        if (pt.y > H()) pt.y -= H();
+
+        // Draw trail segment
+        const col = hexToRgb(pt.color);
+        offLayer.stroke(col.r, col.g, col.b, pt.alpha * 110);
+        offLayer.line(px, py, pt.x, pt.y);
+      }
+
+      // Draw attractor glows
+      for (let j = 0; j < attractors.length; j++) {
+        const at = attractors[j];
+        const col = hexToRgb(at.color);
+
+        // Outer glow ring (pulsing)
+        const pulse = 1 + Math.sin(frameCount * 0.04 + j * 1.05) * 0.15;
+        offLayer.noFill();
+        offLayer.stroke(col.r, col.g, col.b, 25);
+        offLayer.strokeWeight(2);
+        offLayer.ellipse(at.x, at.y, at.radius * 2.4 * pulse, at.radius * 2.4 * pulse);
+
+        // Core dot
+        offLayer.noStroke();
+        offLayer.fill(col.r, col.g, col.b, 90);
+        offLayer.ellipse(at.x, at.y, at.radius * 0.7, at.radius * 0.7);
+
+        // Bright center
+        offLayer.fill(col.r, col.g, col.b, 200);
+        offLayer.ellipse(at.x, at.y, 5, 5);
+      }
+
+      // Blit to screen
+      p.image(offLayer, 0, 0);
+
+      // Attractor labels on screen (not baked into trail)
+      p.textFont('Orbitron');
+      p.textStyle(p.BOLD);
+      for (let j = 0; j < attractors.length; j++) {
+        const at = attractors[j];
+        const col = hexToRgb(at.color);
+        p.noStroke();
+        p.fill(col.r, col.g, col.b, 200);
+        p.textSize(11);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.text(at.num, at.x, at.y - at.radius * 0.9);
+        p.fill(col.r, col.g, col.b, 100);
+        p.textSize(7);
+        const pct = (NUM_FREQ[at.num] / TOTAL_FREQ * 100).toFixed(1) + '%';
+        p.text(pct, at.x, at.y - at.radius * 0.9 + 13);
+      }
+
+      // Frame counter
+      document.getElementById('frame-counter').textContent = 'FRAME: ' + frameCount;
+    };
+
+    p.windowResized = function() {
+      const wrap = document.getElementById('canvas-wrap');
+      p.resizeCanvas(wrap.clientWidth, wrap.clientHeight);
+      offLayer.resizeCanvas(wrap.clientWidth, wrap.clientHeight);
+      offLayer.background(5, 7, 15);
+      buildAttractors();
+    };
+
+    // Expose rebuild functions
+    p._rebuildParticles = buildParticles;
+    p._rebuildAll = function() {
+      rng = mulberry32(currentSeed * 9973 + 1);
+      offLayer.background(5, 7, 15);
+      buildAttractors();
+      buildParticles();
+    };
+    p._resetCanvas = function() {
+      offLayer.background(5, 7, 15);
+    };
+  };
+}
+
+// ── UTILITIES ──────────────────────────────────────────────────────────────
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b };
+}
+
+function setStatus(msg) {
+  document.getElementById('status-txt').textContent = msg;
+}
+
+function updateSeedDisplay(s) {
+  document.getElementById('seed-disp').textContent = s;
+  document.getElementById('seed-corner').textContent = 'SEED: ' + s;
+}
+
+function applySeed(s) {
+  currentSeed = ((s % 1000000) + 1000000) % 1000000;
+  updateSeedDisplay(currentSeed);
+  if (sketch) {
+    sketch.remove();
+  }
+  sketch = new p5(makeSketch(currentSeed));
+  setStatus('Running · seed ' + currentSeed);
+}
+
+// ── CONTROLS ───────────────────────────────────────────────────────────────
+document.getElementById('btn-prev').addEventListener('click', () => {
+  applySeed(currentSeed - 1);
+});
+document.getElementById('btn-next').addEventListener('click', () => {
+  applySeed(currentSeed + 1);
+});
+document.getElementById('btn-rand').addEventListener('click', () => {
+  applySeed(Math.floor(Math.random() * 999999));
+});
+
+document.getElementById('seed-disp').addEventListener('click', () => {
+  document.getElementById('jump-input').value = currentSeed;
+  document.getElementById('jump-overlay').classList.add('active');
+  document.getElementById('jump-input').focus();
+  document.getElementById('jump-input').select();
+});
+document.getElementById('jump-ok').addEventListener('click', () => {
+  const v = parseInt(document.getElementById('jump-input').value, 10);
+  if (!isNaN(v)) applySeed(v);
+  document.getElementById('jump-overlay').classList.remove('active');
+});
+document.getElementById('jump-cancel').addEventListener('click', () => {
+  document.getElementById('jump-overlay').classList.remove('active');
+});
+document.getElementById('jump-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('jump-ok').click();
+  if (e.key === 'Escape') document.getElementById('jump-cancel').click();
+});
+
+// Pause/resume
+document.getElementById('btn-pause').addEventListener('click', () => {
+  paused = !paused;
+  document.getElementById('btn-pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  document.getElementById('pause-badge').style.display = paused ? 'block' : 'none';
+  setStatus(paused ? 'Paused' : 'Running · seed ' + currentSeed);
+});
+
+// Regenerate (new particles, keep canvas)
+document.getElementById('btn-regen').addEventListener('click', () => {
+  if (sketch && sketch._rebuildAll) sketch._rebuildAll();
+  setStatus('Regenerated · seed ' + currentSeed);
+});
+
+// Reset canvas (clear trails)
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (sketch && sketch._resetCanvas) sketch._resetCanvas();
+  setStatus('Canvas cleared');
+});
+
+// Download
+document.getElementById('btn-save').addEventListener('click', () => {
+  if (sketch) {
+    sketch.saveCanvas('entropy_' + currentSeed, 'png');
+  }
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft')  document.getElementById('btn-prev').click();
+  if (e.key === 'ArrowRight') document.getElementById('btn-next').click();
+  if (e.key === ' ')          document.getElementById('btn-pause').click();
+  if (e.key === 'r' || e.key === 'R') document.getElementById('btn-regen').click();
+  if (e.key === 'Escape' && document.getElementById('jump-overlay').classList.contains('active')) {
+    document.getElementById('jump-cancel').click();
+  }
+});
+
+// ── SLIDER WIRING ──────────────────────────────────────────────────────────
+function wireSlider(id, valId, paramKey, fmt) {
+  const sl = document.getElementById(id);
+  const vd = document.getElementById(valId);
+  sl.addEventListener('input', () => {
+    P[paramKey] = parseFloat(sl.value);
+    vd.textContent = fmt ? fmt(sl.value) : sl.value;
+    if (paramKey === 'particleCount' && sketch && sketch._rebuildAll) {
+      sketch._rebuildAll();
+    }
+  });
+}
+
+wireSlider('sl-particles', 'val-particles', 'particleCount', v => Math.round(v));
+wireSlider('sl-attract',   'val-attract',   'attractionStr', v => parseFloat(v).toFixed(2));
+wireSlider('sl-noise',     'val-noise',     'noiseScale',    v => parseFloat(v).toFixed(3));
+wireSlider('sl-speed',     'val-speed',     'speed',         v => parseFloat(v).toFixed(1));
+wireSlider('sl-fade',      'val-fade',      'trailFade',     v => Math.round(v));
+wireSlider('sl-orbit',     'val-orbit',     'orbitRadius',   v => parseFloat(v).toFixed(2));
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+applySeed(42);
+</script>
+</body>
+</html>

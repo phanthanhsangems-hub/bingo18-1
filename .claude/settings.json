@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Invoke-RestMethod *)",
+      "PowerShell(gcloud *)",
+      "PowerShell(curl *)",
+      "PowerShell(tasklist)",
+      "Bash(gcloud *)"
+    ]
+  }
+}

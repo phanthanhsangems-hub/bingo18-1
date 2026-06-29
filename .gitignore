@@ -1,0 +1,38 @@
+# Secrets
+.env
+*.env
+
+# Database
+data/*.db
+data/backups/
+
+# Models
+model_store/
+models/
+*.h5
+*.pkl
+*.keras
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+logs/
+*.log
+
+# Claude Code (local-only settings)
+.claude/settings.local.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.bat

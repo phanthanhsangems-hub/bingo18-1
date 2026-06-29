@@ -1,0 +1,17 @@
+models/
+!models/lstm_full_bingo18.keras
+model_store/
+data/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+*.h5
+!multiset_markov/hybrid_model.pkl
+*.pkl
+*.db
+*.log
+.git/
+.gitignore
+*.bat
+*.md

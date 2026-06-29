@@ -1,0 +1,36 @@
+name: Sync Bingo18 Draws
+
+on:
+  schedule:
+    - cron: '*/6 * * * *'   # mỗi 6 phút (game ra kỳ mới mỗi 6 phút)
+  workflow_dispatch:          # cho phép chạy tay từ GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4        # kill nếu treo (tránh tốn minutes)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: .github/sync-requirements.txt
+
+      - name: Install sync dependencies
+        run: pip install -r .github/sync-requirements.txt
+
+      - name: Sync draws → Supabase
+        env:
+          DB_HOST:        ${{ secrets.DB_HOST }}
+          DB_PORT:        ${{ secrets.DB_PORT }}
+          DB_NAME:        ${{ secrets.DB_NAME }}
+          DB_USER:        ${{ secrets.DB_USER }}
+          DB_PASSWORD:    ${{ secrets.DB_PASSWORD }}
+          CLOUD_RUN_URL:  ${{ secrets.CLOUD_RUN_URL }}
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: python sync_to_supabase.py --mode gha

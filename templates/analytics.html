@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analytics — Bingo18</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:      #05070f;
+    --card:    rgba(8,16,36,0.85);
+    --border:  rgba(0,245,255,0.18);
+    --border-hi: rgba(0,245,255,0.5);
+    --cyan:    #00f5ff;
+    --magenta: #ff00aa;
+    --green:   #00ff88;
+    --amber:   #ffb800;
+    --red:     #ff1744;
+    --text:    #d0e8f0;
+    --muted:   #3d6080;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,245,255,.012) 3px, rgba(0,245,255,.012) 4px),
+      radial-gradient(ellipse at 15% 15%, rgba(0,245,255,.07) 0%, transparent 50%),
+      radial-gradient(ellipse at 85% 85%, rgba(255,0,170,.05) 0%, transparent 50%);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: #05070f; }
+  ::-webkit-scrollbar-thumb { background: rgba(0,245,255,.3); border-radius: 2px; }
+
+  /* ── HEADER ── */
+  header {
+    background: rgba(0,245,255,.04);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 0 rgba(0,245,255,.08);
+    padding: 13px 22px;
+    display: flex; align-items: center; gap: 16px;
+    position: sticky; top: 0; z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  .header-brand {
+    display: flex; align-items: center; gap: 10px; text-decoration: none;
+  }
+  .header-icon {
+    width: 30px; height: 30px; border: 2px solid var(--cyan);
+    border-radius: 4px; display: grid; place-items: center;
+    font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 11px;
+    color: var(--cyan); text-shadow: 0 0 8px var(--cyan);
+    box-shadow: 0 0 10px rgba(0,245,255,.3), inset 0 0 6px rgba(0,245,255,.1);
+  }
+  header h1 {
+    font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 13px;
+    letter-spacing: .18em; color: var(--cyan);
+    text-shadow: 0 0 10px rgba(0,245,255,.5);
+    flex: 1;
+  }
+  header a.back {
+    color: var(--muted); text-decoration: none; font-size: 12px;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: .05em;
+    padding: 4px 10px; border: 1px solid rgba(0,245,255,.15);
+    border-radius: 3px; transition: .15s;
+  }
+  header a.back:hover { color: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 8px rgba(0,245,255,.2); }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex; gap: 0;
+    background: rgba(0,245,255,.03);
+    border-bottom: 1px solid var(--border);
+    padding: 0 22px;
+    overflow-x: auto;
+  }
+  .tabs::-webkit-scrollbar { height: 2px; }
+  .tab {
+    padding: 11px 20px; cursor: pointer; border: none; background: none;
+    color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap;
+    border-bottom: 2px solid transparent; transition: .2s;
+    font-family: 'JetBrains Mono', monospace; letter-spacing: .1em; text-transform: uppercase;
+  }
+  .tab.active {
+    color: var(--cyan); border-bottom-color: var(--cyan);
+    text-shadow: 0 0 6px rgba(0,245,255,.5);
+  }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  /* ── PANELS ── */
+  .panel { display: none; padding: 24px 22px; max-width: 1100px; margin: 0 auto; }
+  .panel.active { display: block; }
+
+  /* ── CONTROLS ── */
+  .controls {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .controls label {
+    font-size: 10px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .1em; font-family: 'JetBrains Mono', monospace;
+  }
+  .controls select, .controls input {
+    background: rgba(0,245,255,.04); border: 1px solid rgba(0,245,255,.2);
+    color: var(--text); padding: 5px 10px; border-radius: 3px; font-size: 12px;
+    font-family: 'JetBrains Mono', monospace; outline: none; transition: .15s;
+  }
+  .controls select:focus, .controls input:focus {
+    border-color: var(--cyan); box-shadow: 0 0 8px rgba(0,245,255,.25);
+  }
+
+  /* ── BUTTONS ── */
+  .btn {
+    padding: 6px 14px; border-radius: 3px; border: 1px solid rgba(0,245,255,.25);
+    background: rgba(0,245,255,.04); color: var(--text); font-size: 12px;
+    cursor: pointer; transition: .15s; font-family: 'JetBrains Mono', monospace;
+  }
+  .btn:hover { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 8px rgba(0,245,255,.2); }
+  .btn-primary {
+    background: rgba(0,245,255,.12); color: var(--cyan);
+    border-color: rgba(0,245,255,.4); font-weight: 700;
+    box-shadow: 0 0 10px rgba(0,245,255,.15);
+  }
+  .btn-primary:hover { background: rgba(0,245,255,.2); box-shadow: 0 0 16px rgba(0,245,255,.3); color: var(--cyan); }
+
+  /* ── GRID ── */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+
+  /* ── CARD ── */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 18px;
+    box-shadow: 0 0 18px rgba(0,245,255,.07), inset 0 0 20px rgba(0,245,255,.03);
+    backdrop-filter: blur(6px);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .card:hover { border-color: rgba(0,245,255,.35); box-shadow: 0 0 26px rgba(0,245,255,.12), inset 0 0 16px rgba(0,245,255,.05); }
+  .card h3 {
+    font-size: 9px; font-weight: 700; color: var(--cyan); margin-bottom: 16px;
+    text-transform: uppercase; letter-spacing: .2em;
+    font-family: 'JetBrains Mono', monospace;
+    text-shadow: 0 0 6px rgba(0,245,255,.4);
+  }
+
+  /* ── CHART ── */
+  .chart-wrap { position: relative; height: 250px; }
+
+  /* ── TABLE ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th {
+    color: var(--muted); font-weight: 600; text-align: left;
+    padding: 7px 10px; border-bottom: 1px solid rgba(0,245,255,.15);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  td { padding: 7px 10px; border-bottom: 1px solid rgba(0,245,255,.06); }
+  tr:hover td { background: rgba(0,245,255,.04); }
+
+  /* ── BADGES ── */
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: .06em; }
+  .badge-nho { background: rgba(0,245,255,.12); color: var(--cyan);    border: 1px solid rgba(0,245,255,.25); box-shadow: 0 0 5px rgba(0,245,255,.15); }
+  .badge-hoa { background: rgba(255,184,0,.12);  color: var(--amber);  border: 1px solid rgba(255,184,0,.25);  box-shadow: 0 0 5px rgba(255,184,0,.15); }
+  .badge-lon { background: rgba(255,0,170,.12);  color: var(--magenta);border: 1px solid rgba(255,0,170,.25);  box-shadow: 0 0 5px rgba(255,0,170,.15); }
+
+  /* ── STATS ── */
+  .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 14px 16px; flex: 1; min-width: 130px;
+    box-shadow: 0 0 14px rgba(0,245,255,.06);
+    transition: border-color .2s;
+  }
+  .stat:hover { border-color: rgba(0,245,255,.35); }
+  .stat .val {
+    font-size: 22px; font-weight: 700; color: var(--cyan);
+    font-family: 'Orbitron', sans-serif;
+    text-shadow: 0 0 10px rgba(0,245,255,.5);
+  }
+  .stat .lbl {
+    font-size: 9px; color: var(--muted); margin-top: 5px;
+    font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .1em;
+  }
+
+  /* ── EXPORT ── */
+  .export-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  .export-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+    padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    box-shadow: 0 0 14px rgba(0,245,255,.06);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .export-card:hover { border-color: rgba(0,245,255,.35); box-shadow: 0 0 20px rgba(0,245,255,.1); }
+  .export-card h4 {
+    font-size: 11px; font-weight: 700; color: var(--cyan);
+    font-family: 'JetBrains Mono', monospace; letter-spacing: .06em; text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(0,245,255,.3);
+  }
+  .export-card p { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+  /* ── MISC ── */
+  .loader { text-align: center; color: var(--muted); padding: 40px; font-size: 12px; font-family: 'JetBrains Mono', monospace; }
+  .loader::after { content: '...'; animation: ldots 1.2s step-end infinite; }
+  @keyframes ldots { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} }
+  .err {
+    color: var(--red); font-size: 12px; padding: 10px 14px;
+    background: rgba(255,23,68,.08); border: 1px solid rgba(255,23,68,.25);
+    border-radius: 3px; font-family: 'JetBrains Mono', monospace;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="header-brand" href="/">
+    <div class="header-icon">B18</div>
+  </a>
+  <h1>ANALYTICS</h1>
+  <div style="display:flex;gap:8px;align-items:center">
+    <a class="back" href="/">← DASHBOARD</a>
+    <a class="back" href="/art" style="border-color:rgba(191,128,255,.25);color:#bf80ff" onmouseover="this.style.borderColor='#bf80ff';this.style.boxShadow='0 0 8px rgba(191,128,255,.3)'" onmouseout="this.style.borderColor='rgba(191,128,255,.25)';this.style.boxShadow=''">✦ ART</a>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('freq')">Frequency</button>
+  <button class="tab" onclick="switchTab('patterns')">Patterns</button>
+  <button class="tab" onclick="switchTab('accuracy')">Accuracy</button>
+  <button class="tab" onclick="switchTab('export')">Export</button>
+</div>
+
+<!-- ═══ FREQUENCY ═══ -->
+<div id="tab-freq" class="panel active">
+  <div class="controls">
+    <label>Window</label>
+    <select id="freq-window" onchange="loadFreq()">
+      <option value="100">100 draws</option>
+      <option value="300">300 draws</option>
+      <option value="500" selected>500 draws</option>
+      <option value="1000">1000 draws</option>
+    </select>
+  </div>
+  <div class="stat-row" id="freq-stats"></div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Overall Frequency</h3>
+      <div class="chart-wrap"><canvas id="freqOverallChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>By Position</h3>
+      <div class="chart-wrap"><canvas id="freqPosChart"></canvas></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <h3>Frequency Table</h3>
+    <div id="freq-table"></div>
+  </div>
+</div>
+
+<!-- ═══ PATTERNS ═══ -->
+<div id="tab-patterns" class="panel">
+  <div class="controls">
+    <label>Window</label>
+    <select id="pat-window" onchange="loadPatterns()">
+      <option value="200">200 draws</option>
+      <option value="500" selected>500 draws</option>
+      <option value="1000">1000 draws</option>
+    </select>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Size Distribution</h3>
+      <div class="chart-wrap"><canvas id="sizeChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Sum Distribution</h3>
+      <div class="chart-wrap"><canvas id="sumChart"></canvas></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <h3>Top Pair Co-occurrences</h3>
+    <div id="pair-table"></div>
+  </div>
+</div>
+
+<!-- ═══ ACCURACY ═══ -->
+<div id="tab-accuracy" class="panel">
+  <div class="controls">
+    <label>Days</label>
+    <select id="acc-days" onchange="loadAccuracy()">
+      <option value="7">7 days</option>
+      <option value="14">14 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="90">90 days</option>
+    </select>
+  </div>
+  <div class="stat-row" id="acc-stats"></div>
+  <div class="grid2">
+    <div class="card">
+      <h3>Win Rate Over Time</h3>
+      <div class="chart-wrap"><canvas id="accTimeChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Win Rate by Model</h3>
+      <div class="chart-wrap"><canvas id="accModelChart"></canvas></div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:20px">
+    <h3>Model Performance Table</h3>
+    <div id="model-table"></div>
+  </div>
+</div>
+
+<!-- ═══ EXPORT ═══ -->
+<div id="tab-export" class="panel">
+  <div class="export-grid">
+    <div class="export-card">
+      <h4>Draw History (JSON)</h4>
+      <p>Last 1000 draws with numbers, time, size category</p>
+      <button class="btn btn-primary" onclick="dl('/api/analytics/export?type=draws&format=json&limit=1000','bingo18_draws.json','application/json')">Download JSON</button>
+    </div>
+    <div class="export-card">
+      <h4>Draw History (CSV)</h4>
+      <p>Spreadsheet-friendly format</p>
+      <button class="btn btn-primary" onclick="window.location='/api/analytics/export?type=draws&format=csv&limit=5000'">Download CSV</button>
+    </div>
+    <div class="export-card">
+      <h4>Predictions (JSON)</h4>
+      <p>Last 1000 predictions with results</p>
+      <button class="btn btn-primary" onclick="dl('/api/analytics/export?type=predictions&format=json&limit=1000','bingo18_predictions.json','application/json')">Download JSON</button>
+    </div>
+    <div class="export-card">
+      <h4>Predictions (CSV)</h4>
+      <p>All predictions with win/loss outcome</p>
+      <button class="btn btn-primary" onclick="window.location='/api/analytics/export?type=predictions&format=csv&limit=5000'">Download CSV</button>
+    </div>
+    <div class="export-card">
+      <h4>Frequency Heatmap (JSON)</h4>
+      <p>Number frequency by position (500-draw window)</p>
+      <button class="btn btn-primary" onclick="dl('/api/analytics/frequency-heatmap?window=500','bingo18_frequency.json','application/json')">Download JSON</button>
+    </div>
+    <div class="export-card">
+      <h4>Model Accuracy (JSON)</h4>
+      <p>Per-model win rates (90-day window)</p>
+      <button class="btn btn-primary" onclick="dl('/api/analytics/accuracy-by-time?days=90','bingo18_accuracy.json','application/json')">Download JSON</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CYAN    = 'rgba(0,245,255,0.85)';
+const MAGENTA = 'rgba(255,0,170,0.85)';
+const GREEN   = 'rgba(0,255,136,0.85)';
+const AMBER   = 'rgba(255,184,0,0.85)';
+const RED     = 'rgba(255,23,68,0.85)';
+const NUMS    = [1,2,3,4,5,6];
+const POS_COLORS = [CYAN, MAGENTA, GREEN];
+const GRID_COLOR  = 'rgba(0,245,255,0.07)';
+const TICK_COLOR  = '#3d6080';
+const LEGEND_COLOR = '#3d6080';
+
+const charts = {};
+function mkChart(id, type, data, opts={}) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
+    type, data,
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: LEGEND_COLOR, font: { size: 10, family: "'JetBrains Mono'" } } } },
+      scales: type !== 'pie' && type !== 'doughnut' ? {
+        x: { ticks: { color: TICK_COLOR, font: { size: 10 } }, grid: { color: GRID_COLOR } },
+        y: { ticks: { color: TICK_COLOR, font: { size: 10 } }, grid: { color: GRID_COLOR } }
+      } : {},
+      ...opts
+    }
+  });
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['freq','patterns','accuracy','export'][i] === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'freq')     loadFreq();
+  if (name === 'patterns') loadPatterns();
+  if (name === 'accuracy') loadAccuracy();
+}
+
+// ── FREQUENCY ──
+async function loadFreq() {
+  const w = document.getElementById('freq-window').value;
+  const res = await fetch(`/api/analytics/frequency-heatmap?window=${w}`);
+  const d = await res.json();
+  if (d.error) { document.getElementById('freq-stats').innerHTML = `<div class="err">${d.error}</div>`; return; }
+
+  document.getElementById('freq-stats').innerHTML = `
+    <div class="stat"><div class="val">${d.total_draws.toLocaleString()}</div><div class="lbl">Draws Analyzed</div></div>
+    <div class="stat"><div class="val">${d.window}</div><div class="lbl">Window Size</div></div>
+    <div class="stat"><div class="val">${d.overall.reduce((a,x)=>Math.max(a,x.count),0)}</div><div class="lbl">Hottest Number Count</div></div>
+  `;
+
+  mkChart('freqOverallChart', 'bar', {
+    labels: d.overall.map(x => `#${x.number}`),
+    datasets: [{
+      label: 'Frequency', data: d.overall.map(x => x.count),
+      backgroundColor: NUMS.map(n => n <= 3 ? CYAN : MAGENTA),
+      borderRadius: 4,
+    }]
+  });
+
+  mkChart('freqPosChart', 'bar', {
+    labels: NUMS.map(n => `#${n}`),
+    datasets: d.by_position.map((pos, i) => ({
+      label: `Position ${pos.position}`,
+      data: pos.numbers.map(x => x.count),
+      backgroundColor: POS_COLORS[i],
+      borderRadius: 3,
+    }))
+  }, { plugins: { legend: { display: true } } });
+
+  const baseline = Math.round(d.total_draws * 3 / 6);
+  document.getElementById('freq-table').innerHTML = `
+    <table>
+      <tr><th>Number</th>${d.by_position.map(p=>`<th>Pos ${p.position}</th>`).join('')}<th>Total</th><th>% Overall</th><th>vs Baseline</th></tr>
+      ${d.overall.map((x,i) => {
+        const delta = x.count - baseline;
+        const dir = delta > 0 ? '+' : '';
+        const col = delta > baseline*0.1 ? 'color:var(--green)' : delta < -baseline*0.1 ? 'color:var(--magenta)' : '';
+        return `<tr>
+          <td><strong>#${x.number}</strong></td>
+          ${d.by_position.map(p => `<td>${p.numbers[i].count} <small style="color:var(--muted)">(${p.numbers[i].pct}%)</small></td>`).join('')}
+          <td><strong>${x.count}</strong></td>
+          <td>${x.pct}%</td>
+          <td style="${col}">${dir}${delta}</td>
+        </tr>`;
+      }).join('')}
+    </table>`;
+}
+
+// ── PATTERNS ──
+async function loadPatterns() {
+  const w = document.getElementById('pat-window').value;
+  const res = await fetch(`/api/analytics/patterns?window=${w}`);
+  const d = await res.json();
+  if (d.error) return;
+
+  mkChart('sizeChart', 'doughnut', {
+    labels: d.size_distribution.map(x => x.category),
+    datasets: [{ data: d.size_distribution.map(x => x.count),
+      backgroundColor: [CYAN, AMBER, MAGENTA], borderWidth: 0 }]
+  });
+
+  mkChart('sumChart', 'bar', {
+    labels: d.sum_distribution.map(x => x.sum),
+    datasets: [{ label: 'Count', data: d.sum_distribution.map(x => x.count),
+      backgroundColor: CYAN, borderRadius: 2 }]
+  }, { plugins: { legend: { display: false } } });
+
+  document.getElementById('pair-table').innerHTML = `
+    <table>
+      <tr><th>#</th><th>Pair</th><th>Count</th><th>%</th></tr>
+      ${d.top_pairs.map((p,i) => `
+        <tr>
+          <td style="color:var(--muted)">${i+1}</td>
+          <td><strong>#${p.pair[0]}</strong> + <strong>#${p.pair[1]}</strong></td>
+          <td>${p.count}</td>
+          <td>${p.pct}%</td>
+        </tr>`).join('')}
+    </table>`;
+}
+
+// ── ACCURACY ──
+async function loadAccuracy() {
+  const days = document.getElementById('acc-days').value;
+  const res = await fetch(`/api/analytics/accuracy-by-time?days=${days}`);
+  const d = await res.json();
+  if (d.error) { document.getElementById('acc-stats').innerHTML = `<div class="err">${d.error}</div>`; return; }
+
+  const timeline = d.timeline || [];
+  const byModel  = d.by_model  || [];
+  const ov_total = timeline.reduce((a,x)=>a+x.total,0);
+  const ov_wins  = timeline.reduce((a,x)=>a+x.wins,0);
+  const ov_rate  = ov_total ? (ov_wins/ov_total*100).toFixed(1) : '–';
+
+  document.getElementById('acc-stats').innerHTML = `
+    <div class="stat"><div class="val">${ov_rate}%</div><div class="lbl">Win Rate (multiset)</div></div>
+    <div class="stat"><div class="val">${ov_total.toLocaleString()}</div><div class="lbl">Predictions Evaluated</div></div>
+    <div class="stat"><div class="val">87.5%</div><div class="lbl">Random Baseline</div></div>
+  `;
+
+  mkChart('accTimeChart', 'line', {
+    labels: timeline.map(x => x.date),
+    datasets: [
+      { label: 'Win Rate %', data: timeline.map(x => x.win_rate),
+        borderColor: CYAN, backgroundColor: 'rgba(0,245,255,.1)',
+        fill: true, tension: .3, pointRadius: 3 },
+      { label: 'Size Win Rate %', data: timeline.map(x => x.win_rate_size),
+        borderColor: MAGENTA, backgroundColor: 'rgba(255,0,170,.05)',
+        fill: false, tension: .3, pointRadius: 3 },
+      { label: 'Baseline 87.5%', data: timeline.map(() => 87.5),
+        borderColor: AMBER, borderDash: [4,4], pointRadius: 0 },
+    ]
+  }, { plugins: { legend: { display: true } } });
+
+  mkChart('accModelChart', 'bar', {
+    labels: byModel.map(x => x.model_name),
+    datasets: [
+      { label: 'Win Rate %',      data: byModel.map(x => x.win_rate),      backgroundColor: CYAN,    borderRadius: 4 },
+      { label: 'Size Win Rate %', data: byModel.map(x => x.win_rate_size),  backgroundColor: MAGENTA, borderRadius: 4 },
+    ]
+  }, { plugins: { legend: { display: true } } });
+
+  document.getElementById('model-table').innerHTML = `
+    <table>
+      <tr><th>Model</th><th>Total</th><th>Wins (multiset)</th><th>Win Rate</th><th>Size Wins</th><th>Size Rate</th></tr>
+      ${byModel.map(m => {
+        const ok = m.win_rate >= 87.5;
+        return `<tr>
+          <td><strong>${m.model_name}</strong></td>
+          <td>${m.total.toLocaleString()}</td>
+          <td>${m.wins.toLocaleString()}</td>
+          <td style="color:${ok?'var(--green)':'var(--magenta)'}">${m.win_rate}%</td>
+          <td>${m.wins_size.toLocaleString()}</td>
+          <td style="color:${m.win_rate_size>=30?'var(--green)':'var(--amber)'}">${m.win_rate_size}%</td>
+        </tr>`;
+      }).join('')}
+    </table>`;
+}
+
+// ── EXPORT HELPER ──
+async function dl(url, filename, mime) {
+  const r = await fetch(url);
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+// ── INIT ──
+loadFreq();
+</script>
+</body>
+</html>
