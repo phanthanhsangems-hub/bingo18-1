@@ -1187,7 +1187,12 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
         return numbers, None
     try:
         from models import _parse_numbers as _pn
-        recent = df.head(_HOT_WINDOW)
+        # Window co giãn theo độ dài streak: streak ngắn → nhìn sát các kỳ vừa thua
+        # thay vì pha loãng trong 20 kỳ, vì đó chính là tín hiệu lệch SIZE đang xảy ra.
+        streak_window = max(_HOT_ADJUST_STREAK_THRESHOLD, min(loss_streak + 2, _HOT_WINDOW))
+        recent = df.head(streak_window)
+        # Ngưỡng dominant nâng lên khi window nhỏ để bù biến động tự nhiên.
+        dominant_thresh = 0.40 if streak_window >= _HOT_WINDOW else 0.55
 
         size_count = {'NHO': 0, 'HOA': 0, 'LON': 0}
         for _, row in recent.iterrows():
@@ -1202,8 +1207,9 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
 
         total = sum(size_count.values()) or 1
         dominant = max(('NHO', 'LON'), key=lambda sz: size_count[sz])
-        if size_count[dominant] / total < 0.40:
-            logger.debug("HotAdjust: no clear signal NHO=%d HOA=%d LON=%d",
+        if size_count[dominant] / total < dominant_thresh:
+            logger.debug("HotAdjust: no clear signal (window=%d thresh=%.2f) NHO=%d HOA=%d LON=%d",
+                         streak_window, dominant_thresh,
                          size_count['NHO'], size_count['HOA'], size_count['LON'])
             return numbers, None
 
@@ -1221,7 +1227,7 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
             return numbers, None
         best = min(target, key=lambda c: combo_freq.get(c, 0))
         new_numbers = list(best)
-        note = (f"streak={loss_streak} NHO={size_count['NHO']} HOA={size_count['HOA']} LON={size_count['LON']}"
+        note = (f"streak={loss_streak} window={streak_window} NHO={size_count['NHO']} HOA={size_count['HOA']} LON={size_count['LON']}"
                 f" dominant={hot_size}({size_count[dominant]/total*100:.0f}%) {current_size}→{hot_size}")
         logger.info("HotAdjust: %s → %s", numbers, new_numbers)
         return new_numbers, note
