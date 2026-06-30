@@ -19,6 +19,7 @@ import config
 from database import DatabaseManager
 from models import HybridModel, MarkovModel, ColdNumberModel, FWBRModel, MLEnsembleModel, ModelSelector, SizePredictor, ComboColdModel
 from ensemble_model import VotingEnsemble
+from regime_detector import SizeRegimeDetector
 from lstm_model import BingoPredictor, FullLSTMPredictor
 from telegram_bot import TelegramBot
 from calibration import get_calibrator, invalidate_calibrator
@@ -1178,6 +1179,7 @@ def _apply_filter(numbers: List[int], confidence: float, df) -> Optional[Tuple]:
 # ── Hot-Adjust: chuyển SIZE khi loss streak >= 3 ─────────────────
 _HOT_ADJUST_STREAK_THRESHOLD = 3  # kích hoạt khi thua liên tiếp >= N kỳ
 _HOT_WINDOW = 20                  # cửa sổ để tính hot numbers
+_REGIME_WINDOW = 200               # cửa sổ lịch sử SIZE cho BOCPD regime voter
 
 def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
                      banned: set) -> tuple:
@@ -1350,6 +1352,31 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                                   'size': _h_opp, 'conf': _h_conf})
     except Exception as _he:
         logger.debug("size_freq voter error: %s", _he)
+
+    # ── BOCPD regime voter — Bayesian Online Changepoint Detection over the
+    # SIZE sequence. Conservative hazard (expected run ~120 draws) so it mostly
+    # tracks the base rate and only shifts when a streak is statistically
+    # unlikely under "no change" — designed to avoid the same overreaction to
+    # ordinary noise that the old fixed-window hot-adjust heuristic had. ──────
+    try:
+        if len(df) >= 20:
+            from models import _parse_numbers as _pn_bc
+            _bc_window = min(len(df), _REGIME_WINDOW)
+            _bc_sizes = [
+                SizePredictor._cat(sum(int(x) for x in _pn_bc(row.numbers)))
+                for row in df.head(_bc_window).itertuples()
+            ]
+            _bc_sizes.reverse()  # df is most-recent-first; detector needs chronological order
+            _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+            _bc_winner = max(_bc_dist, key=_bc_dist.get)
+            if _bc_winner != 'HOA':
+                _bc_conf = round(min(0.32, max(0.22, _bc_dist[_bc_winner])), 3)
+                _bc_nums = [1, 1, 1] if _bc_winner == 'NHO' else [4, 5, 6]
+                votes.append({'name': 'regime_bocpd', 'nums': _bc_nums,
+                              'size': _bc_winner, 'conf': _bc_conf})
+                logger.debug("regime_bocpd: dist=%s → %s conf=%.3f", _bc_dist, _bc_winner, _bc_conf)
+    except Exception as _bce:
+        logger.debug("regime_bocpd voter error: %s", _bce)
 
     if not votes:
         return None, 0.0, {}
