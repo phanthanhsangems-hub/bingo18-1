@@ -1907,24 +1907,27 @@ def get_next_prediction():
         model_name = row[2]
         vb_raw     = row[6]
 
-        # Apply calibration: replace raw model score with historical win rate
-        try:
-            from calibration import get_calibrator
-            calibrator = get_calibrator(db)
-            win_prob, cal_meta = calibrator.calibrate(model_name, raw_conf)
-        except Exception:
-            win_prob, cal_meta = raw_conf, {}
-
         try:
             vb = json.loads(vb_raw) if isinstance(vb_raw, str) else vb_raw
         except Exception:
             vb = None
+
+        # Apply calibration: replace raw model score with historical win rate,
+        # bucketed by vote_share (consensus strength) when available.
+        try:
+            from calibration import get_calibrator
+            calibrator = get_calibrator(db)
+            vote_share = (vb or {}).get('vote_share', 0.5)
+            win_prob, cal_meta = calibrator.calibrate_by_vote_share(vote_share, model_name, raw_conf)
+        except Exception:
+            win_prob, cal_meta = raw_conf, {}
 
         return jsonify({
             "predicted_numbers":    json.loads(row[0]) if isinstance(row[0], str) else row[0],
             "confidence":           win_prob,
             "raw_confidence":       raw_conf,
             "calibration":          cal_meta,
+            "is_confident":         cal_meta.get("is_confident", False),
             "model_name":           model_name,
             "draw_number":          row[3],
             "prediction_time":      str(row[4]) if row[4] else None,
@@ -1939,7 +1942,7 @@ def get_next_prediction():
 def get_calibration_stats():
     """Trả về win rate thực tế của từng model — nguồn gốc của calibrated confidence."""
     try:
-        from calibration import get_calibrator
+        from calibration import get_calibrator, SIZE_WIN_BASELINE
         calibrator = get_calibrator(db)
         result = {}
         for model_name in calibrator._rates:
@@ -1953,10 +1956,25 @@ def get_calibration_stats():
                 "win_rate_all_time":   round(rates.get("all_time") or 0, 4),
                 "n_predictions":       counts.get("all_time", 0),
             }
+        vote_share_buckets = {}
+        for bucket in calibrator._vs_rates:
+            rates  = calibrator._vs_rates[bucket]
+            counts = calibrator._vs_counts[bucket]
+            cal, _ = calibrator.calibrate_by_vote_share(
+                {"weak": 0.20, "low": 0.45, "moderate": 0.55, "strong": 0.65, "dominant": 0.85}.get(bucket, 0.5),
+                "majority_vote", 0.5)
+            vote_share_buckets[bucket] = {
+                "calibrated_win_prob": round(cal, 4),
+                "win_rate_last_50":    round(rates.get("last_50")  or 0, 4),
+                "win_rate_last_100":   round(rates.get("last_100") or 0, 4),
+                "win_rate_all_time":   round(rates.get("all_time") or 0, 4),
+                "n_predictions":       counts.get("all_time", 0),
+            }
         return jsonify({
-            "models":          result,
-            "random_baseline": 0.0179,
-            "note":            "confidence trong /api/next_prediction = calibrated_win_prob",
+            "models":             result,
+            "vote_share_buckets": vote_share_buckets,
+            "random_baseline":    SIZE_WIN_BASELINE,
+            "note":               "confidence trong /api/next_prediction = calibrated_win_prob (bucketed by vote_share)",
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -84,7 +84,7 @@ class TelegramBot:
                         numbers: List[int], confidence: float,
                         signal: str = "", vote_tally: dict = None,
                         vote_info: dict = None, reason_info: dict = None,
-                        last_result: dict = None) -> bool:
+                        last_result: dict = None, is_confident: bool = True) -> bool:
 
         nums_str  = "  ·  ".join(str(n) for n in numbers)
         vn_now    = datetime.now(timezone(timedelta(hours=7)))
@@ -171,9 +171,8 @@ class TelegramBot:
         if loss_streak >= 7:
             lines.append(f"⚠️ Thua {loss_streak} kỳ liên tiếp")
 
-        _vs = vi.get('vote_share', 0)
-        if 0.50 <= _vs < 0.55:
-            lines.append(f"⚠️ Phiếu chia đôi — tín hiệu yếu")
+        if not is_confident:
+            lines.append(f"⚠️ Tín hiệu yếu — tỷ lệ thắng lịch sử ở mức đồng thuận này thấp")
 
         lines.append(SEP)
         return self._send("\n".join(lines))

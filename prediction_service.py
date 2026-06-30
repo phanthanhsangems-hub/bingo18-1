@@ -2038,9 +2038,13 @@ def run_prediction_cycle() -> dict:
         if _majority and _final_size != _majority:
             _vote_info['size_flipped'] = f"{_majority}→{_final_size}"
 
-    # Calibrate confidence: replace raw model score with honest historical win rate
+    # Calibrate confidence: replace raw model score with honest historical win rate,
+    # bucketed by vote_share (consensus strength) since model_name alone is nearly
+    # always 'majority_vote' and carries no per-prediction signal.
     calibrator = get_calibrator(db)
-    win_prob, cal_meta = calibrator.calibrate(best_name, confidence)
+    _vote_share_for_cal = (_vote_info or {}).get('vote_share', 0.5)
+    win_prob, cal_meta = calibrator.calibrate_by_vote_share(_vote_share_for_cal, best_name, confidence)
+    is_confident = cal_meta.get('is_confident', False)
 
     # Build transition signal line for Telegram ("SIZE P% từ tổng X → tổng Y P%")
     _tg_signal = ""
@@ -2106,7 +2110,8 @@ def run_prediction_cycle() -> dict:
     telegram.send_prediction(next_draw, best_name, numbers, win_prob,
                              signal=_tg_signal, vote_tally=_tg_vote_tally,
                              vote_info=_vote_info, reason_info=_reason_info,
-                             last_result=_last_result_info or None)
+                             last_result=_last_result_info or None,
+                             is_confident=is_confident)
 
     logger.info("Predicted draw #%d: %s (model=%s raw_conf=%.1f%% calibrated=%.2f%%)",
                 next_draw, sorted(numbers), best_name, confidence * 100, win_prob * 100)
@@ -2219,6 +2224,7 @@ def run_prediction_cycle() -> dict:
         "confidence":         win_prob,          # calibrated — honest P(win)
         "raw_confidence":     confidence,         # model's internal score
         "calibration":        cal_meta,
+        "is_confident":       is_confident,        # honest-low-confidence signal (not skipped, just flagged)
         "model":              best_name,
         "prediction_id":      int(pred_id),
         "processed":          processed_results,
