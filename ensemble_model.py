@@ -16,18 +16,18 @@ Online learning:
   update_weights_from_db() pulls last-N win rates per model from DB,
   renormalizes weights so better models get more vote mass.
 
-Win condition (Bingo18): ≥1 matching number between prediction and draw
-Baseline P(win) ≈ 87.5%
+Win condition (Bingo18): predicted SIZE category (NHO/HOA/LON) matches actual SIZE
+Baseline P(win) ≈ 37.5% — same definition as prediction_results.is_win_size in production.
 """
 
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from models import (
-    ColdNumberModel, FWBRModel, MarkovModel, MLEnsembleModel,
+    ColdNumberModel, FWBRModel, MarkovModel, MLEnsembleModel, SizePredictor,
     _parse_numbers, _random_predict, NUMBERS, DRAW_SIZE,
 )
 
@@ -170,10 +170,10 @@ class VotingEnsemble:
 # ── Backtest ──────────────────────────────────────────────────────────────────
 
 def _win(predicted: List[int], actual: List[int]) -> bool:
-    """Bingo18 win: ≥1 matching number (multiset intersection ≥ 1)."""
-    pred_c   = Counter(predicted)
-    actual_c = Counter(actual)
-    return sum((pred_c & actual_c).values()) >= 1
+    """Bingo18 win: predicted SIZE category == actual SIZE category.
+    Matches the production definition (database.py: is_win = is_win_size),
+    not a raw number-overlap match."""
+    return SizePredictor._cat(sum(int(x) for x in predicted)) == SizePredictor._cat(sum(int(x) for x in actual))
 
 
 def quick_backtest(
@@ -238,7 +238,7 @@ def quick_backtest(
         except Exception:
             pass
 
-    baseline = 87.5
+    baseline = 37.5
     results  = {}
 
     if verbose:
