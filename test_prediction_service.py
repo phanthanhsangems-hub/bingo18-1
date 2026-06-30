@@ -44,6 +44,7 @@ print("="*60)
 from prediction_service import (run_prediction_cycle, process_actual_result,
                                  _update_markov_online, _get_models)
 from database import DatabaseManager
+from calibration import ConfidenceCalibrator, SIZE_WIN_BASELINE, MIN_SAMPLES, CONFIDENT_THRESHOLD
 
 check("prediction_service imports", lambda: None)
 
@@ -169,6 +170,67 @@ def _process_actual_result_pending_only():
           f"match={result_info['match']} win={result_info['win']}")
 
 check("process_actual_result() on a pending prediction (or skip if none)", _process_actual_result_pending_only)
+
+# ── TEST 5: ConfidenceCalibrator — pure logic, no DB mutation ────────────────
+print("\n" + "="*60)
+print("TEST 5: ConfidenceCalibrator")
+print("="*60)
+
+def _calib_cold_start_baseline():
+    cal = ConfidenceCalibrator()  # never fit() -> no data for any model/bucket
+    win_prob, meta = cal.calibrate("majority_vote", 0.5)
+    assert win_prob == SIZE_WIN_BASELINE, f"expected SIZE_WIN_BASELINE, got {win_prob}"
+    assert meta["is_confident"] is False, "cold start must never report confident"
+
+def _calib_by_vote_share_falls_back_to_model():
+    cal = ConfidenceCalibrator()
+    # Model has enough samples, but no vote_share bucket data at all.
+    cal._rates["majority_vote"]  = {"last_50": None, "last_100": None, "all_time": 0.40}
+    cal._counts["majority_vote"] = {"last_50": 0, "last_100": 0, "all_time": MIN_SAMPLES}
+    win_prob, meta = cal.calibrate_by_vote_share(0.65, "majority_vote", 0.5)
+    assert meta["bucket_source"] == "fallback_model", f"expected fallback_model, got {meta}"
+    assert abs(win_prob - 0.40) < 1e-9
+
+def _calib_by_vote_share_uses_bucket_when_available():
+    cal = ConfidenceCalibrator()
+    cal._vs_rates["dominant"]  = {"last_50": None, "last_100": None, "all_time": 0.50}
+    cal._vs_counts["dominant"] = {"last_50": 0, "last_100": 0, "all_time": MIN_SAMPLES}
+    win_prob, meta = cal.calibrate_by_vote_share(0.85, "majority_vote", 0.5)
+    assert meta["bucket_source"] == "vote_share", f"expected vote_share source, got {meta}"
+    assert meta["vote_share_bucket"] == "dominant"
+    assert abs(win_prob - 0.50) < 1e-9
+    assert meta["is_confident"] == (win_prob >= CONFIDENT_THRESHOLD)
+
+def _calib_clamped_to_range():
+    cal = ConfidenceCalibrator()
+    cal._vs_rates["weak"]  = {"last_50": None, "last_100": None, "all_time": 0.95}  # implausibly high
+    cal._vs_counts["weak"] = {"last_50": 0, "last_100": 0, "all_time": MIN_SAMPLES}
+    win_prob, _ = cal.calibrate_by_vote_share(0.10, "majority_vote", 0.5)
+    assert win_prob <= 0.60, f"calibrated prob must be clamped to <=0.60, got {win_prob}"
+
+def _calib_weighted_blend_favors_recent():
+    cal = ConfidenceCalibrator()
+    cal._rates["m"]  = {"last_50": 0.60, "last_100": 0.40, "all_time": 0.30}
+    cal._counts["m"] = {"last_50": MIN_SAMPLES, "last_100": MIN_SAMPLES, "all_time": MIN_SAMPLES}
+    win_prob, meta = cal.calibrate("m", 0.5)
+    expected = 0.50 * 0.60 + 0.30 * 0.40 + 0.20 * 0.30
+    assert abs(win_prob - expected) < 1e-9, f"expected {expected}, got {win_prob}"
+    assert meta["source"] == "weighted_50_100_all"
+
+def _bucket_for_boundaries():
+    from calibration import _bucket_for
+    assert _bucket_for(0.0)  == "weak"
+    assert _bucket_for(0.39) == "weak"
+    assert _bucket_for(0.40) == "low"
+    assert _bucket_for(0.70) == "dominant"
+    assert _bucket_for(1.0)  == "dominant"
+
+check("cold start returns SIZE_WIN_BASELINE, not confident",      _calib_cold_start_baseline)
+check("calibrate_by_vote_share() falls back to model when bucket empty", _calib_by_vote_share_falls_back_to_model)
+check("calibrate_by_vote_share() uses bucket data when available", _calib_by_vote_share_uses_bucket_when_available)
+check("calibrated probability clamped to [0.05, 0.60]",            _calib_clamped_to_range)
+check("weighted blend favors recent window",                       _calib_weighted_blend_favors_recent)
+check("_bucket_for() bucket boundaries",                            _bucket_for_boundaries)
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 print("\n" + "="*60)
