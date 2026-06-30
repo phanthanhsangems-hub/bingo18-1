@@ -277,6 +277,10 @@ circle.fill {
 .gauge-unit { font-size: 13px; }
 .gauge-state { font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin-top: 2px; }
 
+.conf-source { text-align: center; font-size: 11px; color: var(--muted); margin: -6px 0 14px; padding: 5px 8px; border-radius: var(--rs); background: rgba(255,255,255,.03); border: 1px solid var(--border); }
+.conf-source.confident { color: #34d399; border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.07); }
+.conf-source.weak { color: #fbbf24; border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.07); }
+
 .conf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .cstat { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: var(--rs); padding: 9px 11px; }
 .cstat .k { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
@@ -1194,11 +1198,10 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
           <div class="gauge-state" id="conf-label">ĐANG TẢI</div>
         </div>
       </div>
+      <div class="conf-source" id="conf-source" data-tip="Độ tin cậy được tính theo tỷ lệ thắng thực tế của các kỳ trước có mức đồng thuận (vote_share) tương tự, không phải con số model tự báo">Đang tải...</div>
       <div class="conf-grid">
         <div class="cstat"><div class="k">Đã học 24h</div><div class="v good" id="learned-24h">---</div></div>
         <div class="cstat"><div class="k">Win 24h</div><div class="v" id="wins-24h">---</div></div>
-        <div class="cstat"><div class="k">Win 50 kỳ</div><div class="v" id="wins-last50">---</div></div>
-        <div class="cstat"><div class="k">Streak</div><div class="v" id="current-streak">---</div></div>
       </div>
     </div>
   </div>
@@ -1743,6 +1746,29 @@ async function loadNextPrediction() {
   updateElem('conf-label',
     conf>=0.45?'CAO':conf>=0.40?'TRÊN BASELINE':conf>=0.375?'BASELINE':conf>=0.30?'DƯỚI BASELINE':'YẾU');
 
+  // Calibration source badge — shows WHY the % is what it is (vote_share bucket win-rate,
+  // fallback to per-model rate, or cold-start baseline), not just the number itself.
+  const csEl = document.getElementById('conf-source');
+  if (csEl) {
+    const cal = data.calibration || {};
+    const isConf = !!data.is_confident;
+    const BUCKET_VI = {weak:'Yếu', low:'Thấp', moderate:'Trung bình', strong:'Mạnh', dominant:'Áp đảo'};
+    let txt;
+    if (cal.source === 'baseline') {
+      txt = `⚠ Chưa đủ dữ liệu (${cal.n_samples||0} kỳ) — dùng baseline 37.5%`;
+    } else if (cal.bucket_source === 'vote_share') {
+      const bk = BUCKET_VI[cal.vote_share_bucket] || cal.vote_share_bucket || '?';
+      txt = `Đồng thuận ${bk} · thắng ${cal.win_rate_all||'--'} trên ${cal.n_samples||0} kỳ tương tự`;
+    } else if (cal.bucket_source === 'fallback_model') {
+      txt = `Chưa đủ mẫu đồng thuận — theo model (${cal.n_samples||0} kỳ, thắng ${cal.win_rate_all||'--'})`;
+    } else {
+      txt = 'Đang tải...';
+    }
+    csEl.textContent = txt;
+    csEl.classList.toggle('confident', isConf);
+    csEl.classList.toggle('weak', !isConf && cal.source !== undefined);
+  }
+
   // Vote breakdown
   const vb = data.vote_breakdown;
   const vbPanel = document.getElementById('vote-breakdown-panel');
@@ -1896,8 +1922,6 @@ async function loadLearningStatus() {
   const wr50=data.win_rate_last_50;
   if (typeof wr50==='number') {
     const p=Math.round(wr50*100);
-    const el=document.getElementById('wins-last50');
-    if (el) { el.textContent=p+'%'; el.className='v '+(p>=37.5?'good':p>=33?'':'warn'); }
     const elS=document.getElementById('wins-last50-stat');
     if (elS) elS.textContent=`${p}% (${data.wins_last_50||0}/${data.total_last_50||0})`;
     const note=document.getElementById('wr50-note');
@@ -1906,11 +1930,6 @@ async function loadLearningStatus() {
       note.textContent=(d>=0?'+':'')+d+'% vs 37.5%';
       note.className='note '+(p>=37.5?'good':'warn');
     }
-  }
-  const sk=data.current_streak, st=data.current_streak_type;
-  if (sk&&st) {
-    const el=document.getElementById('current-streak');
-    if (el) { el.textContent=(st==='win'?'🔥 ':'❄️ ')+sk+' kỳ'; el.className='v '+(st==='win'?'good':'warn'); }
   }
 }
 
