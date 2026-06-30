@@ -758,7 +758,7 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
             """)
         else:
             cur.execute("""
-                SELECT p.vote_breakdown, 'NHO' AS actual_size
+                SELECT p.vote_breakdown, pr.actual_numbers
                 FROM predictions p
                 JOIN prediction_results pr ON pr.prediction_id = p.id
                 WHERE p.vote_breakdown IS NOT NULL AND pr.actual_numbers IS NOT NULL
@@ -769,9 +769,15 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
 
         from collections import defaultdict
         acc = defaultdict(lambda: {'correct': 0, 'total': 0})
-        for vb_raw, actual_size in rows:
+        for vb_raw, actual_raw in rows:
             try:
                 vb = json.loads(vb_raw) if isinstance(vb_raw, str) else vb_raw
+                if config.DATABASE_URL:
+                    actual_size = actual_raw
+                else:
+                    actual_nums = json.loads(actual_raw) if isinstance(actual_raw, str) else actual_raw
+                    s = sum(int(x) for x in actual_nums)
+                    actual_size = 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
                 all_votes = (vb or {}).get('all_votes')
                 if all_votes:
                     for voter_name, voted_size in all_votes.items():
@@ -1221,7 +1227,7 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
         return new_numbers, note
     except Exception as e:
         logger.debug("HotAdjust error: %s", e)
-        return numbers
+        return numbers, None
 
 
 # ── Majority Vote: tất cả ML models bầu SIZE, chọn số đồng thuận ──
