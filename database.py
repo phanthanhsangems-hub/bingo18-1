@@ -232,6 +232,8 @@ class DatabaseManager:
                     "ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS is_win_size BOOLEAN",
                     "ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS is_win_sum  BOOLEAN",
                     "ALTER TABLE model_stats        ADD COLUMN IF NOT EXISTS sum_win_rate REAL DEFAULT 0.0",
+                    # required by update_prediction_result()'s ON CONFLICT (prediction_id)
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_presult_pid_uniq ON prediction_results(prediction_id)",
                 ]:
                     cur.execute(ddl)
 
@@ -319,6 +321,8 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_pred_time   ON predictions(prediction_time DESC)",
                     "CREATE INDEX IF NOT EXISTS idx_pred_model  ON predictions(model_name)",
                     "CREATE INDEX IF NOT EXISTS idx_markov_from ON markov_transitions(from_state)",
+                    # required by update_prediction_result()'s ON CONFLICT (prediction_id)
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_presult_pid_uniq ON prediction_results(prediction_id)",
                 ]:
                     cur.execute(ddl)
 
