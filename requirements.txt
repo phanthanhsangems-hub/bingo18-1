@@ -27,6 +27,7 @@ lxml==5.1.0
 ujson==5.9.0
 Pillow==10.2.0
 openpyxl==3.1.2
+python-dotenv==1.0.1
 
 # â”€â”€ LSTM training (cháº¡y local, khĂ´ng cáº§n trong Cloud Run) â”€â”€â”€â”€â”€
 # Bá» comment dĂ²ng dÆ°á»›i khi cáº§n train lstm_model.py:
