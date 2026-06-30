@@ -293,6 +293,10 @@ circle.fill {
   text-shadow: 0 0 6px rgba(0,245,255,.4);
 }
 
+/* ── TAB PANELS ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
 /* ── SECTION DIVIDER ── */
 .sec-hdr {
   display: flex; align-items: center; gap: 12px;

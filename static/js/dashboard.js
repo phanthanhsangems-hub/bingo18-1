@@ -3774,38 +3774,26 @@ async function doComboDetail() {
   `;
 }
 
-// ── initBottomNav ─────────────────────────────────────────────
+// ── initBottomNav (click-based tab switching) ─────────────────
+function switchTab(tab) {
+  const panel = document.getElementById('tab-' + tab);
+  if (!panel) return;
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  panel.classList.add('active');
+  document.querySelectorAll('.bottom-nav a').forEach(l => l.classList.remove('active'));
+  const navEl = document.getElementById('nav-' + tab);
+  if (navEl) navEl.classList.add('active');
+  window.scrollTo({top: 0, behavior: 'auto'});
+}
+
 function initBottomNav() {
-  const sections = [
-    {id:'sec-signal', nav:'nav-signal'},
-    {id:'sec-wr',     nav:'nav-wr'},
-    {id:'sec-streak', nav:'nav-streak'},
-    {id:'sec-analysis',nav:'nav-analysis'},
-    {id:'sec-tools',  nav:'nav-tools'},
-    {id:'sec-search', nav:'nav-search'},
-  ];
-  const navLinks = document.querySelectorAll('.bottom-nav a');
-  const obs = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return;
-      const matched = sections.find(s => s.id === e.target.id);
-      if (!matched) return;
-      navLinks.forEach(l => l.classList.remove('active'));
-      const el = document.getElementById(matched.nav);
-      if (el) el.classList.add('active');
+  document.querySelectorAll('.bottom-nav a').forEach(a => {
+    if (a.id === 'nav-art') return; // external page link, keep default navigation
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      switchTab(a.id.replace('nav-', ''));
     });
-  }, {rootMargin: '-25% 0px -55% 0px', threshold: 0});
-  sections.forEach(s => { const el = document.getElementById(s.id); if (el) obs.observe(el); });
-  const topEl = document.querySelector('.main-grid');
-  if (topEl) {
-    const topObs = new IntersectionObserver((entries) => {
-      if (!entries[0].isIntersecting) return;
-      navLinks.forEach(l => l.classList.remove('active'));
-      const nt = document.getElementById('nav-top');
-      if (nt) nt.classList.add('active');
-    }, {rootMargin: '0px 0px -60% 0px', threshold: 0});
-    topObs.observe(topEl);
-  }
+  });
 }
 
 function initCardCollapse() {
@@ -3836,20 +3824,15 @@ setInterval(refreshAll, REFRESH_INTERVAL);
 updateCheckpoint();
 setInterval(updateCheckpoint, 60000);
 // ── Keyboard shortcuts ───────────────────────────────────────
-const _SECTIONS = ['sec-signal','sec-dist','sec-wr','sec-streak','sec-analysis','sec-tools','sec-search'];
+const _TABS = ['signal','signal','wr','streak','analysis','tools','search'];
 const _KBD_HELP = [
   ['R','Refresh toàn bộ dữ liệu'],
-  ['T','Cuộn lên đầu trang'],
-  ['1 – 7','Nhảy đến section (Tín hiệu → Tra cứu)'],
+  ['T','Về tab Top'],
+  ['1 – 7','Chuyển tab (Tín hiệu → Tra cứu)'],
   ['/','Mở ô tìm kiếm lịch sử'],
   ['C','Mở combo calculator'],
   ['?','Hiện / ẩn bảng phím tắt'],
 ];
-
-function _kbdScrollTo(id) {
-  const el = document.getElementById(id);
-  if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
-}
 
 function _showKbdToast(msg) {
   const t = document.createElement('div');
@@ -3911,15 +3894,16 @@ document.addEventListener('keydown', e => {
   if (inInput) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+  const _TAB_LABELS = {top:'Top', signal:'Tín hiệu', wr:'Win Rate', streak:'Streak', analysis:'Phân tích', tools:'Hệ thống', search:'Tra cứu'};
   const k = e.key.toLowerCase();
   if (k === 'r') { e.preventDefault(); refreshAll(); _showKbdToast('↻ Refreshing…'); }
-  else if (k === 't') { e.preventDefault(); window.scrollTo({top:0,behavior:'smooth'}); }
-  else if (k === '/') { e.preventDefault(); const el=document.getElementById('srch-input'); if(el){_kbdScrollTo('sec-search');setTimeout(()=>el.focus(),350);} }
-  else if (k === 'c') { e.preventDefault(); const el=document.getElementById('cn1'); if(el){_kbdScrollTo('sec-search');setTimeout(()=>el.focus(),350);} }
+  else if (k === 't') { e.preventDefault(); switchTab('top'); }
+  else if (k === '/') { e.preventDefault(); const el=document.getElementById('srch-input'); switchTab('search'); if(el) setTimeout(()=>el.focus(),350); }
+  else if (k === 'c') { e.preventDefault(); const el=document.getElementById('cn1'); switchTab('search'); if(el) setTimeout(()=>el.focus(),350); }
   else if (e.key >= '1' && e.key <= '7') {
     e.preventDefault();
-    const id = _SECTIONS[parseInt(e.key)-1];
-    if (id) { _kbdScrollTo(id); _showKbdToast('→ ' + document.querySelector('#'+id+' .sec-title')?.textContent); }
+    const tab = _TABS[parseInt(e.key)-1];
+    if (tab) { switchTab(tab); _showKbdToast('→ ' + (_TAB_LABELS[tab] || tab)); }
   }
 });
 

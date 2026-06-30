@@ -124,6 +124,7 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <span class="smry-badge" id="smry-status" style="opacity:.4">---</span>
   </div>
 
+  <div class="tab-panel active" id="tab-top" data-tab="top">
   <!-- HERO + CONFIDENCE -->
   <div class="main-grid">
 
@@ -250,6 +251,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     </div>
   </div>
 
+  </div>
+  <div class="tab-panel" id="tab-signal" data-tab="signal">
   <div class="sec-hdr" id="sec-signal"><span class="sec-title">TÍN HIỆU HÔM NAY</span></div>
   <!-- BET SIGNAL #56 + NUMBER HOT TODAY #57 + NUMBER GAP #59 -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
@@ -275,6 +278,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="voter-fresh-note" style="display:none;font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px"></div>
   </div>
 
+  </div>
+  <div class="tab-panel" id="tab-wr" data-tab="wr">
   <div class="sec-hdr" id="sec-wr"><span class="sec-title">WIN RATE & HIỆU SUẤT</span></div>
   <!-- WIN RATE THEO GIỜ -->
   <div class="card" style="margin-bottom:14px">
@@ -384,6 +389,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
   </div>
 
 
+  </div>
+  <div class="tab-panel" id="tab-streak" data-tab="streak">
   <div class="sec-hdr" id="sec-streak"><span class="sec-title">CHUỖI & STREAK</span></div>
 
 
@@ -393,6 +400,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="pair-today-body"><span class="loading">Đang tải</span></div>
   </div>
 
+  </div>
+  <div class="tab-panel" id="tab-analysis" data-tab="analysis">
   <div class="sec-hdr" id="sec-analysis"><span class="sec-title">PHÂN TÍCH CHI TIẾT</span></div>
   <!-- SIZE TRANSITION MATRIX -->
   <div class="card" style="margin-bottom:14px">
@@ -487,6 +496,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     </div>
   </div>
 
+  </div>
+  <div class="tab-panel" id="tab-tools" data-tab="tools">
   <div class="sec-hdr" id="sec-tools"><span class="sec-title">HỆ THỐNG & CÔNG CỤ</span></div>
 
   <!-- SYSTEM HEALTH BADGE -->
@@ -539,6 +550,8 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="combo-cold-grid"><span class="loading">Đang tải</span></div>
   </div>
 
+  </div>
+  <div class="tab-panel" id="tab-search" data-tab="search">
   <div class="sec-hdr" id="sec-search"><span class="sec-title">TRA CỨU & LỊCH SỬ</span></div>
   <!-- COMBO PROBABILITY CALCULATOR -->
   <div class="card" style="margin-bottom:14px" id="combo-calc-card">
@@ -640,6 +653,7 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     </div>
   </div>
 
+  </div>
   <footer class="card">
     <span>BINGO18 Neural v4.7</span>
     <span>GCP asia-southeast1</span>
@@ -650,8 +664,6 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     </span>
   </footer>
 </div>
-
-<script src="/static/js/dashboard.js"></script>
 
 <button id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Lên đầu">↑</button>
 
@@ -665,5 +677,7 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
   <a href="#sec-search" id="nav-search"><span class="nav-ico">🔎</span>Tra cứu</a>
   <a href="/art" id="nav-art"><span class="nav-ico">✦</span>Art</a>
 </nav>
+
+<script src="/static/js/dashboard.js"></script>
 </body>
 </html>
