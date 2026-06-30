@@ -99,13 +99,13 @@ def _db_connect():
 def _get_models_cache():
     db = DatabaseManager()
     result = _get_models(db)
-    assert len(result) == 4, f"Expected 4-tuple, got {len(result)}"
-    hybrid, selector, fwbr, ens = result
+    assert len(result) == 5, f"Expected 5-tuple, got {len(result)}"
+    hybrid, selector, fwbr, ens, size_pred = result
     assert ens.name == "voting_ensemble"
 
 def _selector_has_ensemble():
     db = DatabaseManager()
-    _, selector, _, ens = _get_models(db)
+    _, selector, _, ens, _ = _get_models(db)
     m = selector.get_model("voting_ensemble")
     assert m is not None, "voting_ensemble not registered in selector"
 
@@ -117,7 +117,7 @@ def _weights_update():
         f"Weights don't sum to ~1 after DB update: {sum(ens.weights.values())}"
 
 check("DB connect + get_recent_draws(10)",      _db_connect)
-check("_get_models() returns 4-tuple with ens", _get_models_cache)
+check("_get_models() returns 5-tuple with ens", _get_models_cache)
 check("voting_ensemble registered in selector", _selector_has_ensemble)
 check("update_weights_from_db() normalizes",    _weights_update)
 
@@ -142,7 +142,7 @@ print("="*60)
 from database import DatabaseManager as _DM
 
 _db3      = _DM()
-_, _sel3, _, _ens3 = _get_models(_db3)
+_, _sel3, _, _ens3, _ = _get_models(_db3)
 _df3      = _db3.get_recent_draws(100)
 _history3 = [row["numbers"] for _, row in _df3.iterrows()]
 
@@ -208,7 +208,7 @@ print("="*60)
 def _selector_picks():
     from database import DatabaseManager
     db = DatabaseManager()
-    _, selector, _, _ = _get_models(db)
+    _, selector, _, _, _ = _get_models(db)
     name = selector.select_best_model()
     assert isinstance(name, str) and len(name) > 0, f"Got: {name!r}"
     print(f"         -> selected model: {name}")
@@ -230,7 +230,7 @@ def _e2e():
     print(f"  1. Loaded {len(history)} draws")
 
     # Step 2: select best model
-    _, selector, _, ens = _get_models(db)
+    _, selector, _, ens, _ = _get_models(db)
     best_name  = selector.select_best_model()
     best_model = selector.get_model(best_name)
     assert best_model is not None
