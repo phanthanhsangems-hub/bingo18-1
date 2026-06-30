@@ -234,6 +234,8 @@ class DatabaseManager:
                     "ALTER TABLE model_stats        ADD COLUMN IF NOT EXISTS sum_win_rate REAL DEFAULT 0.0",
                     # required by update_prediction_result()'s ON CONFLICT (prediction_id)
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_presult_pid_uniq ON prediction_results(prediction_id)",
+                    # required by insert_prediction() / voter-weight & analytics queries (app.py, prediction_service.py)
+                    "ALTER TABLE predictions        ADD COLUMN IF NOT EXISTS vote_breakdown JSONB",
                 ]:
                     cur.execute(ddl)
 
@@ -331,6 +333,8 @@ class DatabaseManager:
                     "ALTER TABLE prediction_results ADD COLUMN is_win_size BOOLEAN",
                     "ALTER TABLE prediction_results ADD COLUMN is_win_sum  BOOLEAN",
                     "ALTER TABLE model_stats        ADD COLUMN sum_win_rate REAL DEFAULT 0.0",
+                    # required by _get_voter_multipliers()'s SQLite-path query (p.vote_breakdown)
+                    "ALTER TABLE predictions        ADD COLUMN vote_breakdown TEXT",
                 ]:
                     try:
                         cur.execute(col_ddl)
