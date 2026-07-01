@@ -205,6 +205,17 @@ async function loadNextPrediction() {
         adaptHtml+=`<span style="margin-left:6px" title="Split Conformal α=0.20 · tập dự đoán phủ ≥80% · ${unc?'bất định':'tự tin'}">`
           +`${unc?'⚠':'🎯'} <span style="color:var(--${unc?'gold':'cyan'})">${psStr}</span>${qStr}</span>`;
       }
+      if (vb.bocpd_dist && Object.keys(vb.bocpd_dist).length) {
+        const bd=vb.bocpd_dist;
+        const winner=Object.keys(bd).reduce((a,b)=>bd[a]>bd[b]?a:b);
+        const _SLV={NHO:'NHỎ',HOA:'HÒA',LON:'LỚN'};
+        const parts=['NHO','HOA','LON'].map(c=>{
+          const pct=Math.round((bd[c]||0)*100);
+          const bold=c===winner?'font-weight:700':'';
+          return `<span class="${c.toLowerCase()}" style="${bold}">${_SLV[c]}${pct}%</span>`;
+        }).join(' ');
+        adaptHtml+=`<span style="margin-left:6px" title="BOCPD regime · phân phối SIZE dự báo kỳ tiếp">📡 ${parts}</span>`;
+      }
       vbAdapt.innerHTML = adaptHtml;
     }
     vbPanel.style.display='';
@@ -714,9 +725,10 @@ async function loadSizeDist(n) {
 // ── loadVoterStats ───────────────────────────────────────────
 const _CHECKPOINT_SINCE='2026-05-15T16:15:00';
 async function loadVoterStats() {
-  const [data, fresh]=await Promise.all([
-    fetchJSON('/api/voter-stats?n=200'),
+  const [data, fresh, hedgeData]=await Promise.all([
+    fetchJSON('/api/voter-stats?n=500'),
     fetchJSON('/api/voter-stats?n=500&since='+_CHECKPOINT_SINCE),
+    fetchJSON('/api/hedge-weights'),
   ]);
   const el=document.getElementById('voter-stats-body');
   if (!el) return;
@@ -724,8 +736,12 @@ async function loadVoterStats() {
   // Build fresh WR lookup {voter: {wr, n}}
   const freshMap={};
   if (fresh?.voters) for (const v of fresh.voters) if (v.total>=5) freshMap[v.voter]={wr:v.win_rate,n:v.total};
+  // Build Hedge mult lookup {voter: mult}
+  const hedgeMap={};
+  if (hedgeData?.available && hedgeData.voters) for (const v of hedgeData.voters) hedgeMap[v.name]=v.mult;
+  const showHedge=Object.keys(hedgeMap).length>0;
   let html=`<table class="vs-table">
-    <thead><tr><th>Model</th><th class="r" title="Wins / Total predictions">W/N</th><th class="r" title="Win Rate % — tỷ lệ dự đoán đúng SIZE">WR%</th><th class="r" title="Edge = WR% − 37.5% (baseline). Dương = tốt hơn ngẫu nhiên">Edge</th><th class="r" title="Fresh WR post-checkpoint (z-score). |z| > 1.96 = có ý nghĩa thống kê">Fresh (z)</th></tr></thead><tbody>`;
+    <thead><tr><th>Model</th><th class="r" title="Wins / Total predictions">W/N</th><th class="r" title="Win Rate % — tỷ lệ dự đoán đúng SIZE">WR%</th><th class="r" title="Edge = WR% − 37.5% (baseline). Dương = tốt hơn ngẫu nhiên">Edge</th><th class="r" title="Fresh WR post-checkpoint (z-score). |z| > 1.96 = có ý nghĩa thống kê">Fresh (z)</th>${showHedge?'<th class="r" title="Hedge multiplier hiện tại — softmax EWA sau '+hedgeData.n_updates+' draws. >1.0x = được tin tưởng, <1.0x = bị down-weight">Hedge</th>':''}</tr></thead><tbody>`;
   for (const v of data.voters) {
     const wr=Math.round((v.win_rate||0)*100);
     const edge=v.edge>=0?'+'+Math.round(v.edge*100)+'%':Math.round(v.edge*100)+'%';
@@ -739,12 +755,23 @@ async function loadVoterStats() {
       const col=fw>=0.375?'var(--green)':fw<0.30?'var(--red)':'var(--gold)';
       fCell=`<span style="color:${col}">${Math.round(fw*100)}% <span style="font-size:10px;color:var(--muted)">(z${zStr})</span></span>`;
     }
+    let hCell='';
+    if (showHedge) {
+      const hm=hedgeMap[v.voter];
+      if (hm!=null) {
+        const hc=hm>=1.05?'var(--cyan)':hm<=0.95?'var(--red)':'var(--muted)';
+        const hs=(hm>=1?'+':'')+((hm-1)*100).toFixed(0)+'%';
+        hCell=`<td class="r"><span class="vb-mult ${hm>=1.05?'up':hm<=0.95?'dn':''}">${hs}</span></td>`;
+      } else {
+        hCell=`<td class="r"><span style="color:var(--dim)">—</span></td>`;
+      }
+    }
     html+=`<tr>
       <td>${v.voter}</td>
       <td class="r" style="color:var(--muted)">${v.wins}/${v.total}</td>
       <td class="r"><span class="vs-wr ${cls}">${wr}%</span></td>
       <td class="r"><span class="vs-wr ${cls}">${edge}</span></td>
-      <td class="r">${fCell}</td></tr>`;
+      <td class="r">${fCell}</td>${hCell}</tr>`;
   }
   html+='</tbody></table>';
   if (data.markov_abstain_rate!=null)
@@ -2919,6 +2946,42 @@ async function loadSysHealth() {
   </div>`;
 }
 
+async function loadHedgeWeights() {
+  const el = document.getElementById('hedge-weights-body');
+  if (!el) return;
+  const d = await fetchJSON('/api/hedge-weights');
+  if (!d || !d.available) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px">Chưa có dữ liệu Hedge (cần chạy backfill)</span>';
+    return;
+  }
+  const warmTxt = d.warmup_active
+    ? `<span style="color:var(--green)">ACTIVE</span>`
+    : `<span style="color:var(--gold)">WARMUP</span>`;
+  let rows = '';
+  for (const v of d.voters) {
+    const mc = v.mult >= 1.05 ? 'up' : v.mult <= 0.95 ? 'dn' : '';
+    const ms = ((v.mult - 1) * 100).toFixed(0);
+    const pct = Math.min(Math.abs(v.mult - 1) * 50, 30);
+    const barCol = v.mult >= 1.05 ? 'var(--cyan)' : 'var(--red)';
+    rows += `<tr>
+      <td style="font-size:12px">${v.name}</td>
+      <td class="r" style="font-size:11px;color:var(--dim)">${v.log_w.toFixed(2)}</td>
+      <td class="r"><span class="vb-mult ${mc}">${v.mult >= 1 ? '+' : ''}${ms}%</span></td>
+      <td class="r" style="width:50px">
+        <div style="height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}px;background:${barCol};border-radius:3px"></div>
+        </div>
+      </td></tr>`;
+  }
+  el.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+    n=${d.n_updates} · η=${d.eta} · ${warmTxt}
+    <span style="margin-left:6px;color:var(--dim)" title="Softmax của log-weights, chuẩn hóa: uniform → 1.0x · tốt → >1.0x · xấu → <1.0x">ℹ</span>
+  </div>
+  <table class="vb-table"><thead><tr>
+    <th>Voter</th><th class="r">log_w</th><th class="r">Mult</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 // ── Prediction timeline strip ─────────────────────────────────
 let _tlAllDraws = [];
 let _tlFilter   = 'all';
@@ -3228,6 +3291,7 @@ async function refreshAll() {
     loadBetSignal(),
     loadNumberGap(),
     loadSysHealth(),
+    loadHedgeWeights(),
     loadPredictions(),
     loadSmartSummary(),
   ]);
