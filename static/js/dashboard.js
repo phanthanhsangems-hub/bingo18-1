@@ -2982,6 +2982,45 @@ async function loadHedgeWeights() {
   </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+async function loadAlgoImpact() {
+  const el = document.getElementById('algo-impact-body');
+  if (!el) return;
+  const d = await fetchJSON('/api/algo-impact');
+  if (!d || d.error === 'no_algo_data') {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px">Chưa đủ dữ liệu sau khi deploy thuật toán</span>';
+    return;
+  }
+  if (d.error) { el.innerHTML = `<span style="color:var(--muted);font-size:12px">${d.error}</span>`; return; }
+
+  function wrCell(s) {
+    if (!s || s.wr == null) return '<span style="color:var(--dim)">—</span>';
+    const pct = Math.round(s.wr * 100);
+    const col = s.wr >= 0.375 ? 'var(--green)' : s.wr >= 0.30 ? 'var(--gold)' : 'var(--red)';
+    const ci = s.ci95 != null ? ` <span style="color:var(--dim);font-size:10px">±${Math.round(s.ci95*100)}%</span>` : '';
+    return `<span style="color:${col};font-weight:700">${pct}%</span>${ci} <span style="color:var(--dim);font-size:10px">(${s.wins}/${s.n})</span>`;
+  }
+
+  const delta = d.delta != null ? ((d.delta >= 0 ? '+' : '') + Math.round(d.delta * 100) + 'pp') : '—';
+  const deltaCol = d.delta == null ? 'var(--dim)' : d.delta >= 0 ? 'var(--green)' : 'var(--red)';
+  const zStr = d.z_score != null ? `z=${d.z_score}` : '';
+  const sigBadge = d.significant
+    ? `<span style="color:var(--green);font-size:10px;border:1px solid var(--green);border-radius:3px;padding:0 3px;margin-left:4px">SIG ✓</span>`
+    : `<span style="color:var(--dim);font-size:10px;border:1px solid var(--border);border-radius:3px;padding:0 3px;margin-left:4px">n.s.</span>`;
+
+  el.innerHTML = `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Cutoff: kỳ #${d.since_draw} · baseline ${Math.round(d.baseline*100)}%</div>
+    <table class="vb-table" style="width:100%"><thead><tr>
+      <th>Giai đoạn</th><th class="r">Win Rate</th>
+    </tr></thead><tbody>
+      <tr><td>Trước khi deploy</td><td class="r">${wrCell(d.before)}</td></tr>
+      <tr><td>Sau khi deploy</td><td class="r">${wrCell(d.after)}</td></tr>
+    </tbody></table>
+    <div style="margin-top:8px;font-size:13px;font-weight:600;color:${deltaCol}">
+      Δ ${delta} ${zStr ? `<span style="font-size:11px;font-weight:400;color:var(--muted)">(${zStr})</span>` : ''}${sigBadge}
+    </div>
+    <div style="font-size:10px;color:var(--dim);margin-top:4px">|z| ≥ 1.96 = có ý nghĩa thống kê 95%</div>`;
+}
+
 // ── Prediction timeline strip ─────────────────────────────────
 let _tlAllDraws = [];
 let _tlFilter   = 'all';
@@ -3292,6 +3331,7 @@ async function refreshAll() {
     loadNumberGap(),
     loadSysHealth(),
     loadHedgeWeights(),
+    loadAlgoImpact(),
     loadPredictions(),
     loadSmartSummary(),
   ]);

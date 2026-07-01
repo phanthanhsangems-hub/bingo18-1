@@ -22,7 +22,7 @@ import config
 logger = logging.getLogger(__name__)
 
 CATEGORIES = ('NHO', 'HOA', 'LON')
-_DEFAULT_ALPHA = 0.20          # target miscoverage rate → 80% coverage
+_DEFAULT_ALPHA = 0.35          # target miscoverage rate → 65% coverage (more selective sets)
 _CALIB_WINDOW = 150            # calibration draws (need ≥ 30 to be meaningful)
 _CALIB_CACHE_KEY = 'conformal_quantile'
 _MIN_CALIB_DRAWS = 30          # min calibration draws before using conformal
