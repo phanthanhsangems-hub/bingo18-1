@@ -1514,6 +1514,95 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     except Exception as _bce:
         logger.debug("regime_bocpd voter error: %s", _bce)
 
+    # ── Anti-streak voter ─────────────────────────────────────────────────────
+    # If same SIZE appears 4+ consecutive times, mean-reversion signal → vote opposite.
+    try:
+        from models import _parse_numbers as _pn_as
+        _as_sizes = [
+            SizePredictor._cat(sum(int(x) for x in _pn_as(row.numbers)))
+            for _, row in df.head(10).iterrows()
+        ]
+        if _as_sizes:
+            _as_last, _as_streak = _as_sizes[0], 1
+            for _s in _as_sizes[1:]:
+                if _s == _as_last:
+                    _as_streak += 1
+                else:
+                    break
+            if _as_streak >= 4 and _as_last != 'HOA':
+                _as_anti = 'LON' if _as_last == 'NHO' else 'NHO'
+                _as_conf = round(min(0.34, 0.22 + (_as_streak - 4) * 0.03), 3)
+                _as_nums = [1, 1, 2] if _as_anti == 'NHO' else [4, 5, 6]
+                votes.append({'name': 'anti_streak', 'nums': _as_nums,
+                              'size': _as_anti, 'conf': _as_conf})
+                logger.debug("anti_streak: %s×%d → vote %s conf=%.3f", _as_last, _as_streak, _as_anti, _as_conf)
+    except Exception as _ase:
+        logger.debug("anti_streak voter error: %s", _ase)
+
+    # ── Number absence voter ──────────────────────────────────────────────────
+    # Track individual number (1-6) absence. When a number is absent 15+ draws,
+    # bias towards combos containing it and vote for the resulting SIZE.
+    try:
+        from models import _parse_numbers as _pn_na
+        _na_window = [(_, row) for _, row in df.head(30).iterrows()]
+        _na_last_seen: dict = {}
+        for _i, (_, row) in enumerate(_na_window):
+            for _n in _pn_na(row.numbers):
+                if _n not in _na_last_seen:
+                    _na_last_seen[int(_n)] = _i
+        _na_absence = {n: _na_last_seen.get(n, 30) for n in range(1, 7)}
+        _na_coldest3 = sorted(_na_absence, key=lambda x: -_na_absence[x])[:3]
+        _na_max_abs = _na_absence[_na_coldest3[0]]
+        if _na_max_abs >= 15:
+            _na_sorted = sorted(_na_coldest3)
+            _na_sum = sum(_na_sorted)
+            _na_size = 'NHO' if _na_sum <= 9 else ('HOA' if _na_sum <= 11 else 'LON')
+            if _na_size == 'HOA':
+                _na_size = 'NHO' if _na_sum <= 10 else 'LON'
+            _na_conf = round(min(0.32, 0.20 + (_na_max_abs - 15) * 0.012), 3)
+            votes.append({'name': 'num_absence', 'nums': _na_sorted,
+                          'size': _na_size, 'conf': _na_conf})
+            logger.debug("num_absence: coldest3=%s abs=%d → %s conf=%.3f", _na_sorted, _na_max_abs, _na_size, _na_conf)
+    except Exception as _nae:
+        logger.debug("num_absence voter error: %s", _nae)
+
+    # ── Pair co-occurrence voter ──────────────────────────────────────────────
+    # Find the pair (a,b) most frequently appearing together in last 50 draws.
+    # If significantly above expected frequency, build a combo and vote its SIZE.
+    try:
+        from models import _parse_numbers as _pn_pc
+        _pc_draws = [_pn_pc(row.numbers) for _, row in df.head(50).iterrows()]
+        _pc_pair_cnt: Counter = Counter()
+        for _d in _pc_draws:
+            _uniq = sorted(set(int(x) for x in _d))
+            for _pi in range(len(_uniq)):
+                for _pj in range(_pi + 1, len(_uniq)):
+                    _pc_pair_cnt[(_uniq[_pi], _uniq[_pj])] += 1
+        if _pc_pair_cnt:
+            (_pc_pair, _pc_cnt) = _pc_pair_cnt.most_common(1)[0]
+            _pc_expected = len(_pc_draws) * 0.12  # ~expected pair co-occurrence freq
+            if _pc_cnt > _pc_expected * 1.5:      # only fire if 50% above expected
+                _pc_in_pair = set(_pc_pair)
+                _pc_ls: dict = {}
+                for _i, _d in enumerate(_pc_draws):
+                    for _n in _d:
+                        if int(_n) not in _pc_ls:
+                            _pc_ls[int(_n)] = _i
+                _pc_absence = {n: _pc_ls.get(n, 50) for n in range(1, 7) if n not in _pc_in_pair}
+                _pc_cold3rd = max(_pc_absence, key=_pc_absence.get)
+                _pc_combo = sorted(list(_pc_pair) + [_pc_cold3rd])
+                _pc_sum = sum(_pc_combo)
+                _pc_size = 'NHO' if _pc_sum <= 9 else ('HOA' if _pc_sum <= 11 else 'LON')
+                if _pc_size == 'HOA':
+                    _pc_size = 'NHO' if _pc_sum <= 10 else 'LON'
+                _pc_conf = round(min(0.30, 0.18 + (_pc_cnt / max(_pc_expected, 1) - 1.5) * 0.04), 3)
+                votes.append({'name': 'pair_cooc', 'nums': _pc_combo,
+                              'size': _pc_size, 'conf': _pc_conf})
+                logger.debug("pair_cooc: pair=%s cnt=%d → combo=%s %s conf=%.3f",
+                             _pc_pair, _pc_cnt, _pc_combo, _pc_size, _pc_conf)
+    except Exception as _pce:
+        logger.debug("pair_cooc voter error: %s", _pce)
+
     if not votes:
         return None, 0.0, {}
 
