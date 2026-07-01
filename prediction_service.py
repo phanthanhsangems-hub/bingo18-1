@@ -302,6 +302,7 @@ def _update_pred_diversity(numbers: list) -> None:
 # ── Dynamic voter weight cache ───────────────────────────────
 _voter_weight_cache: dict = {}
 _voter_weight_ts: int = 0
+_last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
 _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
@@ -2169,6 +2170,37 @@ def run_prediction_cycle() -> dict:
         _reason_info['combo_total'] = len(_same_sz)
     except Exception as _rie:
         logger.debug("reason_info build error: %s", _rie)
+
+    # BOCPD regime change alert — only fires when dominant category deviates
+    # significantly from base rate (NHO/LON > 55%, HOA > 45%) and the regime
+    # has changed since the last alert, to avoid spam on stable runs.
+    try:
+        global _last_bocpd_regime
+        _bd = (_vote_info or {}).get('bocpd_dist') or {}
+        if _bd:
+            _BASE = {'NHO': 0.375, 'HOA': 0.25, 'LON': 0.375}
+            _THRESH = {'NHO': 0.55, 'HOA': 0.45, 'LON': 0.55}
+            _SLV = {'NHO': 'NHỎ', 'HOA': 'HÒA', 'LON': 'LỚN'}
+            _dom = max(_bd, key=_bd.get)
+            if _bd[_dom] >= _THRESH[_dom] and _dom != _last_bocpd_regime:
+                _delta = _bd[_dom] - _BASE[_dom]
+                _msg = (
+                    f"📡 <b>BOCPD Regime Shift</b>\n"
+                    f"Chuỗi SIZE đang lệch mạnh về <b>{_SLV[_dom]}</b> "
+                    f"({_bd[_dom]*100:.0f}% vs baseline {_BASE[_dom]*100:.0f}%, "
+                    f"Δ+{_delta*100:.0f}pp)\n"
+                    f"NHỎ {_bd.get('NHO',0)*100:.0f}% · "
+                    f"HÒA {_bd.get('HOA',0)*100:.0f}% · "
+                    f"LỚN {_bd.get('LON',0)*100:.0f}%\n"
+                    f"<i>Kỳ #{next_draw} · BOCPD hazard=1/120</i>"
+                )
+                telegram.send_message(_msg)
+                _last_bocpd_regime = _dom
+                logger.info("BOCPD regime alert sent: %s %.0f%%", _dom, _bd[_dom] * 100)
+            elif _bd.get(_last_bocpd_regime, 0) < _THRESH.get(_last_bocpd_regime, 1):
+                _last_bocpd_regime = ''  # reset when regime normalises
+    except Exception as _bae:
+        logger.debug("bocpd alert error: %s", _bae)
 
     telegram.send_prediction(next_draw, best_name, numbers, win_prob,
                              signal=_tg_signal, vote_tally=_tg_vote_tally,
