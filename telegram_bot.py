@@ -62,6 +62,9 @@ class TelegramBot:
         'lstm_full':        'LSTM56',
         'cold_voter':       'Cold',
         'fwbr':             'FWBR',
+        'anti_streak':      'AntiStr',
+        'num_absence':      'NumAbs',
+        'pair_cooc':        'PairCo',
     }
 
     @staticmethod
