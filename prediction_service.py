@@ -303,6 +303,9 @@ def _update_pred_diversity(numbers: list) -> None:
 _voter_weight_cache: dict = {}
 _voter_weight_ts: int = 0
 _last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
+_last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 10 draws
+_TRIPLE_DROUGHT_THRESH = 50       # alert when ≥50 draws without a triple (~1.4× expected 36)
+_TRIPLE_ALERT_COOLDOWN = 10       # draws between repeated triple drought alerts
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
 _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
@@ -1257,6 +1260,47 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
         return numbers, None
 
 
+# ── Triple drought helper ──────────────────────────────────────
+def _query_triple_drought(db) -> tuple:
+    """Return (draws_since_last_triple, last_triple_draw) by scanning prediction_results.
+    A triple is any draw where all 3 actual numbers are equal (e.g. [2,2,2]).
+    Returns (None, None) on error or if no triple found in history.
+    """
+    try:
+        ph = db._ph()
+        conn = db.get_connection()
+        cur = conn.cursor()
+        if config.DATABASE_URL:
+            cur.execute("""
+                SELECT draw_number FROM prediction_results
+                WHERE actual_numbers IS NOT NULL
+                  AND (actual_numbers::json->>0) = (actual_numbers::json->>1)
+                  AND (actual_numbers::json->>1) = (actual_numbers::json->>2)
+                ORDER BY draw_number DESC LIMIT 1
+            """)
+        else:
+            cur.execute("""
+                SELECT draw_number FROM prediction_results
+                WHERE actual_numbers IS NOT NULL
+                  AND json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                  AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
+                ORDER BY draw_number DESC LIMIT 1
+            """)
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return None, None
+        last_triple_draw = int(row[0])
+        cur.execute(f"SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+        latest_row = cur.fetchone()
+        conn.close()
+        latest = int(latest_row[0]) if latest_row and latest_row[0] else last_triple_draw
+        return latest - last_triple_draw, last_triple_draw
+    except Exception as e:
+        logger.debug("triple drought query error: %s", e)
+        return None, None
+
+
 # ── Majority Vote: tất cả ML models bầu SIZE, chọn số đồng thuận ──
 def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                        banned: set, prev_sum: Optional[int] = None,
@@ -2148,6 +2192,25 @@ def run_prediction_cycle() -> dict:
                 _last_bocpd_regime = ''  # reset when regime normalises
     except Exception as _bae:
         logger.debug("bocpd alert error: %s", _bae)
+
+    # Triple drought alert — fires when no triple for ≥ _TRIPLE_DROUGHT_THRESH draws
+    try:
+        global _last_triple_alert_draw
+        if next_draw - _last_triple_alert_draw >= _TRIPLE_ALERT_COOLDOWN:
+            _drought, _last_triple = _query_triple_drought(db)
+            if _drought is not None and _drought >= _TRIPLE_DROUGHT_THRESH:
+                _overdue = _drought - 36
+                _msg = (
+                    f"⚡ <b>CẢNH BÁO TRIPLE</b>\n"
+                    f"Đã <b>{_drought} kỳ</b> chưa có triple (kỳ gần nhất: #{_last_triple})\n"
+                    f"Xác suất mỗi kỳ: 2.78% · Trung bình 36 kỳ/1 lần\n"
+                    f"Đang nợ <b>~{_overdue} kỳ</b> so với kỳ vọng"
+                )
+                telegram.send_message(_msg)
+                _last_triple_alert_draw = next_draw
+                logger.info("Triple drought alert: %d draws since #%d", _drought, _last_triple)
+    except Exception as _tae:
+        logger.debug("triple alert error: %s", _tae)
 
     telegram.send_prediction(next_draw, best_name, numbers, win_prob,
                              signal=_tg_signal, vote_tally=_tg_vote_tally,
