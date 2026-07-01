@@ -11,12 +11,12 @@ import os
 import traceback
 import threading
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import config
-from database import DatabaseManager
+from database import DatabaseManager, USE_POSTGRES
 from models import HybridModel, MarkovModel, ColdNumberModel, FWBRModel, MLEnsembleModel, ModelSelector, SizePredictor, ComboColdModel
 from ensemble_model import VotingEnsemble
 from regime_detector import SizeRegimeDetector
@@ -303,9 +303,9 @@ def _update_pred_diversity(numbers: list) -> None:
 _voter_weight_cache: dict = {}
 _voter_weight_ts: int = 0
 _last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
-_last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 10 draws
-_TRIPLE_DROUGHT_THRESH = 50       # alert when ≥50 draws without a triple (~1.4× expected 36)
-_TRIPLE_ALERT_COOLDOWN = 10       # draws between repeated triple drought alerts
+_last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 8 draws
+_TRIPLE_DROUGHT_THRESH = 25       # alert when ≥25 draws without a triple (near expected 36; fire early)
+_TRIPLE_ALERT_COOLDOWN = 8        # draws between repeated triple drought alerts
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
 _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
@@ -2200,12 +2200,15 @@ def run_prediction_cycle() -> dict:
         if next_draw - _last_triple_alert_draw >= _TRIPLE_ALERT_COOLDOWN:
             _drought, _last_triple = _query_triple_drought(db)
             if _drought is not None and _drought >= _TRIPLE_DROUGHT_THRESH:
-                _overdue = _drought - 36
+                import math as _math
+                _p_next5  = round((1 - (1 - 6/216) ** 5) * 100, 1)
+                _p_next10 = round((1 - (1 - 6/216) ** 10) * 100, 1)
                 _msg = (
-                    f"⚡ <b>CẢNH BÁO TRIPLE</b>\n"
-                    f"Đã <b>{_drought} kỳ</b> chưa có triple (kỳ gần nhất: #{_last_triple})\n"
-                    f"Xác suất mỗi kỳ: 2.78% · Trung bình 36 kỳ/1 lần\n"
-                    f"Đang nợ <b>~{_overdue} kỳ</b> so với kỳ vọng"
+                    f"⚡ <b>WATCH TRIPLE · {_drought} kỳ chưa có</b>\n"
+                    f"Kỳ gần nhất: #{_last_triple} · Trung bình 36 kỳ/1 lần\n"
+                    f"➡️ P(triple trong 5 kỳ tới): <b>{_p_next5}%</b>\n"
+                    f"➡️ P(triple trong 10 kỳ tới): <b>{_p_next10}%</b>\n"
+                    f"📌 Triple có khả năng xuất hiện sớm — chú ý theo dõi!"
                 )
                 telegram.send_message(_msg)
                 _last_triple_alert_draw = next_draw
