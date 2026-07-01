@@ -19,6 +19,9 @@ import config
 from database import DatabaseManager
 from models import HybridModel, MarkovModel, ColdNumberModel, FWBRModel, MLEnsembleModel, ModelSelector, SizePredictor, ComboColdModel
 from ensemble_model import VotingEnsemble
+from regime_detector import SizeRegimeDetector
+from hedge_voter import load_hedge_weights, update_hedge_from_draw, _HEDGE_WARMUP
+from conformal import get_conformal_quantile, get_prediction_set
 from lstm_model import BingoPredictor, FullLSTMPredictor
 from telegram_bot import TelegramBot
 from calibration import get_calibrator, invalidate_calibrator
@@ -874,6 +877,22 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
                 # voter recovered → remove from alerted set so next reset alerts again
                 _reset_alerted_voters.discard(name)
 
+        # ── Hedge overlay: replace WR/streak/decay with Hedge weights when warm ──
+        # Hedge is more principled (formal regret bound) and self-adapts without
+        # manual EMA alpha, streak-decay thresholds, or auto-reset constants.
+        # Once it has seen >= _HEDGE_WARMUP draws it takes over as primary multiplier.
+        try:
+            _hw = load_hedge_weights(db)
+            if _hw and _hw.n_updates >= _HEDGE_WARMUP:
+                _hedge_mults = _hw.get_multipliers()
+                multipliers.update(_hedge_mults)  # Hedge overrides WR-based values
+                _voter_decay_cache = {}           # streak-decay not needed; Hedge subsumes it
+                logger.info("Hedge active (n=%d η=%.2f): %s",
+                            _hw.n_updates, _hw.eta,
+                            {k: f"{v:.2f}x" for k, v in sorted(_hedge_mults.items())})
+        except Exception as _he:
+            logger.debug("Hedge overlay error (fallback to WR): %s", _he)
+
         # P146: ml_voter_mult_override — hard cap from system_config (0.0 = disable ML)
         try:
             conn_cfg = db.get_connection()
@@ -1178,6 +1197,7 @@ def _apply_filter(numbers: List[int], confidence: float, df) -> Optional[Tuple]:
 # ── Hot-Adjust: chuyển SIZE khi loss streak >= 3 ─────────────────
 _HOT_ADJUST_STREAK_THRESHOLD = 3  # kích hoạt khi thua liên tiếp >= N kỳ
 _HOT_WINDOW = 20                  # cửa sổ để tính hot numbers
+_REGIME_WINDOW = 200               # cửa sổ lịch sử SIZE cho BOCPD regime voter
 
 def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
                      banned: set) -> tuple:
@@ -1350,6 +1370,31 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                                   'size': _h_opp, 'conf': _h_conf})
     except Exception as _he:
         logger.debug("size_freq voter error: %s", _he)
+
+    # ── BOCPD regime voter — Bayesian Online Changepoint Detection over the
+    # SIZE sequence. Conservative hazard (expected run ~120 draws) so it mostly
+    # tracks the base rate and only shifts when a streak is statistically
+    # unlikely under "no change" — designed to avoid the same overreaction to
+    # ordinary noise that the old fixed-window hot-adjust heuristic had. ──────
+    try:
+        if len(df) >= 20:
+            from models import _parse_numbers as _pn_bc
+            _bc_window = min(len(df), _REGIME_WINDOW)
+            _bc_sizes = [
+                SizePredictor._cat(sum(int(x) for x in _pn_bc(row.numbers)))
+                for row in df.head(_bc_window).itertuples()
+            ]
+            _bc_sizes.reverse()  # df is most-recent-first; detector needs chronological order
+            _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+            _bc_winner = max(_bc_dist, key=_bc_dist.get)
+            if _bc_winner != 'HOA':
+                _bc_conf = round(min(0.32, max(0.22, _bc_dist[_bc_winner])), 3)
+                _bc_nums = [1, 1, 1] if _bc_winner == 'NHO' else [4, 5, 6]
+                votes.append({'name': 'regime_bocpd', 'nums': _bc_nums,
+                              'size': _bc_winner, 'conf': _bc_conf})
+                logger.debug("regime_bocpd: dist=%s → %s conf=%.3f", _bc_dist, _bc_winner, _bc_conf)
+    except Exception as _bce:
+        logger.debug("regime_bocpd voter error: %s", _bce)
 
     if not votes:
         return None, 0.0, {}
@@ -2001,8 +2046,9 @@ def run_prediction_cycle() -> dict:
             logger.warning("Ban-list hit %s → diversified to %s", current_combo, numbers)
 
     else:  # auto → majority vote
-        voter_mults    = _get_voter_multipliers(db, next_draw)
-        adaptive_thres = _get_adaptive_thresholds(db, next_draw)
+        voter_mults     = _get_voter_multipliers(db, next_draw)
+        adaptive_thres  = _get_adaptive_thresholds(db, next_draw)
+        _conformal_q    = get_conformal_quantile(db, next_draw)
         # P-FIX2: loss streak boost — giảm LON anchor, tăng NHO khi thua >= 7 liên tiếp
         if _current_loss_streak >= 7:
             _boost = min(1.5, 1.0 + (_current_loss_streak - 6) * 0.08)
@@ -2017,6 +2063,14 @@ def run_prediction_cycle() -> dict:
             df, next_draw, hybrid, selector, fwbr, ensemble, banned, prev_sum,
             voter_multipliers=voter_mults,
             adaptive_thresholds=adaptive_thres)
+        # Conformal prediction set (informational — P142 still blocks HOA from being chosen)
+        if _vote_info and _conformal_q is not None:
+            _ema_fracs = _vote_info.get('size_weights_ema', {})
+            _pred_set = get_prediction_set(_ema_fracs, _conformal_q)
+            _vote_info['conformal_q'] = round(_conformal_q, 4)
+            _vote_info['prediction_set'] = _pred_set
+            _vote_info['conformal_uncertain'] = len(_pred_set) >= 2
+            logger.debug("ConformalSet: q=%.3f thresh=%.3f → %s", _conformal_q, 1 - _conformal_q, _pred_set)
         best_name = 'majority_vote'
         skip_size_adjust = False  # allow SizePredictor to correct SIZE bias
         if numbers is None:
@@ -2250,7 +2304,7 @@ def process_actual_result(draw_number: int, actual_numbers: List[int]) -> dict:
         cur = conn.cursor()
         ph = db._ph()
         cur.execute(f"""
-            SELECT id, predicted_numbers, model_name FROM predictions
+            SELECT id, predicted_numbers, model_name, vote_breakdown FROM predictions
             WHERE draw_number={ph} ORDER BY prediction_time DESC LIMIT 1
         """, (draw_number,))
         row = cur.fetchone()
@@ -2259,9 +2313,16 @@ def process_actual_result(draw_number: int, actual_numbers: List[int]) -> dict:
 
     result_info = {}
     if row:
-        pred_id, pred_json, model_name = row
+        pred_id, pred_json, model_name, vb_raw = row
         predicted = json.loads(pred_json)
         db.update_prediction_result(pred_id, draw_number, actual_numbers)
+
+        # Update Hedge voter weights online with this draw's result
+        try:
+            vb = json.loads(vb_raw) if isinstance(vb_raw, str) else (vb_raw or {})
+            update_hedge_from_draw(db, vb, actual_numbers)
+        except Exception as _he:
+            logger.debug("hedge update error: %s", _he)
 
         match_count = len(set(predicted) & set(actual_numbers))
         is_win     = (db.get_size_category(predicted) == db.get_size_category(actual_numbers)) if len(predicted) == 3 and len(actual_numbers) == 3 else False
