@@ -306,6 +306,9 @@ _last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
 _last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 8 draws
 _TRIPLE_DROUGHT_THRESH = 25       # alert when ≥25 draws without a triple (near expected 36; fire early)
 _TRIPLE_ALERT_COOLDOWN = 8        # draws between repeated triple drought alerts
+_last_pair_alert_draw: int = 0    # cooldown for pair drought alert
+_PAIR_DROUGHT_THRESH = 20         # alert when ≥20 draws without any pair (~2.1× expected 9.3)
+_PAIR_ALERT_COOLDOWN = 8          # draws between repeated pair drought alerts
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
 _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
@@ -1301,6 +1304,123 @@ def _query_triple_drought(db) -> tuple:
         return None, None
 
 
+# ── Pair drought helper ────────────────────────────────────────
+def _query_pair_drought(db) -> tuple:
+    """Return (draws_since_last_pair, last_pair_draw, cold_doubles)
+    where a pair = exactly 2 of 3 numbers equal (not all 3).
+    cold_doubles = [(doubled_digit, drought_draws), ...] sorted by drought desc.
+    """
+    try:
+        conn = db.get_connection()
+        cur = conn.cursor()
+
+        if config.DATABASE_URL:
+            # PostgreSQL: pair condition (not triple)
+            cur.execute("""
+                SELECT draw_number FROM prediction_results
+                WHERE actual_numbers IS NOT NULL
+                  AND ((actual_numbers::json->>0) = (actual_numbers::json->>1)
+                       OR (actual_numbers::json->>1) = (actual_numbers::json->>2)
+                       OR (actual_numbers::json->>0) = (actual_numbers::json->>2))
+                  AND NOT ((actual_numbers::json->>0) = (actual_numbers::json->>1)
+                           AND (actual_numbers::json->>1) = (actual_numbers::json->>2))
+                ORDER BY draw_number DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+            if not row:
+                conn.close()
+                return None, None, []
+            last_pair_draw = int(row[0])
+            cur.execute("SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+            latest = int(cur.fetchone()[0] or last_pair_draw)
+            # Per-doubled-digit drought
+            cur.execute("""
+                WITH latest_draw AS (
+                    SELECT MAX(draw_number) AS max_dn
+                    FROM prediction_results WHERE actual_numbers IS NOT NULL
+                ),
+                pair_draws AS (
+                    SELECT draw_number,
+                        CASE
+                            WHEN (actual_numbers::json->>0) = (actual_numbers::json->>1)
+                                THEN (actual_numbers::json->>0)::int
+                            WHEN (actual_numbers::json->>1) = (actual_numbers::json->>2)
+                                THEN (actual_numbers::json->>1)::int
+                            ELSE (actual_numbers::json->>0)::int
+                        END AS ddigit
+                    FROM prediction_results
+                    WHERE actual_numbers IS NOT NULL
+                      AND ((actual_numbers::json->>0) = (actual_numbers::json->>1)
+                           OR (actual_numbers::json->>1) = (actual_numbers::json->>2)
+                           OR (actual_numbers::json->>0) = (actual_numbers::json->>2))
+                      AND NOT ((actual_numbers::json->>0) = (actual_numbers::json->>1)
+                               AND (actual_numbers::json->>1) = (actual_numbers::json->>2))
+                ),
+                last_per AS (
+                    SELECT ddigit, MAX(draw_number) AS last_dn FROM pair_draws GROUP BY ddigit
+                )
+                SELECT lp.ddigit, l.max_dn - lp.last_dn AS drought
+                FROM last_per lp, latest_draw l
+                ORDER BY drought DESC
+            """)
+            cold_doubles = [(int(r[0]), int(r[1])) for r in cur.fetchall()]
+        else:
+            # SQLite
+            cur.execute("""
+                SELECT draw_number FROM prediction_results
+                WHERE actual_numbers IS NOT NULL
+                  AND (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                       OR json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
+                       OR json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[2]'))
+                  AND NOT (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                           AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]'))
+                ORDER BY draw_number DESC LIMIT 1
+            """)
+            row = cur.fetchone()
+            if not row:
+                conn.close()
+                return None, None, []
+            last_pair_draw = int(row[0])
+            cur.execute("SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+            latest = int(cur.fetchone()[0] or last_pair_draw)
+            cur.execute("""
+                WITH latest_draw AS (
+                    SELECT MAX(draw_number) AS max_dn
+                    FROM prediction_results WHERE actual_numbers IS NOT NULL
+                ),
+                pair_draws AS (
+                    SELECT draw_number,
+                        CASE
+                            WHEN json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                                THEN CAST(json_extract(actual_numbers,'$[0]') AS INTEGER)
+                            WHEN json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
+                                THEN CAST(json_extract(actual_numbers,'$[1]') AS INTEGER)
+                            ELSE CAST(json_extract(actual_numbers,'$[0]') AS INTEGER)
+                        END AS ddigit
+                    FROM prediction_results
+                    WHERE actual_numbers IS NOT NULL
+                      AND (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                           OR json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
+                           OR json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[2]'))
+                      AND NOT (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
+                               AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]'))
+                ),
+                last_per AS (
+                    SELECT ddigit, MAX(draw_number) AS last_dn FROM pair_draws GROUP BY ddigit
+                )
+                SELECT lp.ddigit, l.max_dn - lp.last_dn AS drought
+                FROM last_per lp, latest_draw l
+                ORDER BY drought DESC
+            """)
+            cold_doubles = [(int(r[0]), int(r[1])) for r in cur.fetchall()]
+
+        conn.close()
+        return latest - last_pair_draw, last_pair_draw, cold_doubles
+    except Exception as e:
+        logger.debug("pair drought query error: %s", e)
+        return None, None, []
+
+
 # ── Majority Vote: tất cả ML models bầu SIZE, chọn số đồng thuận ──
 def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                        banned: set, prev_sum: Optional[int] = None,
@@ -2215,6 +2335,34 @@ def run_prediction_cycle() -> dict:
                 logger.info("Triple drought alert: %d draws since #%d", _drought, _last_triple)
     except Exception as _tae:
         logger.debug("triple alert error: %s", _tae)
+
+    # Pair drought alert — fires when no pair for ≥ _PAIR_DROUGHT_THRESH draws
+    try:
+        global _last_pair_alert_draw
+        if next_draw - _last_pair_alert_draw >= _PAIR_ALERT_COOLDOWN:
+            _pd, _lp_draw, _cold_dbls = _query_pair_drought(db)
+            if _pd is not None and _pd >= _PAIR_DROUGHT_THRESH:
+                _pp5  = round((1 - (1 - 30/216) ** 5)  * 100, 1)
+                _pp10 = round((1 - (1 - 30/216) ** 10) * 100, 1)
+                _cold_lines = '\n'.join(
+                    f"  • Đôi <b>{d}</b> ({d},{d},?): <b>{dr} kỳ</b> chưa ra"
+                    for d, dr in _cold_dbls[:3]
+                )
+                _pmsg = (
+                    f"🎯 <b>WATCH CẶP ĐÔI · {_pd} kỳ chưa có</b>\n"
+                    f"Kỳ gần nhất: #{_lp_draw} · TB ~9 kỳ/lần\n"
+                    f"➡️ P(cặp đôi trong 5 kỳ tới): <b>{_pp5}%</b>\n"
+                    f"➡️ P(cặp đôi trong 10 kỳ tới): <b>{_pp10}%</b>\n"
+                )
+                if _cold_lines:
+                    _pmsg += f"🧊 Đôi lạnh nhất:\n{_cold_lines}\n"
+                _pmsg += f"📌 Cặp đôi sắp xuất hiện — chú ý theo dõi!"
+                telegram.send_message(_pmsg)
+                _last_pair_alert_draw = next_draw
+                logger.info("Pair drought alert: %d draws since #%d, cold=%s",
+                            _pd, _lp_draw, _cold_dbls[:3])
+    except Exception as _pae:
+        logger.debug("pair alert error: %s", _pae)
 
     telegram.send_prediction(next_draw, best_name, numbers, win_prob,
                              signal=_tg_signal, vote_tally=_tg_vote_tally,
