@@ -205,6 +205,17 @@ async function loadNextPrediction() {
         adaptHtml+=`<span style="margin-left:6px" title="Split Conformal α=0.20 · tập dự đoán phủ ≥80% · ${unc?'bất định':'tự tin'}">`
           +`${unc?'⚠':'🎯'} <span style="color:var(--${unc?'gold':'cyan'})">${psStr}</span>${qStr}</span>`;
       }
+      if (vb.bocpd_dist && Object.keys(vb.bocpd_dist).length) {
+        const bd=vb.bocpd_dist;
+        const winner=Object.keys(bd).reduce((a,b)=>bd[a]>bd[b]?a:b);
+        const _SLV={NHO:'NHỎ',HOA:'HÒA',LON:'LỚN'};
+        const parts=['NHO','HOA','LON'].map(c=>{
+          const pct=Math.round((bd[c]||0)*100);
+          const bold=c===winner?'font-weight:700':'';
+          return `<span class="${c.toLowerCase()}" style="${bold}">${_SLV[c]}${pct}%</span>`;
+        }).join(' ');
+        adaptHtml+=`<span style="margin-left:6px" title="BOCPD regime · phân phối SIZE dự báo kỳ tiếp">📡 ${parts}</span>`;
+      }
       vbAdapt.innerHTML = adaptHtml;
     }
     vbPanel.style.display='';

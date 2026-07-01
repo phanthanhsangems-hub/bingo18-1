@@ -1376,6 +1376,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # tracks the base rate and only shifts when a streak is statistically
     # unlikely under "no change" — designed to avoid the same overreaction to
     # ordinary noise that the old fixed-window hot-adjust heuristic had. ──────
+    _bocpd_dist = None
     try:
         if len(df) >= 20:
             from models import _parse_numbers as _pn_bc
@@ -1386,6 +1387,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
             ]
             _bc_sizes.reverse()  # df is most-recent-first; detector needs chronological order
             _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+            _bocpd_dist = {k: round(v, 3) for k, v in _bc_dist.items()}
             _bc_winner = max(_bc_dist, key=_bc_dist.get)
             if _bc_winner != 'HOA':
                 _bc_conf = round(min(0.32, max(0.22, _bc_dist[_bc_winner])), 3)
@@ -1586,6 +1588,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
         'all_votes_detail':  _detail,
         'markov_abstained':  _markov_abstained,
         'adaptive':          {k: round(v, 3) for k, v in (_at or {}).items()},
+        'bocpd_dist':        _bocpd_dist,
     }
     logger.info("MajorityVote: %d/%d → SIZE=%s share=%.0f%% tally=%s weights={NHO:%.3f HOA:%.3f LON:%.3f} → %s",
                 majority_count, len(votes), majority_size, vote_share * 100, dict(size_tally),
