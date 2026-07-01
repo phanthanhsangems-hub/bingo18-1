@@ -11566,6 +11566,8 @@ def daily_summary_evening():
             'total_draws_today': total_draws_today,
             'combo_coverage':    f'{len(appeared_combos)}/56',
             'coverage_pct':      coverage_pct,
+            'msg_len':           len(msg),
+            'msg_preview':       msg[:300],
         })
 
     except Exception as e:
