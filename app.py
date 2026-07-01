@@ -11556,6 +11556,10 @@ def daily_summary_evening():
         tg   = TelegramBot()
         sent = tg.send_message(msg)
 
+        chat_id = config.TELEGRAM_CHAT_ID or ''
+        chat_hint = f"...{chat_id[-6:]}" if len(chat_id) > 6 else (chat_id or 'NOT_SET')
+        token_ok  = bool(config.TELEGRAM_BOT_TOKEN)
+
         return jsonify({
             'status':            'ok',
             'sent':              sent,
@@ -11568,6 +11572,8 @@ def daily_summary_evening():
             'coverage_pct':      coverage_pct,
             'msg_len':           len(msg),
             'msg_preview':       msg[:300],
+            'debug_chat_id':     chat_hint,
+            'debug_token_set':   token_ok,
         })
 
     except Exception as e:
