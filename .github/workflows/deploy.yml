@@ -32,10 +32,32 @@ jobs:
           TAG=$(git rev-parse --short HEAD)
           IMAGE="asia-southeast1-docker.pkg.dev/bingo18-predictor/bingo18-images/bingo18:${TAG}"
           echo "IMAGE=${IMAGE}" >> $GITHUB_ENV
-          gcloud builds submit \
+          # --async avoids the log-streaming permission error (SA doesn't need logs bucket access)
+          BUILD_ID=$(gcloud builds submit \
             --tag "${IMAGE}" \
             --project bingo18-predictor \
-            --timeout 900s
+            --timeout 900s \
+            --async \
+            --format='value(id)')
+          echo "Cloud Build ID: ${BUILD_ID}"
+          # Poll until done
+          for i in $(seq 1 90); do
+            STATUS=$(gcloud builds describe "${BUILD_ID}" \
+              --project bingo18-predictor \
+              --format='value(status)')
+            echo "  [${i}/90] status=${STATUS}"
+            if [ "${STATUS}" = "SUCCESS" ]; then
+              echo "Build succeeded."
+              break
+            elif [ "${STATUS}" = "FAILURE" ] || [ "${STATUS}" = "CANCELLED" ] || [ "${STATUS}" = "TIMEOUT" ]; then
+              echo "Build failed: ${STATUS}"
+              exit 1
+            fi
+            sleep 10
+          done
+          if [ "${STATUS}" != "SUCCESS" ]; then
+            echo "Build timed out waiting (status=${STATUS})"; exit 1
+          fi
 
       - name: Deploy to Cloud Run
         run: |
