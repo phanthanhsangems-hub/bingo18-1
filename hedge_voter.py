@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 _HEDGE_CONFIG_KEY = 'hedge_log_weights'
 _DEFAULT_ETA = 0.05         # learning rate; 0.05 → slower decay, prevents single-voter dominance
 _HEDGE_WARMUP = 20          # minimum draw updates before Hedge takes effect
-_HEDGE_MULT_MIN = 0.3       # clamp floor, matches existing WR multiplier range
+_HEDGE_MULT_MIN = 0.5       # clamp floor — raised from 0.3 to preserve diversity among active voters
 _HEDGE_MULT_MAX = 3.0       # clamp ceiling
+_PRUNE_LOG_W_FLOOR = -100.0 # voters below this are unrecoverable; pruned during backfill
 
 
 class HedgeWeights:
@@ -158,7 +159,8 @@ def update_hedge_from_draw(db, vote_breakdown: dict, actual_numbers: List[int]) 
 
 # ── CLI: warm-start from historical vote_breakdown data ──────────────────────
 
-def _backfill(db, limit: int = 5000, eta: float = _DEFAULT_ETA) -> HedgeWeights:
+def _backfill(db, limit: int = 5000, eta: float = _DEFAULT_ETA,
+              prune_threshold: float = _PRUNE_LOG_W_FLOOR) -> HedgeWeights:
     """Replay historical draws in chronological order to warm-start Hedge weights."""
     from models import SizePredictor, _parse_numbers
 
@@ -203,6 +205,11 @@ def _backfill(db, limit: int = 5000, eta: float = _DEFAULT_ETA) -> HedgeWeights:
         except Exception:
             continue
 
+    before = len(hw.log_weights)
+    hw.log_weights = {v: lw for v, lw in hw.log_weights.items() if lw >= prune_threshold}
+    pruned = before - len(hw.log_weights)
+    if pruned:
+        print(f"  Pruned {pruned} dead voters (log_w < {prune_threshold})")
     return hw
 
 
@@ -222,6 +229,8 @@ if __name__ == "__main__":
                         help="Show current weights stored in DB")
     parser.add_argument("--limit", type=int, default=5000, help="Max historical rows for backfill")
     parser.add_argument("--eta", type=float, default=_DEFAULT_ETA, help="Learning rate")
+    parser.add_argument("--prune-threshold", type=float, default=_PRUNE_LOG_W_FLOOR,
+                        help=f"Prune voters with log_w below this after backfill (default: {_PRUNE_LOG_W_FLOOR})")
     args = parser.parse_args()
 
     db_mgr = DatabaseManager()
@@ -241,7 +250,7 @@ if __name__ == "__main__":
 
     if args.backfill:
         print(f"Backfilling from up to {args.limit} historical draws (η={args.eta})…")
-        hw = _backfill(db_mgr, limit=args.limit, eta=args.eta)
+        hw = _backfill(db_mgr, limit=args.limit, eta=args.eta, prune_threshold=args.prune_threshold)
         print(f"Processed {hw.n_updates} draws.")
         mults = hw.get_multipliers()
         print(f"\n{'Voter':<28}  {'log_w':>8}  {'mult':>6}")
