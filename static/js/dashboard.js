@@ -137,19 +137,6 @@ async function loadNextPrediction() {
   const vbAdapt = document.getElementById('vb-adaptive');
   if (vb&&vb.all_votes&&vbPanel&&vbWrap) {
     const SL = {NHO:'NHỎ',HOA:'HÒA',LON:'LỚN'};
-    // Update Markov field to show actual vote, not state count
-    const markovEl = document.getElementById('pred-markov');
-    if (markovEl) {
-      const _MC = {NHO:'var(--cyan)',HOA:'var(--gold)',LON:'var(--magenta)'};
-      const mvote = vb.all_votes['markov'];
-      if (mvote) {
-        markovEl.textContent = SL[mvote]||mvote;
-        markovEl.style.color = _MC[mvote]||'';
-      } else if (vb.markov_abstained) {
-        markovEl.textContent = 'abstain';
-        markovEl.style.color = 'var(--dim)';
-      }
-    }
     const tally = {NHO:0,HOA:0,LON:0};
     const det = vb.all_votes_detail||{};
     const win = vb.majority_size||'';
@@ -172,9 +159,6 @@ async function loadNextPrediction() {
         <td class="r">${wpct}<span class="vb-w-bar ${sz.toLowerCase()}" style="width:${bw}px"></span></td>
         <td class="r"><span class="vb-mult ${mc}">${ms}</span></td></tr>`;
     }
-    if (vb.markov_abstained&&!vb.all_votes['markov'])
-      rows+=`<tr style="opacity:.35"><td>markov<span style="color:var(--dim);font-size:9px;margin-left:3px">abstain</span></td>
-        <td><span class="vb-badge">—</span></td><td class="r" style="color:var(--dim)">≤25%</td><td class="r">—</td><td class="r">—</td></tr>`;
     vbWrap.innerHTML=`<table class="vb-table">
       <thead><tr><th>Voter</th><th>Vote</th><th class="r">Conf</th><th class="r">Weight</th><th class="r">Mult</th></tr></thead>
       <tbody>${rows}</tbody></table>`;

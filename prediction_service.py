@@ -1274,9 +1274,10 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # P40: removed cold(29%), ensemble(28.4%), fwbr_w30(25.8%), fwbr_w60(32.3%) —
     # all NHO-biased with negative edge, adding noise not signal.
     # P49: removed hybrid (WR 31.5%, NHO-biased 58%, below baseline — adds noise).
+    # P50: removed markov (-40.2 Hedge log_w, 90% fallback rate) and
+    #       markov2_size (-42.7), size_freq (-32.5) — all confirmed negative edge.
     # prior_nho raised 0.36→0.44 to replace hybrid's NHO signal with a cleaner anchor.
     candidates = [
-        ('markov',    hybrid.markov_model, False),
         ('ml',        hybrid.ml_model,     True),
     ]
 
@@ -1289,19 +1290,12 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
         candidates.append(('lstm_full', lstm_full_voter, False))
 
     votes = []
-    _markov_abstained = False
     for name, model, use_df in candidates:
         try:
             arg  = df if use_df else recent_draws
             preds = model.predict(arg, next_draw)
             if preds:
                 nums, conf = preds[0]
-                # P52: exclude Markov when in hot-number fallback (conf≤0.25 = state not found,
-                # LON-biased 43% vs baseline 37.5% — confirmed 90% fallback rate in DB)
-                if name == 'markov' and float(conf) <= 0.25:
-                    logger.debug("Markov abstain: fallback mode (conf=%.2f)", conf)
-                    _markov_abstained = True
-                    continue
                 nums = [int(n) for n in nums]
                 if len(nums) == 3:
                     size = SizePredictor._cat(sum(nums))
@@ -1309,26 +1303,6 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                     votes.append({'name': name, 'nums': nums, 'size': size, 'conf': _conf})
         except Exception as e:
             logger.debug("MajorityVote skip %s: %s", name, e)
-
-    # ── Order-2 SIZE Markov voter ───────────────────────────────
-    try:
-        if len(df) >= 2:
-            from models import _parse_numbers as _pn_m2
-            _s_prev1 = SizePredictor._cat(sum(int(x) for x in _pn_m2(df.iloc[0]['numbers'])))
-            _s_prev2 = SizePredictor._cat(sum(int(x) for x in _pn_m2(df.iloc[1]['numbers'])))
-            _m2state = (_s_prev2, _s_prev1)
-            _m2row = _SIZE_MARKOV2.get(_m2state)
-            if _m2row:
-                _p_nho, _, _p_lon = _m2row
-                _m2_winner = 'NHO' if _p_nho >= _p_lon else 'LON'
-                _m2_edge   = abs(max(_p_nho, _p_lon) - 0.375)
-                _m2_conf   = round(min(0.38, max(0.25, 0.25 + _m2_edge * 10)), 3)
-                _m2_nums   = [1, 1, 1] if _m2_winner == 'NHO' else [4, 5, 6]
-                votes.append({'name': 'markov2_size', 'nums': _m2_nums,
-                              'size': _m2_winner, 'conf': _m2_conf})
-                logger.debug("markov2_size: state=%s→%s conf=%.3f", _m2state, _m2_winner, _m2_conf)
-    except Exception as _m2e:
-        logger.debug("markov2_size voter error: %s", _m2e)
 
     # ── G: Sum transition voter — P(NHO|prev_sum) vs P(LON|prev_sum) ────────────
     try:
@@ -1347,30 +1321,6 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                               'size': _st_winner, 'conf': _st_conf})
     except Exception as _ge:
         logger.debug("sum_transition voter error: %s", _ge)
-
-    # ── H: SIZE frequency voter — low freq → continue; high freq → reverse ──────
-    # Signal from 6000-kỳ: freq=3/10 → stay 54.6% (2.3σ); freq=4/10 → reverse 52.8% (1.7σ)
-    try:
-        if len(df) >= 10:
-            from models import _parse_numbers as _pn_h
-            _prev_sz_h = SizePredictor._cat(sum(int(x) for x in _pn_h(df.iloc[0]['numbers'])))
-            if _prev_sz_h != 'HOA':
-                _freq10 = sum(
-                    1 for row in df.head(10).itertuples()
-                    if SizePredictor._cat(sum(int(x) for x in _pn_h(row.numbers))) == _prev_sz_h
-                )
-                if _freq10 <= 3:
-                    # Continuation more likely (stay with same SIZE)
-                    votes.append({'name': 'size_freq', 'nums': [1,1,1] if _prev_sz_h=='NHO' else [5,6,6],
-                                  'size': _prev_sz_h, 'conf': 0.27})
-                elif _freq10 >= 4:
-                    # Reversal slightly more likely
-                    _h_opp = 'LON' if _prev_sz_h == 'NHO' else 'NHO'
-                    _h_conf = round(min(0.28, 0.25 + (_freq10 - 3) * 0.01), 3)
-                    votes.append({'name': 'size_freq', 'nums': [1,1,1] if _h_opp=='NHO' else [5,6,6],
-                                  'size': _h_opp, 'conf': _h_conf})
-    except Exception as _he:
-        logger.debug("size_freq voter error: %s", _he)
 
     # ── BOCPD regime voter — Bayesian Online Changepoint Detection over the
     # SIZE sequence. Conservative hazard (expected run ~120 draws) so it mostly
@@ -1587,7 +1537,6 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
         'voters':          [v['name'] for v in majority_votes],
         'all_votes':       {v['name']: v['size'] for v in votes},
         'all_votes_detail':  _detail,
-        'markov_abstained':  _markov_abstained,
         'adaptive':          {k: round(v, 3) for k, v in (_at or {}).items()},
         'bocpd_dist':        _bocpd_dist,
     }
@@ -1653,8 +1602,6 @@ def _send_explain_breakdown(db, telegram, draw_number: int):
                 f"{'✅' if won else '❌'} <b>{vname}</b>: {SIZE_EMJ.get(sz,'⚪')}{sz} "
                 f"conf {c:.0%}  ×{mult:.2f}{decay_str}{streak_str}  → {eff_pct:.1f}%"
             )
-        if vb.get('markov_abstained'):
-            voter_lines.append("⏸ <i>markov abstained</i>")
 
         sw_parts = [
             f"{SIZE_EMJ.get(sz,'')}{sz} {round(size_w.get(sz,0)/sw_total*100)}%"
