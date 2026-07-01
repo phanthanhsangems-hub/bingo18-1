@@ -3890,7 +3890,6 @@ function switchTab(tab) {
 
 function initBottomNav() {
   document.querySelectorAll('.bottom-nav a').forEach(a => {
-    if (a.id === 'nav-art') return; // external page link, keep default navigation
     a.addEventListener('click', e => {
       e.preventDefault();
       switchTab(a.id.replace('nav-', ''));
@@ -3926,11 +3925,11 @@ setInterval(refreshAll, REFRESH_INTERVAL);
 updateCheckpoint();
 setInterval(updateCheckpoint, 60000);
 // ── Keyboard shortcuts ───────────────────────────────────────
-const _TABS = ['signal','signal','wr','streak','analysis','tools','search'];
+const _TABS = ['top','signal','wr','analysis','tools','search'];
 const _KBD_HELP = [
   ['R','Refresh toàn bộ dữ liệu'],
   ['T','Về tab Top'],
-  ['1 – 7','Chuyển tab (Tín hiệu → Tra cứu)'],
+  ['1 – 6','Chuyển tab (Top → Tra cứu)'],
   ['/','Mở ô tìm kiếm lịch sử'],
   ['C','Mở combo calculator'],
   ['?','Hiện / ẩn bảng phím tắt'],
@@ -3996,13 +3995,13 @@ document.addEventListener('keydown', e => {
   if (inInput) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-  const _TAB_LABELS = {top:'Top', signal:'Tín hiệu', wr:'Win Rate', streak:'Streak', analysis:'Phân tích', tools:'Hệ thống', search:'Tra cứu'};
+  const _TAB_LABELS = {top:'Top', signal:'Tín hiệu', wr:'Win Rate', analysis:'Phân tích', tools:'Hệ thống', search:'Tra cứu'};
   const k = e.key.toLowerCase();
   if (k === 'r') { e.preventDefault(); refreshAll(); _showKbdToast('↻ Refreshing…'); }
   else if (k === 't') { e.preventDefault(); switchTab('top'); }
   else if (k === '/') { e.preventDefault(); const el=document.getElementById('srch-input'); switchTab('search'); if(el) setTimeout(()=>el.focus(),350); }
   else if (k === 'c') { e.preventDefault(); const el=document.getElementById('cn1'); switchTab('search'); if(el) setTimeout(()=>el.focus(),350); }
-  else if (e.key >= '1' && e.key <= '7') {
+  else if (e.key >= '1' && e.key <= '6') {
     e.preventDefault();
     const tab = _TABS[parseInt(e.key)-1];
     if (tab) { switchTab(tab); _showKbdToast('→ ' + (_TAB_LABELS[tab] || tab)); }
