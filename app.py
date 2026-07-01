@@ -11285,6 +11285,294 @@ def today_combos():
         return jsonify({'error': str(e)}), 500
 
 
+# ─── P56: daily-summary-evening ──────────────────────────────────────────────
+@app.route('/api/daily-summary-evening', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
+def daily_summary_evening():
+    """
+    P56: Báo cáo sơ kết 22h — gửi Telegram.
+    Cloud Scheduler gọi lúc 22:05 giờ VN (15:05 UTC).
+    """
+    import itertools
+    from collections import defaultdict, Counter as _Counter2
+    from datetime import datetime, timedelta, timezone
+    from telegram_bot import TelegramBot
+
+    secret = request.args.get('secret') or request.headers.get('X-Trigger-Secret', '')
+    if secret and secret != config.TRIGGER_SECRET:
+        return jsonify({'error': 'unauthorized'}), 403
+
+    try:
+        from database import USE_POSTGRES as _USE_PG
+        vn_tz  = timezone(timedelta(hours=7))
+        now_vn = datetime.now(vn_tz)
+        date_str = now_vn.strftime('%d/%m/%Y')
+
+        conn = db.get_connection()
+        cur  = conn.cursor()
+
+        _TODAY_PRED = (
+            "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
+            "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
+        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours')"
+
+        # ── 1. Tổng predictions hôm nay ──────────────────────────
+        cur.execute(f"""
+            SELECT COUNT(*),
+                   SUM(CASE WHEN COALESCE(pr.is_win_size, pr.is_win, FALSE) THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN COALESCE(pr.is_win_sum,  FALSE) THEN 1 ELSE 0 END)
+            FROM prediction_results pr
+            JOIN predictions p ON p.id = pr.prediction_id
+            WHERE {_TODAY_PRED}
+        """)
+        row = cur.fetchone()
+        total    = row[0] or 0
+        wins     = row[1] or 0
+        sum_wins = row[2] or 0
+        losses   = total - wins
+        win_rate     = wins / total if total > 0 else 0
+        sum_win_rate = sum_wins / total if total > 0 else 0
+
+        # ── 2. SIZE breakdown ─────────────────────────────────────
+        size_rows        = {}
+        size_actual_rows = {}
+        if _USE_PG:
+            cur.execute(f"""
+                SELECT
+                    CASE WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
+                         WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
+                         ELSE 'LON' END AS pred_size,
+                    COUNT(*),
+                    SUM(CASE WHEN COALESCE(pr.is_win_size, pr.is_win, FALSE) THEN 1 ELSE 0 END)
+                FROM prediction_results pr
+                JOIN predictions p ON p.id = pr.prediction_id
+                WHERE {_TODAY_PRED}
+                GROUP BY pred_size ORDER BY COUNT(*) DESC
+            """)
+            size_rows = {r[0]: (r[1], r[2] or 0) for r in cur.fetchall()}
+
+            cur.execute(f"""
+                SELECT
+                    CASE WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 9  THEN 'NHO'
+                         WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 11 THEN 'HOA'
+                         ELSE 'LON' END AS actual_size,
+                    COUNT(*) AS cnt
+                FROM prediction_results pr
+                JOIN predictions p ON p.id = pr.prediction_id
+                WHERE {_TODAY_PRED} AND pr.actual_numbers IS NOT NULL
+                GROUP BY actual_size
+            """)
+            size_actual_rows = {r[0]: r[1] for r in cur.fetchall()}
+
+        # ── 3. W/L trail + streak ─────────────────────────────────
+        cur.execute(f"""
+            SELECT COALESCE(pr.is_win_size, pr.is_win, FALSE)
+            FROM prediction_results pr
+            WHERE {_TODAY_PRED}
+            ORDER BY pr.draw_number ASC
+        """)
+        wl_seq = [r[0] for r in cur.fetchall()]
+
+        # ── 4. Draws hôm nay ─────────────────────────────────────
+        if _USE_PG:
+            cur.execute("""
+                SELECT draw_number, numbers FROM draw_history
+                WHERE (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                ORDER BY draw_number ASC
+            """)
+        else:
+            cur.execute("""
+                SELECT draw_number, numbers FROM draw_history
+                WHERE date(datetime(draw_time, '+7 hours')) = date('now', '+7 hours')
+                ORDER BY draw_number ASC
+            """)
+        draw_rows = cur.fetchall()
+
+        # ── 5. Alerts hôm nay ────────────────────────────────────
+        alert_count = 0
+        if _USE_PG:
+            cur.execute("""
+                SELECT COUNT(*) FROM alert_log
+                WHERE fired_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh'
+                      >= NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh' - INTERVAL '24 hours'
+            """)
+            alert_count = (cur.fetchone() or [0])[0] or 0
+
+        # ── 6. Rolling 100 ────────────────────────────────────────
+        cur.execute("""
+            SELECT COALESCE(pr.is_win_size, pr.is_win, FALSE)
+            FROM prediction_results pr
+            WHERE pr.actual_numbers IS NOT NULL
+            ORDER BY pr.draw_number DESC LIMIT 100
+        """)
+        last100 = [r[0] for r in cur.fetchall()]
+        wr100 = sum(1 for w in last100 if w) / len(last100) if last100 else None
+
+        conn.close()
+
+        # ── Process draws ─────────────────────────────────────────
+        number_freq = _Counter2()
+        pair_count = triple_count = alldiff_count = 0
+        combo_draws_map: dict = defaultdict(list)
+
+        for draw_num, nums_raw in draw_rows:
+            try:
+                nums = json.loads(nums_raw) if isinstance(nums_raw, str) else list(nums_raw)
+                nums = [int(n) for n in nums]
+                number_freq.update(nums)
+                key = tuple(sorted(nums))
+                combo_draws_map[key].append(int(draw_num))
+                cnt_nums = _Counter2(nums)
+                mx = max(cnt_nums.values()) if cnt_nums else 0
+                if mx == 3:
+                    triple_count += 1
+                elif mx == 2:
+                    pair_count += 1
+                else:
+                    alldiff_count += 1
+            except Exception:
+                continue
+
+        total_draws_today = len(draw_rows)
+
+        # Combo coverage
+        all_combos      = list(itertools.combinations_with_replacement(range(1, 7), 3))
+        appeared_combos = [c for c in all_combos if c in combo_draws_map]
+        not_appr_combos = [c for c in all_combos if c not in combo_draws_map]
+        coverage_pct    = round(len(appeared_combos) / 56 * 100, 1)
+        top_appeared    = sorted(appeared_combos, key=lambda c: -len(combo_draws_map[c]))[:3]
+        top_not_appeared = not_appr_combos[:5]
+
+        # Hot / cold
+        hot_nums  = number_freq.most_common(3)
+        cold_nums = sorted(((n, number_freq.get(n, 0)) for n in range(1, 7)), key=lambda x: x[1])[:3]
+
+        # Streaks
+        max_win = cur_win = max_loss = cur_loss = 0
+        for w in wl_seq:
+            if w:
+                cur_win += 1; max_win = max(max_win, cur_win); cur_loss = 0
+            else:
+                cur_loss += 1; max_loss = max(max_loss, cur_loss); cur_win = 0
+
+        cur_streak_val = 0
+        cur_streak_type = None
+        if wl_seq:
+            last_val = wl_seq[-1]
+            cur_streak_type = 'win' if last_val else 'loss'
+            for w in reversed(wl_seq):
+                if w == last_val:
+                    cur_streak_val += 1
+                else:
+                    break
+
+        trail = ''.join('✅' if w else '❌' for w in wl_seq[-20:])
+
+        # ── Build message ─────────────────────────────────────────
+        BASELINE    = 0.375
+        diff_today  = (win_rate - BASELINE) * 100
+        status_icon = '🔥' if win_rate >= 0.44 else ('✅' if win_rate >= BASELINE else '⚠️')
+
+        _SL = {'NHO': '🔵NHỎ', 'HOA': '🟡HÒA', 'LON': '🔴LỚN'}
+        size_line = ''
+        if size_rows:
+            parts = []
+            for sz in ['NHO', 'HOA', 'LON']:
+                if sz in size_rows:
+                    t, w = size_rows[sz]
+                    parts.append(f'{_SL[sz]} {w}/{t}({w/t*100:.0f}%)' if t else f'{_SL[sz]} 0')
+            size_line = '📐 SIZE dự: ' + '  '.join(parts) + '\n'
+        if size_actual_rows:
+            act_total = sum(size_actual_rows.values()) or 1
+            act_parts = [
+                f'{_SL[sz]} {size_actual_rows.get(sz,0)}({size_actual_rows.get(sz,0)/act_total*100:.0f}%)'
+                for sz in ['NHO', 'HOA', 'LON']
+            ]
+            size_line += '📐 SIZE thực: ' + '  '.join(act_parts) + '\n'
+
+        combo_top_str  = '  '.join(
+            f"{'-'.join(str(x) for x in c)}(×{len(combo_draws_map[c])})" for c in top_appeared
+        )
+        combo_miss_str = '  '.join('-'.join(str(x) for x in c) for c in top_not_appeared)
+        combo_line = (
+            f'🎰 Combo: <b>{len(appeared_combos)}/56</b> = {coverage_pct}%\n'
+            f'  🔥 Ra nhiều: {combo_top_str if combo_top_str else "N/A"}\n'
+            f'  ❄️ Chưa ra (top5): {combo_miss_str if combo_miss_str else "Tất cả đã ra!"}\n'
+        )
+
+        hot_str  = '  '.join(f'[{n}]×{c}' for n, c in hot_nums)
+        cold_str = '  '.join(f'[{n}]×{c}' for n, c in cold_nums)
+        freq_str = '  '.join(f'{n}:{number_freq.get(n,0)}' for n in range(1, 7))
+        hotcold_line = (
+            f'🔥 Số nóng: {hot_str}\n'
+            f'❄️ Số lạnh: {cold_str}\n'
+            f'📊 Tần suất 1-6: {freq_str}\n'
+        )
+
+        p_pct = pair_count / total_draws_today * 100 if total_draws_today else 0
+        t_pct = triple_count / total_draws_today * 100 if total_draws_today else 0
+        pair_line = f'🔗 Pair: {pair_count}({p_pct:.0f}%)  Triple: {triple_count}({t_pct:.0f}%)  AllDiff: {alldiff_count}\n'
+
+        wr100_line = (
+            f'📈 Rolling 100: <b>{wr100*100:.1f}%</b> {"✅" if wr100 >= BASELINE else "⚠️"}\n'
+            if wr100 else ''
+        )
+
+        streak_line = ''
+        if cur_streak_type == 'loss' and cur_streak_val >= 2:
+            streak_line = f'❄️ Đang thua <b>{cur_streak_val} kỳ cuối</b>\n'
+        elif cur_streak_type == 'win' and cur_streak_val >= 3:
+            streak_line = f'🔥 Đang thắng <b>{cur_streak_val} kỳ cuối</b>\n'
+
+        alert_line = ''
+        if alert_count > 0:
+            al_icon    = '🔴' if alert_count >= 5 else ('🟡' if alert_count >= 2 else '🔵')
+            alert_line = f'{al_icon} Alerts hôm nay: <b>{alert_count}</b>\n'
+
+        sign = '+' if diff_today >= 0 else ''
+        msg = (
+            f'📋 <b>SƠ KẾT 22H — {date_str}</b>\n'
+            f'━━━━━━━━━━━━━━━━━━━\n'
+            f'🎯 Dự đoán: <b>{total} kỳ</b>  |  Lượt quay: <b>{total_draws_today}</b>\n'
+            f'{status_icon} Thắng SIZE: <b>{wins}/{total}</b> = <b>{win_rate*100:.1f}%</b>'
+            f' ({sign}{diff_today:.1f}% vs 37.5%)\n'
+            f'🎲 Đúng tổng: {sum_wins}/{total} ({sum_win_rate*100:.1f}%)\n'
+            f'━━━━━━━━━━━━━━━━━━━\n'
+            f'{size_line}'
+            f'{wr100_line}'
+            f'🔥 WIN streak max: <b>{max_win}</b>  ❄️ LOSS streak max: <b>{max_loss}</b>\n'
+            f'{streak_line}'
+            f'━━━━━━━━━━━━━━━━━━━\n'
+            f'{combo_line}'
+            f'{hotcold_line}'
+            f'{pair_line}'
+            f'━━━━━━━━━━━━━━━━━━━\n'
+            f'{alert_line}'
+            f'20 kỳ cuối: {trail}\n'
+            f'🕙 {now_vn.strftime("%H:%M")} VN · Còn ~2h đến tổng kết'
+        )
+
+        tg   = TelegramBot()
+        sent = tg.send_message(msg)
+
+        return jsonify({
+            'status':            'ok',
+            'sent':              sent,
+            'date':              date_str,
+            'total_predictions': total,
+            'wins':              wins,
+            'win_rate':          round(win_rate, 4),
+            'total_draws_today': total_draws_today,
+            'combo_coverage':    f'{len(appeared_combos)}/56',
+            'coverage_pct':      coverage_pct,
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
 def create_app():
     import logging
     import threading
