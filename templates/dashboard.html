@@ -277,6 +277,12 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="voter-fresh-note" style="display:none;font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px"></div>
   </div>
 
+  <!-- PAIR TODAY (moved from Streak tab) -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="panel-ttl">Cặp số hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· cặp số xuất hiện cùng nhiều nhất</span></div>
+    <div id="pair-today-body"><span class="loading">Đang tải</span></div>
+  </div>
+
   </div>
   <div class="tab-panel" id="tab-wr" data-tab="wr">
   <div class="sec-hdr" id="sec-wr"><span class="sec-title">WIN RATE & HIỆU SUẤT</span></div>
@@ -345,34 +351,11 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
 
 
 
-  <!-- DRAW SPEED #26 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Draw Speed Monitor <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· khoảng cách giữa các kỳ</span></div>
-    <div id="draw-speed-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-
   <!-- DB MONITOR #53 -->
   <div class="card" style="margin-bottom:14px">
     <div class="panel-ttl">DB Monitor <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· latency &amp; table stats</span></div>
     <div id="db-monitor-body"><span class="loading">Đang tải</span></div>
   </div>
-
-  <!-- PWA install banner #51 -->
-  <div id="pwa-banner" style="display:none;background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.25);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;display:flex;align-items:center;gap:10px">
-    <span style="flex:1">📲 Cài Bingo18 như app trên thiết bị này</span>
-    <button id="pwa-install-btn" class="mwr-n-btn active" style="font-size:11px;padding:4px 10px">Cài</button>
-    <button onclick="document.getElementById('pwa-banner').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px">✕</button>
-  </div>
-
-
-  <!-- NUMBER BY HOUR #38 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Số hot theo giờ <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· heatmap giờ VN × số 1-6</span></div>
-    <div id="nbh-body"><span class="loading">Đang tải</span></div>
-  </div>
-
 
   <!-- MODEL VS RANDOM #39 -->
   <div class="card" style="margin-bottom:14px">
@@ -387,17 +370,6 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="mvr-body"><span class="loading">Đang tải</span></div>
   </div>
 
-
-  </div>
-  <div class="tab-panel" id="tab-streak" data-tab="streak">
-  <div class="sec-hdr" id="sec-streak"><span class="sec-title">CHUỖI & STREAK</span></div>
-
-
-  <!-- PAIR TODAY #66 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Cặp số hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· cặp số xuất hiện cùng nhiều nhất</span></div>
-    <div id="pair-today-body"><span class="loading">Đang tải</span></div>
-  </div>
 
   </div>
   <div class="tab-panel" id="tab-analysis" data-tab="analysis">
@@ -458,11 +430,6 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
     <div id="wl-calendar-body"><span class="loading">Đang tải</span></div>
   </div>
 
-
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Ma trận cặp số <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· tần suất đồng xuất hiện · 500 kỳ</span></div>
-    <div id="number-pair-matrix-body"><span class="loading">Đang tải</span></div>
-  </div>
 
   <!-- COMBO HOT TODAY #63 -->
   <div class="card" style="margin-bottom:14px">
@@ -684,11 +651,9 @@ window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
   <a href="#" id="nav-top" class="active"><span class="nav-ico">🏠</span>Top</a>
   <a href="#sec-signal" id="nav-signal"><span class="nav-ico">📡</span>Tín hiệu</a>
   <a href="#sec-wr" id="nav-wr"><span class="nav-ico">📊</span>Win Rate</a>
-  <a href="#sec-streak" id="nav-streak"><span class="nav-ico">🔥</span>Streak</a>
   <a href="#sec-analysis" id="nav-analysis"><span class="nav-ico">🔍</span>Phân tích</a>
   <a href="#sec-tools" id="nav-tools"><span class="nav-ico">⚙️</span>Hệ thống</a>
   <a href="#sec-search" id="nav-search"><span class="nav-ico">🔎</span>Tra cứu</a>
-  <a href="/art" id="nav-art"><span class="nav-ico">✦</span>Art</a>
 </nav>
 
 <script src="/static/js/dashboard.js"></script>
