@@ -1320,10 +1320,11 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # P49: removed hybrid (WR 31.5%, NHO-biased 58%, below baseline — adds noise).
     # P50: removed markov (-40.2 Hedge log_w, 90% fallback rate) and
     #       markov2_size (-42.7), size_freq (-32.5) — all confirmed negative edge.
+    # P51: removed ml (WR 34.7%, Hedge log_w -163/η=0.05 over 4994 draws; after Hedge
+    #       pruned it from DB, it reset to 0.925x WR-based mult instead of 0.5x floor,
+    #       making it more influential than suppressed — negative edge, removed).
     # prior_nho raised 0.36→0.44 to replace hybrid's NHO signal with a cleaner anchor.
-    candidates = [
-        ('ml',        hybrid.ml_model,     True),
-    ]
+    candidates = []
 
     lstm_voter = selector.get_model('lstm')
     if lstm_voter and getattr(lstm_voter, 'model', None) is not None:
@@ -1629,7 +1630,7 @@ def _send_explain_breakdown(db, telegram, draw_number: int):
         detail     = vb.get('all_votes_detail', {})
 
         voter_lines = []
-        for vname in ['ml', 'markov', 'prior_nho', 'prior_lon']:
+        for vname in ['prior_nho', 'prior_lon', 'sum_transition', 'regime_bocpd']:
             d = detail.get(vname)
             if d is None:
                 continue
