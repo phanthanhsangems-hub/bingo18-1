@@ -11203,6 +11203,88 @@ def weight_optimizer():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/today-combos')
+@limiter.limit("30 per minute")
+def today_combos():
+    """P55: Combos (3-number sets) appeared today vs not-appeared yet (VN time).
+
+    Returns all 56 possible unordered multisets of {1..6} choose 3.
+    'appeared'     = list of combos seen today, sorted by count desc.
+    'not_appeared' = list of combos not yet seen today, sorted by sum asc.
+    """
+    try:
+        import itertools
+        from collections import defaultdict
+        from datetime import datetime, timezone, timedelta
+
+        conn = db.get_connection()
+        cur  = conn.cursor()
+
+        if USE_POSTGRES:
+            cur.execute("""
+                SELECT draw_number, numbers, draw_time
+                FROM draw_history
+                WHERE (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                ORDER BY draw_number ASC
+            """)
+        else:
+            cur.execute("""
+                SELECT draw_number, numbers, draw_time
+                FROM draw_history
+                WHERE date(datetime(draw_time, '+7 hours')) = date('now', '+7 hours')
+                ORDER BY draw_number ASC
+            """)
+
+        rows = cur.fetchall()
+        conn.close()
+
+        combo_draws: dict = defaultdict(list)  # (a,b,c) -> [draw_number, ...]
+        for draw_number, numbers_raw, draw_time in rows:
+            try:
+                nums = json.loads(numbers_raw) if isinstance(numbers_raw, str) else numbers_raw
+                key  = tuple(sorted(int(x) for x in nums))
+                combo_draws[key].append(int(draw_number))
+            except Exception:
+                continue
+
+        all_combos = list(itertools.combinations_with_replacement(range(1, 7), 3))
+
+        appeared     = []
+        not_appeared = []
+        for combo in all_combos:
+            s    = sum(combo)
+            size = 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
+            entry = {'combo': list(combo), 'label': f"{combo[0]}-{combo[1]}-{combo[2]}",
+                     'sum': s, 'size': size}
+            if combo in combo_draws:
+                entry['count'] = len(combo_draws[combo])
+                entry['draws'] = combo_draws[combo]
+                appeared.append(entry)
+            else:
+                not_appeared.append(entry)
+
+        appeared.sort(key=lambda x: -x['count'])
+        not_appeared.sort(key=lambda x: x['sum'])
+
+        vn_now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
+        total_draws = sum(len(v) for v in combo_draws.values())
+
+        return jsonify({
+            'date':               vn_now.strftime('%Y-%m-%d'),
+            'vn_time':            vn_now.strftime('%H:%M'),
+            'total_draws_today':  total_draws,
+            'total_unique_combos': 56,
+            'appeared_count':     len(appeared),
+            'not_appeared_count': len(not_appeared),
+            'coverage_pct':       round(len(appeared) / 56 * 100, 1),
+            'appeared':           appeared,
+            'not_appeared':       not_appeared,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 def create_app():
     import logging
     import threading
