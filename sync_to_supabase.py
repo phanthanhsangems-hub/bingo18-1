@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────
 DB_CONFIG = {
     'host':            os.environ['DB_HOST'],
-    'port':            int(os.environ.get('DB_PORT', 5432)),
+    'port':            int(os.environ.get('DB_PORT') or 5432),
     'dbname':          os.environ.get('DB_NAME', 'postgres'),
     'user':            os.environ['DB_USER'],
     'password':        os.environ['DB_PASSWORD'],
