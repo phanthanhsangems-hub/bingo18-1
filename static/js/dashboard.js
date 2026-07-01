@@ -196,6 +196,15 @@ async function loadNextPrediction() {
           ` <span class="hoa">${e.HOA!=null?(e.HOA*100).toFixed(0)+'%':'—'}</span>`+
           ` <span class="lon">${e.LON!=null?(e.LON*100).toFixed(0)+'%':'—'}</span></span>`;
       }
+      if (vb.prediction_set && vb.prediction_set.length) {
+        const _SLV={NHO:'NHỎ',HOA:'HÒA',LON:'LỚN'};
+        const ps=vb.prediction_set;
+        const psStr=ps.map(c=>`<span class="${c.toLowerCase()}">${_SLV[c]||c}</span>`).join('·');
+        const unc=ps.length>=2;
+        const qStr=vb.conformal_q!=null?` <span style="color:var(--dim);font-size:10px">q=${vb.conformal_q}</span>`:'';
+        adaptHtml+=`<span style="margin-left:6px" title="Split Conformal α=0.20 · tập dự đoán phủ ≥80% · ${unc?'bất định':'tự tin'}">`
+          +`${unc?'⚠':'🎯'} <span style="color:var(--${unc?'gold':'cyan'})">${psStr}</span>${qStr}</span>`;
+      }
       vbAdapt.innerHTML = adaptHtml;
     }
     vbPanel.style.display='';
