@@ -29,9 +29,9 @@ class TelegramBot:
                 json={"chat_id": self.chat_id, "text": text, "parse_mode": "HTML"},
                 timeout=10
             )
-            if r.ok:
+            if r.ok and r.json().get('ok'):
                 return True
-            if r.status_code == 400 and "parse" in r.text:
+            if r.status_code == 400 or (r.ok and not r.json().get('ok')):
                 import re
                 plain = re.sub(r'<[^>]+>', '', text)
                 r2 = requests.post(
@@ -39,9 +39,9 @@ class TelegramBot:
                     json={"chat_id": self.chat_id, "text": plain},
                     timeout=10
                 )
-                if r2.ok:
+                if r2.ok and r2.json().get('ok'):
                     return True
-            logger.error("Telegram error %d: %s", r.status_code, r.text[:200])
+            logger.error("Telegram error %d: %s", r.status_code, r.text[:300])
             return False
         except Exception as e:
             logger.error("Telegram send error: %s", e)
