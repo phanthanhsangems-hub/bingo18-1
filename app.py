@@ -3720,6 +3720,89 @@ def system_health_badge():
         return jsonify({'error': str(e), 'status': 'unknown'}), 500
 
 
+@app.route('/api/algo-impact')
+@limiter.limit("20 per minute")
+def algo_impact():
+    """Compare win rate before vs after algorithm deployment.
+
+    Auto-detects cutoff as the first draw with bocpd_dist in vote_breakdown
+    (i.e., first draw after BOCPD/Hedge/Conformal went live).
+    Optional: ?since_draw=N to override cutoff manually.
+    """
+    try:
+        conn = db.get_connection()
+        cur = conn.cursor()
+        since_draw = request.args.get('since_draw', type=int)
+
+        if USE_POSTGRES:
+            if since_draw is None:
+                cur.execute("""
+                    SELECT MIN(draw_number) FROM predictions
+                    WHERE vote_breakdown IS NOT NULL
+                      AND vote_breakdown::jsonb->>'bocpd_dist' IS NOT NULL
+                """)
+                row = cur.fetchone()
+                since_draw = row[0] if row and row[0] else None
+
+            if since_draw is None:
+                conn.close()
+                return jsonify({'error': 'no_algo_data', 'message': 'Chưa có draw nào sau khi deploy thuật toán'}), 200
+
+            cur.execute("""
+                SELECT
+                    p.draw_number < %s AS is_before,
+                    COALESCE(pr.is_win_size, pr.is_win, FALSE) AS win
+                FROM predictions p
+                JOIN prediction_results pr ON pr.prediction_id = p.id
+                WHERE pr.actual_numbers IS NOT NULL
+                ORDER BY p.draw_number
+            """, (since_draw,))
+        else:
+            conn.close()
+            return jsonify({'error': 'postgres_only'}), 200
+
+        rows = cur.fetchall()
+        conn.close()
+
+        before = [w for is_b, w in rows if is_b]
+        after  = [w for is_b, w in rows if not is_b]
+
+        import math as _math
+
+        def stats(wins_list):
+            n = len(wins_list)
+            if n == 0:
+                return {'n': 0, 'wins': 0, 'wr': None, 'ci95': None}
+            w = sum(wins_list)
+            wr = w / n
+            se = _math.sqrt(wr * (1 - wr) / n) if n > 0 else 0
+            return {'n': n, 'wins': w, 'wr': round(wr, 4), 'ci95': round(1.96 * se, 4)}
+
+        sb = stats(before)
+        sa = stats(after)
+        delta = None
+        z = None
+        if sb['wr'] is not None and sa['wr'] is not None:
+            delta = round(sa['wr'] - sb['wr'], 4)
+            pooled_se = _math.sqrt(
+                (sb['wr'] * (1 - sb['wr']) / sb['n']) +
+                (sa['wr'] * (1 - sa['wr']) / sa['n'])
+            ) if sb['n'] > 0 and sa['n'] > 0 else None
+            z = round(delta / pooled_se, 2) if pooled_se else None
+
+        return jsonify({
+            'since_draw': since_draw,
+            'baseline': 0.375,
+            'before': sb,
+            'after': sa,
+            'delta': delta,
+            'z_score': z,
+            'significant': abs(z) >= 1.96 if z is not None else False,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/hedge-weights')
 @limiter.limit("30 per minute")
 def hedge_weights_api():
