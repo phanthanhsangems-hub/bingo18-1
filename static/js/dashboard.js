@@ -725,9 +725,10 @@ async function loadSizeDist(n) {
 // ── loadVoterStats ───────────────────────────────────────────
 const _CHECKPOINT_SINCE='2026-05-15T16:15:00';
 async function loadVoterStats() {
-  const [data, fresh]=await Promise.all([
-    fetchJSON('/api/voter-stats?n=200'),
+  const [data, fresh, hedgeData]=await Promise.all([
+    fetchJSON('/api/voter-stats?n=500'),
     fetchJSON('/api/voter-stats?n=500&since='+_CHECKPOINT_SINCE),
+    fetchJSON('/api/hedge-weights'),
   ]);
   const el=document.getElementById('voter-stats-body');
   if (!el) return;
@@ -735,8 +736,12 @@ async function loadVoterStats() {
   // Build fresh WR lookup {voter: {wr, n}}
   const freshMap={};
   if (fresh?.voters) for (const v of fresh.voters) if (v.total>=5) freshMap[v.voter]={wr:v.win_rate,n:v.total};
+  // Build Hedge mult lookup {voter: mult}
+  const hedgeMap={};
+  if (hedgeData?.available && hedgeData.voters) for (const v of hedgeData.voters) hedgeMap[v.name]=v.mult;
+  const showHedge=Object.keys(hedgeMap).length>0;
   let html=`<table class="vs-table">
-    <thead><tr><th>Model</th><th class="r" title="Wins / Total predictions">W/N</th><th class="r" title="Win Rate % — tỷ lệ dự đoán đúng SIZE">WR%</th><th class="r" title="Edge = WR% − 37.5% (baseline). Dương = tốt hơn ngẫu nhiên">Edge</th><th class="r" title="Fresh WR post-checkpoint (z-score). |z| > 1.96 = có ý nghĩa thống kê">Fresh (z)</th></tr></thead><tbody>`;
+    <thead><tr><th>Model</th><th class="r" title="Wins / Total predictions">W/N</th><th class="r" title="Win Rate % — tỷ lệ dự đoán đúng SIZE">WR%</th><th class="r" title="Edge = WR% − 37.5% (baseline). Dương = tốt hơn ngẫu nhiên">Edge</th><th class="r" title="Fresh WR post-checkpoint (z-score). |z| > 1.96 = có ý nghĩa thống kê">Fresh (z)</th>${showHedge?'<th class="r" title="Hedge multiplier hiện tại — softmax EWA sau '+hedgeData.n_updates+' draws. >1.0x = được tin tưởng, <1.0x = bị down-weight">Hedge</th>':''}</tr></thead><tbody>`;
   for (const v of data.voters) {
     const wr=Math.round((v.win_rate||0)*100);
     const edge=v.edge>=0?'+'+Math.round(v.edge*100)+'%':Math.round(v.edge*100)+'%';
@@ -750,12 +755,23 @@ async function loadVoterStats() {
       const col=fw>=0.375?'var(--green)':fw<0.30?'var(--red)':'var(--gold)';
       fCell=`<span style="color:${col}">${Math.round(fw*100)}% <span style="font-size:10px;color:var(--muted)">(z${zStr})</span></span>`;
     }
+    let hCell='';
+    if (showHedge) {
+      const hm=hedgeMap[v.voter];
+      if (hm!=null) {
+        const hc=hm>=1.05?'var(--cyan)':hm<=0.95?'var(--red)':'var(--muted)';
+        const hs=(hm>=1?'+':'')+((hm-1)*100).toFixed(0)+'%';
+        hCell=`<td class="r"><span class="vb-mult ${hm>=1.05?'up':hm<=0.95?'dn':''}">${hs}</span></td>`;
+      } else {
+        hCell=`<td class="r"><span style="color:var(--dim)">—</span></td>`;
+      }
+    }
     html+=`<tr>
       <td>${v.voter}</td>
       <td class="r" style="color:var(--muted)">${v.wins}/${v.total}</td>
       <td class="r"><span class="vs-wr ${cls}">${wr}%</span></td>
       <td class="r"><span class="vs-wr ${cls}">${edge}</span></td>
-      <td class="r">${fCell}</td></tr>`;
+      <td class="r">${fCell}</td>${hCell}</tr>`;
   }
   html+='</tbody></table>';
   if (data.markov_abstain_rate!=null)
