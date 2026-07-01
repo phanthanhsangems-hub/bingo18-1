@@ -2324,33 +2324,38 @@ async function loadHourlyToday() {
   body.innerHTML = bars;
 }
 
-// ── loadComboHotToday (#63) ───────────────────────────────────
+// ── loadComboHotToday (#63) — uses /api/today-combos (P55) ──────
 async function loadComboHotToday() {
   const body = document.getElementById('combo-hot-today-body');
   if (!body) return;
-  const d = await fetchJSON('/api/combo-hot-today');
+  const d = await fetchJSON('/api/today-combos');
   if (!d || d.error) { body.innerHTML='<span style="color:var(--muted)">Không có dữ liệu</span>'; return; }
-  const SL = {NHO:'NHỎ', HOA:'HÒA', LON:'LỚN'};
   const SC = {NHO:'cyan', HOA:'gold', LON:'magenta'};
-  const hotRows = (d.hot||[]).map(c => {
-    const icon = c.is_triple ? '■ ' : c.is_pair ? '● ' : '';
+  const isTriple = c => c[0]===c[1] && c[1]===c[2];
+  const isPair   = c => !isTriple(c) && (c[0]===c[1] || c[1]===c[2] || c[0]===c[2]);
+  const hotRows = (d.appeared||[]).map(c => {
+    const icon = isTriple(c.combo) ? '■ ' : isPair(c.combo) ? '● ' : '';
     return `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;
       border:1px solid var(--border);font-size:11px;margin:2px;font-weight:600;
       color:var(--${SC[c.size]||'text'})">
-      ${icon}${c.combo.join('-')} <span style="color:var(--muted);font-weight:400;font-size:10px">×${c.count}</span>
+      ${icon}${c.label} <span style="color:var(--muted);font-weight:400;font-size:10px">×${c.count}</span>
     </span>`;
   }).join('');
-  const coldRows = (d.not_seen_today||[]).slice(0,20).map(c => {
-    const icon = c.is_triple ? '■ ' : c.is_pair ? '● ' : '';
+  const coldRows = (d.not_appeared||[]).map(c => {
+    const icon = isTriple(c.combo) ? '■ ' : isPair(c.combo) ? '● ' : '';
     return `<span style="display:inline-flex;padding:1px 6px;border-radius:10px;
-      border:1px solid var(--border);font-size:10px;margin:1px;color:var(--muted)">
-      ${icon}${c.combo.join('-')}
+      border:1px solid var(--border);font-size:10px;margin:1px;
+      color:var(--${SC[c.size]||'muted'});opacity:.6">
+      ${icon}${c.label}
     </span>`;
   }).join('');
   body.innerHTML = `
-    <div style="font-size:10px;color:var(--muted);margin-bottom:4px">${d.total_draws} kỳ · ${d.unique_combos_today} bộ khác nhau · ${56-d.unique_combos_today} bộ chưa ra hôm nay</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:4px">
+      ${d.total_draws_today} kỳ · ${d.appeared_count} bộ đã ra · ${d.not_appeared_count} chưa ra · phủ ${d.coverage_pct}%
+      &nbsp;<a href="/api/today-combos" target="_blank" style="color:var(--cyan);text-decoration:none;font-size:10px;opacity:.7" title="Xem JSON đầy đủ">📋 JSON</a>
+    </div>
     <div style="margin-bottom:8px">${hotRows}</div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Chưa ra hôm nay (${56-d.unique_combos_today} bộ):</div>
+    <div style="font-size:10px;color:var(--muted);margin-bottom:4px">Chưa ra hôm nay (${d.not_appeared_count} bộ) — màu theo size:</div>
     <div>${coldRows}</div>`;
 }
 
