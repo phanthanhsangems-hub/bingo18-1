@@ -3720,6 +3720,32 @@ def system_health_badge():
         return jsonify({'error': str(e), 'status': 'unknown'}), 500
 
 
+@app.route('/api/hedge-weights')
+@limiter.limit("30 per minute")
+def hedge_weights_api():
+    """Return current Hedge voter log-weights and multipliers from system_config."""
+    try:
+        from hedge_voter import load_hedge_weights, _HEDGE_WARMUP
+        hw = load_hedge_weights(db)
+        if hw is None:
+            return jsonify({'available': False, 'n_updates': 0})
+        mults = hw.get_multipliers()
+        voters = sorted(
+            [{'name': v, 'log_w': round(lw, 4), 'mult': mults.get(v, 1.0)}
+             for v, lw in hw.log_weights.items()],
+            key=lambda x: x['mult'], reverse=True
+        )
+        return jsonify({
+            'available': True,
+            'n_updates': hw.n_updates,
+            'eta': hw.eta,
+            'warmup_active': hw.n_updates >= _HEDGE_WARMUP,
+            'voters': voters,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'available': False}), 500
+
+
 @app.route('/api/voter-health')
 @limiter.limit("30 per minute")
 def voter_health():

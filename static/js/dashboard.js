@@ -2919,6 +2919,42 @@ async function loadSysHealth() {
   </div>`;
 }
 
+async function loadHedgeWeights() {
+  const el = document.getElementById('hedge-weights-body');
+  if (!el) return;
+  const d = await fetchJSON('/api/hedge-weights');
+  if (!d || !d.available) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px">Chưa có dữ liệu Hedge (cần chạy backfill)</span>';
+    return;
+  }
+  const warmTxt = d.warmup_active
+    ? `<span style="color:var(--green)">ACTIVE</span>`
+    : `<span style="color:var(--gold)">WARMUP</span>`;
+  let rows = '';
+  for (const v of d.voters) {
+    const mc = v.mult >= 1.05 ? 'up' : v.mult <= 0.95 ? 'dn' : '';
+    const ms = ((v.mult - 1) * 100).toFixed(0);
+    const pct = Math.min(Math.abs(v.mult - 1) * 50, 30);
+    const barCol = v.mult >= 1.05 ? 'var(--cyan)' : 'var(--red)';
+    rows += `<tr>
+      <td style="font-size:12px">${v.name}</td>
+      <td class="r" style="font-size:11px;color:var(--dim)">${v.log_w.toFixed(2)}</td>
+      <td class="r"><span class="vb-mult ${mc}">${v.mult >= 1 ? '+' : ''}${ms}%</span></td>
+      <td class="r" style="width:50px">
+        <div style="height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${pct}px;background:${barCol};border-radius:3px"></div>
+        </div>
+      </td></tr>`;
+  }
+  el.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+    n=${d.n_updates} · η=${d.eta} · ${warmTxt}
+    <span style="margin-left:6px;color:var(--dim)" title="Softmax của log-weights, chuẩn hóa: uniform → 1.0x · tốt → >1.0x · xấu → <1.0x">ℹ</span>
+  </div>
+  <table class="vb-table"><thead><tr>
+    <th>Voter</th><th class="r">log_w</th><th class="r">Mult</th><th></th>
+  </tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 // ── Prediction timeline strip ─────────────────────────────────
 let _tlAllDraws = [];
 let _tlFilter   = 'all';
@@ -3228,6 +3264,7 @@ async function refreshAll() {
     loadBetSignal(),
     loadNumberGap(),
     loadSysHealth(),
+    loadHedgeWeights(),
     loadPredictions(),
     loadSmartSummary(),
   ]);
