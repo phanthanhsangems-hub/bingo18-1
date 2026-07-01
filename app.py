@@ -11581,6 +11581,55 @@ def daily_summary_evening():
         return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
 
+@app.route('/api/test-telegram')
+@limiter.limit("5 per minute")
+def test_telegram():
+    """Debug: kiểm tra bot token + chat_id bằng cách gọi thẳng Telegram API."""
+    import requests as _req
+    token   = config.TELEGRAM_BOT_TOKEN or ''
+    chat_id = config.TELEGRAM_CHAT_ID   or ''
+
+    if not token:
+        return jsonify({'error': 'TELEGRAM_BOT_TOKEN not set'}), 500
+
+    base = f"https://api.telegram.org/bot{token}"
+
+    # 1. getMe — verify token
+    try:
+        r_me = _req.get(f"{base}/getMe", timeout=8)
+        me   = r_me.json()
+    except Exception as e:
+        return jsonify({'error': f'getMe failed: {e}'}), 500
+
+    if not me.get('ok'):
+        return jsonify({'step': 'getMe', 'ok': False, 'telegram_error': me}), 200
+
+    bot_info = me.get('result', {})
+
+    # 2. sendMessage — gửi tin test
+    if not chat_id:
+        return jsonify({'step': 'sendMessage', 'ok': False,
+                        'error': 'TELEGRAM_CHAT_ID not set',
+                        'bot': bot_info.get('username')}), 200
+
+    try:
+        r_send = _req.post(f"{base}/sendMessage",
+                           json={'chat_id': chat_id, 'text': '🔧 Bingo18 test — bot hoạt động!'},
+                           timeout=8)
+        send_result = r_send.json()
+    except Exception as e:
+        return jsonify({'step': 'sendMessage', 'error': str(e)}), 500
+
+    return jsonify({
+        'bot_username':  bot_info.get('username'),
+        'bot_id':        bot_info.get('id'),
+        'chat_id_hint':  f"...{chat_id[-6:]}" if len(chat_id) > 6 else chat_id,
+        'send_ok':       send_result.get('ok'),
+        'send_error':    send_result.get('description') if not send_result.get('ok') else None,
+        'send_error_code': send_result.get('error_code') if not send_result.get('ok') else None,
+    })
+
+
 def create_app():
     import logging
     import threading
