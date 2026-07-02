@@ -38,11 +38,11 @@ logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────
 DB_CONFIG = {
-    'host':            os.environ['DB_HOST'],
+    'host':            os.environ.get('DB_HOST', ''),
     'port':            int(os.environ.get('DB_PORT') or 5432),
     'dbname':          os.environ.get('DB_NAME', 'postgres'),
-    'user':            os.environ['DB_USER'],
-    'password':        os.environ['DB_PASSWORD'],
+    'user':            os.environ.get('DB_USER', ''),
+    'password':        os.environ.get('DB_PASSWORD', ''),
     'sslmode':         'require',
     'connect_timeout': 15,
 }
@@ -1550,7 +1550,7 @@ if __name__ == '__main__':
 
     print(f"\n{'='*52}")
     print(f"  Bingo18 Sync v4.3 — mode: {args.mode}")
-    print(f"  DB: {DB_CONFIG['host']}")
+    print(f"  DB: {DB_CONFIG.get('host') or '(via Cloud Run API)'}")
     print(f"  Table: {TABLE}")
     print(f"{'='*52}\n")
 
