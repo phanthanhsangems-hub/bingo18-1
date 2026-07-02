@@ -24,13 +24,8 @@ jobs:
       - name: Install sync dependencies
         run: pip install -r .github/sync-requirements.txt
 
-      - name: Sync draws → Supabase
+      - name: Sync draws → Cloud Run → Supabase
         env:
-          DB_HOST:        ${{ secrets.DB_HOST }}
-          DB_PORT:        ${{ secrets.DB_PORT }}
-          DB_NAME:        ${{ secrets.DB_NAME }}
-          DB_USER:        ${{ secrets.DB_USER }}
-          DB_PASSWORD:    ${{ secrets.DB_PASSWORD }}
-          CLOUD_RUN_URL:  ${{ secrets.CLOUD_RUN_URL }}
+          CLOUD_RUN_URL:  https://bingo18-633959711537.asia-southeast1.run.app
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: python sync_to_supabase.py --mode gha

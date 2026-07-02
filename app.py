@@ -531,6 +531,66 @@ def trigger_prediction():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/last-draw-id', methods=['GET'])
+@limiter.limit("60 per minute")
+def last_draw_id():
+    """Trả về draw_number lớn nhất trong DB — dùng bởi GitHub Actions."""
+    secret = request.headers.get("X-Trigger-Secret")
+    if secret != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        draws = db.get_recent_draws(limit=1)
+        last_id = draws[0]['draw_number'] if draws else 0
+        return jsonify({"draw_number": last_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/ingest-draws', methods=['POST'])
+@limiter.limit("30 per minute")
+def ingest_draws():
+    """
+    Nhận draw data từ GitHub Actions (scrape từ Vietlott) và ghi vào DB.
+    Body JSON: {"draws": [{"draw_id": X, "numbers": [a,b,c], "draw_date": "..."}]}
+    """
+    secret = request.headers.get("X-Trigger-Secret")
+    if secret != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    draws = request.json.get("draws", []) if request.json else []
+    inserted = 0
+    for draw in draws:
+        try:
+            draw_id = int(draw.get("draw_id") or draw.get("draw_number", 0))
+            numbers = [int(n) for n in draw.get("numbers", [])]
+            draw_date_str = draw.get("draw_date") or draw.get("draw_time") or ""
+            if not draw_id or len(numbers) != 3:
+                continue
+            draw_time = None
+            if draw_date_str:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+                    try:
+                        draw_time = datetime.strptime(draw_date_str[:19], fmt)
+                        break
+                    except Exception:
+                        pass
+            row_id = db.insert_draw(draw_id, numbers, draw_time)
+            if row_id and row_id > 0:
+                inserted += 1
+                logger.info("ingest-draws: inserted #%d %s", draw_id, numbers)
+        except Exception as e:
+            logger.warning("ingest-draws: skip draw %s — %s", draw, e)
+
+    if inserted > 0:
+        try:
+            from prediction_service import run_prediction_cycle
+            run_prediction_cycle()
+        except Exception as e:
+            logger.warning("ingest-draws: prediction trigger failed: %s", e)
+
+    return jsonify({"inserted": inserted, "received": len(draws)})
+
+
 # ── PWA helpers (#51) ────────────────────────────────────────
 import struct as _struct, zlib as _zlib
 
