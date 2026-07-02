@@ -50,7 +50,7 @@ TABLE          = '"public"."draw_history"'
 FETCH_INTERVAL = 10   # giây
 
 CLOUD_RUN_URL  = os.environ.get('CLOUD_RUN_URL', '')
-TRIGGER_SECRET = os.environ.get('TRIGGER_SECRET', '')
+TRIGGER_SECRET = os.environ.get('TRIGGER_SECRET', '').strip()
 
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT  = os.environ.get('TELEGRAM_CHAT_ID', '')
