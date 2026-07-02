@@ -1458,57 +1458,88 @@ def mode_backfill():
 
 def mode_gha():
     """
-    GitHub Actions mode: chạy 1 lần rồi exit.
-    Ưu tiên: vietlott.vn homepage → fallback GitHub JSONL.
-    Trigger prediction nếu có kỳ mới.
+    GitHub Actions mode: scrape Vietlott → POST lên Cloud Run (không cần DB trực tiếp).
+    Cloud Run đã có DATABASE_URL, tự ghi DB và trigger prediction.
+    Chỉ cần CLOUD_RUN_URL + TRIGGER_SECRET — không cần DB_HOST/DB_PASSWORD/etc.
     """
-    logger.info("=== GHA mode: single-run sync ===")
-    conn    = get_conn()
-    last_id = get_last_draw_id(conn)
-    logger.info("DB last draw: #%d", last_id)
+    logger.info("=== GHA mode (v2 via Cloud Run API) ===")
 
-    inserted = 0
+    cloud_url = CLOUD_RUN_URL.rstrip('/')
+    headers   = {"X-Trigger-Secret": TRIGGER_SECRET, "Content-Type": "application/json"}
 
-    # ── Bước 1: thử vietlott.vn (có thể bị block từ Azure IPs)
+    if not cloud_url or not TRIGGER_SECRET:
+        logger.error("CLOUD_RUN_URL hoặc TRIGGER_SECRET chưa cấu hình — exit")
+        raise SystemExit(1)
+
+    # ── Bước 1: lấy last draw ID từ Cloud Run
+    last_id = 0
+    try:
+        r = requests.get(f"{cloud_url}/api/last-draw-id", headers=headers, timeout=15)
+        if r.status_code == 200:
+            last_id = r.json().get("draw_number", 0)
+            logger.info("Cloud Run last draw: #%d", last_id)
+        else:
+            logger.warning("last-draw-id returned %d — dùng last_id=0", r.status_code)
+    except Exception as e:
+        logger.warning("Không lấy được last draw từ Cloud Run: %s — tiếp tục", e)
+
+    # ── Bước 2: scrape Vietlott
+    to_send = []
+    now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     try:
         new_draws = get_new_since(last_id)
-        if new_draws:
-            now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            for draw in new_draws:
-                draw['draw_date'] = now_utc
-                if insert_draw(conn, draw):
-                    inserted += 1
-                    logger.info("✅ vietlott.vn #%d %s", draw['draw_id'], draw['numbers'])
+        for draw in new_draws:
+            to_send.append({
+                'draw_id':   draw['draw_id'],
+                'numbers':   draw['numbers'],
+                'draw_date': draw.get('draw_date') or now_utc,
+            })
+        if to_send:
+            logger.info("Vietlott: %d kỳ mới", len(to_send))
     except Exception as e:
-        logger.warning("vietlott.vn fetch failed: %s — fallback to GitHub", e)
+        logger.warning("vietlott.vn fetch failed: %s — fallback GitHub", e)
 
-    # ── Bước 2: fallback GitHub JSONL (cập nhật hàng ngày, luôn accessible)
-    if inserted == 0:
+    # ── Bước 3: fallback GitHub JSONL
+    if not to_send:
         logger.info("Fallback: GitHub JSONL...")
         try:
             gh_draws = fetch_from_github(limit=30)
             for d in gh_draws:
                 if d.get('draw_number', 0) > last_id:
-                    fake_draw = {
+                    to_send.append({
                         'draw_id':   d['draw_number'],
                         'numbers':   d['numbers'],
-                        'draw_date': d.get('draw_time', ''),
-                        'total':     sum(d['numbers']),
-                    }
-                    if insert_draw(conn, fake_draw):
-                        inserted += 1
-                        logger.info("✅ GitHub #%d %s", d['draw_number'], d['numbers'])
+                        'draw_date': d.get('draw_time', now_utc),
+                    })
+            if to_send:
+                logger.info("GitHub fallback: %d kỳ mới", len(to_send))
         except Exception as e:
             logger.warning("GitHub fallback failed: %s", e)
 
-    conn.close()
-    logger.info("GHA sync done — inserted=%d", inserted)
-
-    if inserted > 0:
-        logger.info("Triggering prediction...")
-        trigger_prediction()
-    else:
+    if not to_send:
         logger.info("Không có kỳ mới.")
+        return
+
+    # ── Bước 4: POST lên Cloud Run để ghi DB + trigger prediction
+    try:
+        r = requests.post(
+            f"{cloud_url}/api/ingest-draws",
+            json={"draws": to_send},
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            logger.info("GHA sync done — inserted=%d / received=%d",
+                        data.get('inserted', 0), data.get('received', 0))
+        else:
+            logger.error("ingest-draws returned %d: %s", r.status_code, r.text[:200])
+            raise SystemExit(1)
+    except SystemExit:
+        raise
+    except Exception as e:
+        logger.error("POST ingest-draws failed: %s", e)
+        raise SystemExit(1)
 
 
 # ══════════════════════════════════════════════════════════════
