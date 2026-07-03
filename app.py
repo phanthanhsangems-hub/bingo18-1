@@ -591,6 +591,92 @@ def ingest_draws():
     return jsonify({"inserted": inserted, "received": len(draws)})
 
 
+@app.route('/api/morning-digest', methods=['POST'])
+@limiter.limit("5 per hour")
+def morning_digest():
+    """Gửi digest sáng qua Telegram — gọi từ GitHub Actions (không cần DB secrets trong GHA)."""
+    secret = request.headers.get("X-Trigger-Secret")
+    if secret != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    try:
+        import json as _json
+        from zoneinfo import ZoneInfo
+        conn = db.get_connection()
+        cur  = conn.cursor()
+
+        cur.execute("""
+            SELECT COUNT(*), size_category
+            FROM draw_history
+            WHERE draw_time >= NOW() - INTERVAL '24 hours'
+            GROUP BY size_category
+        """)
+        size_rows   = cur.fetchall()
+        total_draws = sum(r[0] for r in size_rows)
+        size_dist   = {r[1]: r[0] for r in size_rows}
+
+        cur.execute("""
+            SELECT numbers, COUNT(*) AS cnt
+            FROM draw_history
+            WHERE draw_time >= NOW() - INTERVAL '24 hours'
+            GROUP BY numbers
+            HAVING COUNT(*) >= 2
+            ORDER BY cnt DESC LIMIT 5
+        """)
+        hot_rows = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*), SUM(CASE WHEN pr.is_win_size THEN 1 ELSE 0 END)
+            FROM prediction_results pr
+            JOIN draw_history dh ON dh.draw_number = pr.draw_number
+            WHERE dh.draw_time >= NOW() - INTERVAL '24 hours'
+              AND pr.is_win_size IS NOT NULL
+        """)
+        wr_row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        wr_total = wr_row[0] or 0
+        wr_wins  = int(wr_row[1] or 0)
+        wr_pct   = f"{round(wr_wins/wr_total*100)}%" if wr_total > 0 else "N/A"
+
+        nho = size_dist.get('NHO', 0)
+        hoa = size_dist.get('HOA', 0)
+        lon = size_dist.get('LON', 0)
+
+        hot_lines = ""
+        for numbers_raw, cnt in hot_rows:
+            try:
+                nums = _json.loads(numbers_raw) if isinstance(numbers_raw, str) else numbers_raw
+            except Exception:
+                nums = [numbers_raw]
+            hot_lines += f"  🔥 {'-'.join(str(n) for n in nums)} ×{cnt}\n"
+
+        date_vn = datetime.now(timezone.utc).astimezone(
+            ZoneInfo('Asia/Ho_Chi_Minh')
+        ).strftime('%d/%m/%Y')
+
+        msg = (
+            f"☀️ DIGEST SÁNG {date_vn}\n"
+            f"{'─'*26}\n"
+            f"📊 24h qua: {total_draws} kỳ\n"
+            f"  🟢 NHO: {nho} ({round(nho/total_draws*100) if total_draws else 0}%)\n"
+            f"  🟡 HOA: {hoa} ({round(hoa/total_draws*100) if total_draws else 0}%)\n"
+            f"  🔴 LON: {lon} ({round(lon/total_draws*100) if total_draws else 0}%)\n"
+            f"🎯 Win rate: {wr_wins}/{wr_total} = {wr_pct}\n"
+        )
+        if hot_lines:
+            msg += f"🔥 Bộ ra ≥2 lần:\n{hot_lines}"
+
+        from telegram_bot import TelegramBot
+        TelegramBot().send_message(msg)
+        logger.info("☀️ Morning digest sent via /api/morning-digest")
+        return jsonify({"sent": True, "draws_24h": total_draws})
+    except Exception as e:
+        logger.error("morning-digest endpoint error: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+
 # ── PWA helpers (#51) ────────────────────────────────────────
 import struct as _struct, zlib as _zlib
 

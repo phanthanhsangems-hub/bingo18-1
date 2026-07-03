@@ -11,26 +11,22 @@ jobs:
     timeout-minutes: 3
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: .github/sync-requirements.txt
-
-      - name: Install dependencies
-        run: pip install -r .github/sync-requirements.txt
-
-      - name: Send morning digest
+      - name: Send morning digest via Cloud Run
         env:
-          DB_HOST:            ${{ secrets.DB_HOST }}
-          DB_PORT:            ${{ secrets.DB_PORT }}
-          DB_NAME:            ${{ secrets.DB_NAME }}
-          DB_USER:            ${{ secrets.DB_USER }}
-          DB_PASSWORD:        ${{ secrets.DB_PASSWORD }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python sync_to_supabase.py --mode morning_digest
+          CLOUD_RUN_URL:  https://bingo18-633959711537.asia-southeast1.run.app
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          python3 -c "
+          import urllib.request, os, sys
+          url    = os.environ['CLOUD_RUN_URL'] + '/api/morning-digest'
+          secret = os.environ['TRIGGER_SECRET'].strip()
+          req = urllib.request.Request(url, data=b'{}', method='POST')
+          req.add_header('X-Trigger-Secret', secret)
+          req.add_header('Content-Type', 'application/json')
+          try:
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  print('OK:', r.read().decode())
+          except Exception as e:
+              print('ERROR:', e, file=sys.stderr)
+              sys.exit(1)
+          "
