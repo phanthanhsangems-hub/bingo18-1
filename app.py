@@ -601,7 +601,7 @@ def morning_digest():
 
     try:
         import json as _json
-        from zoneinfo import ZoneInfo
+        from datetime import timedelta as _td
         conn = db.get_connection()
         cur  = conn.cursor()
 
@@ -652,9 +652,7 @@ def morning_digest():
                 nums = [numbers_raw]
             hot_lines += f"  🔥 {'-'.join(str(n) for n in nums)} ×{cnt}\n"
 
-        date_vn = datetime.now(timezone.utc).astimezone(
-            ZoneInfo('Asia/Ho_Chi_Minh')
-        ).strftime('%d/%m/%Y')
+        date_vn = (datetime.now(timezone.utc) + _td(hours=7)).strftime('%d/%m/%Y')
 
         msg = (
             f"☀️ DIGEST SÁNG {date_vn}\n"

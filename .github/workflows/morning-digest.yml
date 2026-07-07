@@ -8,25 +8,31 @@ on:
 jobs:
   digest:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 6
 
     steps:
-      - name: Send morning digest via Cloud Run
+      - name: Send morning digest via Cloud Run (retry 3x)
         env:
           CLOUD_RUN_URL:  https://bingo18-633959711537.asia-southeast1.run.app
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           python3 -c "
-          import urllib.request, os, sys
+          import urllib.request, os, sys, time
           url    = os.environ['CLOUD_RUN_URL'] + '/api/morning-digest'
           secret = os.environ['TRIGGER_SECRET'].strip()
-          req = urllib.request.Request(url, data=b'{}', method='POST')
-          req.add_header('X-Trigger-Secret', secret)
-          req.add_header('Content-Type', 'application/json')
-          try:
-              with urllib.request.urlopen(req, timeout=30) as r:
-                  print('OK:', r.read().decode())
-          except Exception as e:
-              print('ERROR:', e, file=sys.stderr)
-              sys.exit(1)
+          for attempt in range(1, 4):
+              try:
+                  req = urllib.request.Request(url, data=b'{}', method='POST')
+                  req.add_header('X-Trigger-Secret', secret)
+                  req.add_header('Content-Type', 'application/json')
+                  with urllib.request.urlopen(req, timeout=45) as r:
+                      print('OK:', r.read().decode())
+                      sys.exit(0)
+              except Exception as e:
+                  print(f'Attempt {attempt}/3 failed: {e}', file=sys.stderr)
+                  if attempt < 3:
+                      print('Retrying in 60s...', file=sys.stderr)
+                      time.sleep(60)
+          print('All 3 attempts failed', file=sys.stderr)
+          sys.exit(1)
           "
