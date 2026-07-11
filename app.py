@@ -671,8 +671,9 @@ def morning_digest():
         logger.info("☀️ Morning digest sent via /api/morning-digest")
         return jsonify({"sent": True, "draws_24h": total_draws})
     except Exception as e:
-        logger.error("morning-digest endpoint error: %s", e)
-        return jsonify({"error": str(e)}), 500
+        import traceback as _tb
+        logger.error("morning-digest error: %s\n%s", e, _tb.format_exc())
+        return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 
 # ── PWA helpers (#51) ────────────────────────────────────────
