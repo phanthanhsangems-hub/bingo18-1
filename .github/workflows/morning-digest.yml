@@ -34,7 +34,7 @@ jobs:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           python3 -c "
-          import urllib.request, os, sys, time
+          import urllib.request, urllib.error, os, sys, time
           url    = os.environ['CLOUD_RUN_URL'] + '/api/morning-digest'
           secret = os.environ['TRIGGER_SECRET'].strip()
           for attempt in range(1, 4):
@@ -45,6 +45,12 @@ jobs:
                   with urllib.request.urlopen(req, timeout=60) as r:
                       print('OK:', r.read().decode())
                       sys.exit(0)
+              except urllib.error.HTTPError as e:
+                  body = e.read().decode()
+                  print(f'Attempt {attempt}/3 HTTP {e.code}: {body}', file=sys.stderr)
+                  if attempt < 3:
+                      print('Retrying in 30s...', file=sys.stderr)
+                      time.sleep(30)
               except Exception as e:
                   print(f'Attempt {attempt}/3 failed: {e}', file=sys.stderr)
                   if attempt < 3:
