@@ -399,6 +399,13 @@ limiter = Limiter(
 )
 
 
+@app.errorhandler(500)
+def handle_500(e):
+    import traceback as _tb
+    logger.error("Unhandled 500: %s\n%s", e, _tb.format_exc())
+    return jsonify({"error": str(e), "type": type(e).__name__}), 500
+
+
 # ── API: Scheduler / Cron ─────────────────────────────────────
 @app.route('/api/fetch-latest', methods=['GET'])
 @limiter.limit("20 per minute")
@@ -592,7 +599,6 @@ def ingest_draws():
 
 
 @app.route('/api/morning-digest', methods=['POST'])
-@limiter.limit("5 per hour")
 def morning_digest():
     """Gửi digest sáng qua Telegram — gọi từ GitHub Actions (không cần DB secrets trong GHA)."""
     secret = request.headers.get("X-Trigger-Secret")
