@@ -19,6 +19,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+import logging
 import pandas as pd
 import config
 from database import DatabaseManager, USE_POSTGRES
@@ -29,6 +30,7 @@ app = Flask(__name__)
 _CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 CORS(app, origins=_CORS_ORIGINS)
 db  = DatabaseManager()
+logger = logging.getLogger(__name__)
 
 # ── In-memory response cache (GET only, TTL-based) ───────────
 _resp_cache: dict = {}  # full_path -> (payload_bytes, expiry_ts)
