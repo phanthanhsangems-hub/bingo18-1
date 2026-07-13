@@ -24,6 +24,20 @@ jobs:
       - name: Install sync dependencies
         run: pip install -r .github/sync-requirements.txt
 
+      - name: Warmup Cloud Run
+        env:
+          CLOUD_RUN_URL: https://bingo18-633959711537.asia-southeast1.run.app
+        run: |
+          python3 -c "
+          import urllib.request, os
+          url = os.environ['CLOUD_RUN_URL'] + '/api/health'
+          try:
+              with urllib.request.urlopen(url, timeout=10) as r:
+                  print('Warmup OK:', r.read().decode()[:80])
+          except Exception as e:
+              print('Warmup ping failed (ok on cold start):', e)
+          "
+
       - name: Sync draws → Cloud Run → Supabase
         env:
           CLOUD_RUN_URL:  https://bingo18-633959711537.asia-southeast1.run.app

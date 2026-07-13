@@ -1520,26 +1520,30 @@ def mode_gha():
         logger.info("Không có kỳ mới.")
         return
 
-    # ── Bước 4: POST lên Cloud Run để ghi DB + trigger prediction
-    try:
-        r = requests.post(
-            f"{cloud_url}/api/ingest-draws",
-            json={"draws": to_send},
-            headers=headers,
-            timeout=30,
-        )
-        if r.status_code == 200:
-            data = r.json()
-            logger.info("GHA sync done — inserted=%d / received=%d",
-                        data.get('inserted', 0), data.get('received', 0))
-        else:
-            logger.error("ingest-draws returned %d: %s", r.status_code, r.text[:200])
-            raise SystemExit(1)
-    except SystemExit:
-        raise
-    except Exception as e:
-        logger.error("POST ingest-draws failed: %s", e)
-        raise SystemExit(1)
+    # ── Bước 4: POST lên Cloud Run để ghi DB + trigger prediction (retry 3x)
+    import time as _time
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(
+                f"{cloud_url}/api/ingest-draws",
+                json={"draws": to_send},
+                headers=headers,
+                timeout=30,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                logger.info("GHA sync done — inserted=%d / received=%d",
+                            data.get('inserted', 0), data.get('received', 0))
+                return
+            else:
+                logger.warning("ingest-draws attempt %d/3 returned %d: %s",
+                               attempt, r.status_code, r.text[:200])
+        except Exception as e:
+            logger.warning("ingest-draws attempt %d/3 failed: %s", attempt, e)
+        if attempt < 3:
+            _time.sleep(10 * attempt)
+    logger.error("ingest-draws: all 3 attempts failed")
+    raise SystemExit(1)
 
 
 # ══════════════════════════════════════════════════════════════
