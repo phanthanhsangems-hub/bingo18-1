@@ -6689,7 +6689,9 @@ def sse_draws():
             cur.close()
 
             hb = 0  # heartbeat counter
-            while True:
+            _sse_start = _time.time()
+            _SSE_MAX_LIFETIME = 240  # graceful close before Cloud Run's 300s timeout
+            while _time.time() - _sse_start < _SSE_MAX_LIFETIME:
                 try:
                     cur = conn.cursor()
                     cur.execute(
@@ -6722,6 +6724,8 @@ def sse_draws():
                     yield ": ping\n\n"
                     hb = 0
                 _time.sleep(6)
+            # graceful close — client will reconnect after 5s
+            yield "retry: 5000\n\n"
         except GeneratorExit:
             pass
         finally:

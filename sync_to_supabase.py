@@ -57,6 +57,9 @@ TELEGRAM_CHAT  = os.environ.get('TELEGRAM_CHAT_ID', '')
 # #18: chỉ announce khi conf >= ngưỡng (0.0 = luôn announce)
 ANNOUNCE_MIN_CONF = float(os.environ.get('ANNOUNCE_MIN_CONF', '0.0'))
 
+_tg_last_sent: float = 0.0
+_MIN_TG_INTERVAL = 2.5  # seconds minimum between any two Telegram sends
+
 BASE_URL    = "https://vietlott.vn"
 HOME_URL    = f"{BASE_URL}/"
 DETAIL_URL  = f"{BASE_URL}/vi/trung-thuong/ket-qua-trung-thuong/view-detail-bingo18-result"
@@ -391,28 +394,38 @@ def check_and_alert_hot_combo(conn, draw: dict, alerted: dict):
 
 def _tg_send(text: str):
     """Gửi tin nhắn Telegram đơn giản (plain text)."""
+    global _tg_last_sent
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
         return
+    gap = _MIN_TG_INTERVAL - (time.time() - _tg_last_sent)
+    if gap > 0:
+        time.sleep(gap)
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT, "text": text},
             timeout=5,
         )
+        _tg_last_sent = time.time()
     except Exception as e:
         logger.warning(f"Telegram send: {e}")
 
 
 def _tg_html(text: str):
     """Gửi tin nhắn Telegram với HTML formatting."""
+    global _tg_last_sent
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
         return
+    gap = _MIN_TG_INTERVAL - (time.time() - _tg_last_sent)
+    if gap > 0:
+        time.sleep(gap)
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT, "text": text, "parse_mode": "HTML"},
             timeout=5,
         )
+        _tg_last_sent = time.time()
         if not r.ok:
             import re as _re
             _tg_send(_re.sub(r'<[^>]+>', '', text))
