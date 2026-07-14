@@ -356,14 +356,16 @@ class AlertManager:
         import json as _json
         try:
             conn = db.get_connection()
-            cur  = conn.cursor()
-            ph   = '%s' if USE_POSTGRES else '?'
-            cur.execute(
-                f"INSERT INTO alert_log (alert_key, message, metadata) VALUES ({ph}, {ph}, {ph})",
-                (key, message or '', _json.dumps(metadata) if metadata else None)
-            )
-            conn.commit()
-            conn.close()
+            try:
+                cur  = conn.cursor()
+                ph   = '%s' if USE_POSTGRES else '?'
+                cur.execute(
+                    f"INSERT INTO alert_log (alert_key, message, metadata) VALUES ({ph}, {ph}, {ph})",
+                    (key, message or '', _json.dumps(metadata) if metadata else None)
+                )
+                conn.commit()
+            finally:
+                conn.close()
         except Exception as _le:
             logger.debug("alert_log write error: %s", _le)
 
@@ -572,6 +574,7 @@ def _refresh_static_stats(db, current_draw: int) -> None:
     if not config.DATABASE_URL:
         return
     _stats_refresh_draw = current_draw  # mark attempted upfront; prevents retry storm on DB failure
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -676,10 +679,15 @@ def _refresh_static_stats(db, current_draw: int) -> None:
                 _CARRYOVER_STATS = new_co
                 logger.info("_CARRYOVER_STATS refreshed: %d hours from DB", len(new_co))
 
-        conn.close()
         logger.info("Static stats refresh done at draw #%d", current_draw)
     except Exception as e:
         logger.warning("_refresh_static_stats error: %s", e)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _get_tod_priors(db, current_draw: int) -> dict:
@@ -2117,33 +2125,35 @@ def run_prediction_cycle() -> dict:
         if 6 <= vn_hour < 22:  # active hours only
             if _alert_mgr.fire('gap', _GAP_COOLDOWN_SEC):
                 conn_g = db.get_connection()
-                cur_g  = conn_g.cursor()
-                if config.DATABASE_URL:
-                    cur_g.execute("""
-                        SELECT draw_time FROM draw_history
-                        ORDER BY draw_number DESC LIMIT 1
-                    """)
-                    row_g = cur_g.fetchone()
-                    if row_g and row_g[0]:
-                        last_draw_time = row_g[0]
-                        if hasattr(last_draw_time, 'tzinfo') and last_draw_time.tzinfo is None:
-                            last_draw_time = last_draw_time.replace(tzinfo=timezone.utc)
-                        age_min = (datetime.now(timezone.utc) - last_draw_time.astimezone(timezone.utc)).total_seconds() / 60
-                        if age_min > _GAP_THRESHOLD_MIN:
-                            telegram.send_message(
-                                f"⏰ <b>PREDICTION GAP ALERT · P94</b>\n"
-                                f"━━━━━━━━━━━━━━━━\n"
-                                f"Kỳ cuối cách đây <b>{age_min:.0f} phút</b> (ngưỡng {_GAP_THRESHOLD_MIN}p)\n"
-                                f"Giờ VN: {vn_hour}h — đang trong active hours\n"
-                                f"━━━━━━━━━━━━━━━━\n"
-                                f"⚠️ Sync có thể bị lỗi. Kiểm tra sync_to_supabase.py.\n"
-                                f"🔕 Alert tắt 30 phút."
-                            )
-                            _alert_mgr.log(db, 'gap', f"gap={age_min:.0f}min", {'gap_min': round(age_min, 1), 'vn_hour': vn_hour})
-                            logger.warning("P94 gap alert: last draw %.0f min ago", age_min)
-                        else:
-                            _alert_mgr.reset('gap')  # didn't actually fire — allow retry sooner
-                conn_g.close()
+                try:
+                    cur_g  = conn_g.cursor()
+                    if config.DATABASE_URL:
+                        cur_g.execute("""
+                            SELECT draw_time FROM draw_history
+                            ORDER BY draw_number DESC LIMIT 1
+                        """)
+                        row_g = cur_g.fetchone()
+                        if row_g and row_g[0]:
+                            last_draw_time = row_g[0]
+                            if hasattr(last_draw_time, 'tzinfo') and last_draw_time.tzinfo is None:
+                                last_draw_time = last_draw_time.replace(tzinfo=timezone.utc)
+                            age_min = (datetime.now(timezone.utc) - last_draw_time.astimezone(timezone.utc)).total_seconds() / 60
+                            if age_min > _GAP_THRESHOLD_MIN:
+                                telegram.send_message(
+                                    f"⏰ <b>PREDICTION GAP ALERT · P94</b>\n"
+                                    f"━━━━━━━━━━━━━━━━\n"
+                                    f"Kỳ cuối cách đây <b>{age_min:.0f} phút</b> (ngưỡng {_GAP_THRESHOLD_MIN}p)\n"
+                                    f"Giờ VN: {vn_hour}h — đang trong active hours\n"
+                                    f"━━━━━━━━━━━━━━━━\n"
+                                    f"⚠️ Sync có thể bị lỗi. Kiểm tra sync_to_supabase.py.\n"
+                                    f"🔕 Alert tắt 30 phút."
+                                )
+                                _alert_mgr.log(db, 'gap', f"gap={age_min:.0f}min", {'gap_min': round(age_min, 1), 'vn_hour': vn_hour})
+                                logger.warning("P94 gap alert: last draw %.0f min ago", age_min)
+                            else:
+                                _alert_mgr.reset('gap')  # didn't actually fire — allow retry sooner
+                finally:
+                    conn_g.close()
     except Exception as _ge:
         logger.debug("P94 gap alert error: %s", _ge)
 
@@ -2200,15 +2210,17 @@ def run_prediction_cycle() -> dict:
             recent_wl: list = []
             try:
                 conn_wl = db.get_connection()
-                cur_wl  = conn_wl.cursor()
-                ph_wl   = db._ph()
-                cur_wl.execute(
-                    f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
-                    f"ORDER BY draw_number DESC LIMIT 7",
-                    (draw_number,)
-                )
-                recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
-                conn_wl.close()
+                try:
+                    cur_wl  = conn_wl.cursor()
+                    ph_wl   = db._ph()
+                    cur_wl.execute(
+                        f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
+                        f"ORDER BY draw_number DESC LIMIT 7",
+                        (draw_number,)
+                    )
+                    recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
+                finally:
+                    conn_wl.close()
             except Exception:
                 pass
 
@@ -2279,13 +2291,15 @@ def run_prediction_cycle() -> dict:
         # Streak + win rate alerts
         try:
             conn_s = db.get_connection()
-            cur_s  = conn_s.cursor()
-            cur_s.execute(
-                "SELECT COALESCE(is_win_size, is_win, FALSE) FROM prediction_results "
-                "ORDER BY draw_number DESC LIMIT 50"
-            )
-            streak_seq = [r[0] for r in cur_s.fetchall()]
-            conn_s.close()
+            try:
+                cur_s  = conn_s.cursor()
+                cur_s.execute(
+                    "SELECT COALESCE(is_win_size, is_win, FALSE) FROM prediction_results "
+                    "ORDER BY draw_number DESC LIMIT 50"
+                )
+                streak_seq = [r[0] for r in cur_s.fetchall()]
+            finally:
+                conn_s.close()
 
             win_streak = loss_streak = 0
             for w in streak_seq:
@@ -2392,13 +2406,15 @@ def run_prediction_cycle() -> dict:
     _current_loss_streak = 0
     try:
         conn_ls = db.get_connection()
-        cur_ls  = conn_ls.cursor()
-        cur_ls.execute(
-            "SELECT COALESCE(is_win_size, FALSE) FROM prediction_results "
-            "ORDER BY draw_number DESC LIMIT 20"
-        )
-        _ls_rows = [r[0] for r in cur_ls.fetchall()]
-        conn_ls.close()
+        try:
+            cur_ls  = conn_ls.cursor()
+            cur_ls.execute(
+                "SELECT COALESCE(is_win_size, FALSE) FROM prediction_results "
+                "ORDER BY draw_number DESC LIMIT 20"
+            )
+            _ls_rows = [r[0] for r in cur_ls.fetchall()]
+        finally:
+            conn_ls.close()
         for _w in _ls_rows:
             if not _w:
                 _current_loss_streak += 1
@@ -2687,13 +2703,15 @@ def run_prediction_cycle() -> dict:
     try:
         import json as _json
         _conn_d = db.get_connection()
-        _cur_d  = _conn_d.cursor()
-        _cur_d.execute(
-            "SELECT vote_breakdown FROM predictions "
-            "WHERE vote_breakdown IS NOT NULL ORDER BY draw_number DESC LIMIT 50"
-        )
-        _vb_rows = _cur_d.fetchall()
-        _conn_d.close()
+        try:
+            _cur_d  = _conn_d.cursor()
+            _cur_d.execute(
+                "SELECT vote_breakdown FROM predictions "
+                "WHERE vote_breakdown IS NOT NULL ORDER BY draw_number DESC LIMIT 50"
+            )
+            _vb_rows = _cur_d.fetchall()
+        finally:
+            _conn_d.close()
 
         from collections import defaultdict as _dd
         _vc: dict = _dd(lambda: [[], []])  # {voter: [[recent_25_confs], [prior_25_confs]]}
@@ -2740,20 +2758,22 @@ def run_prediction_cycle() -> dict:
     try:
         _check_n = _MOMENTUM_THRESHOLD + 2  # fetch a few extra to be safe
         _conn_m  = db.get_connection()
-        _cur_m   = _conn_m.cursor()
-        _ph_m    = '%s' if USE_POSTGRES else '?'
-        _cur_m.execute(f"""
-            SELECT (SELECT SUM(v::int) FROM json_array_elements_text(predicted_numbers::json) v)
-            FROM predictions
-            WHERE predicted_numbers IS NOT NULL
-            ORDER BY draw_number DESC LIMIT {_ph_m}
-        """ if USE_POSTGRES else f"""
-            SELECT (SELECT SUM(value) FROM json_each(predicted_numbers))
-            FROM predictions WHERE predicted_numbers IS NOT NULL
-            ORDER BY draw_number DESC LIMIT {_ph_m}
-        """, (_check_n,))
-        _sums = [row[0] for row in _cur_m.fetchall() if row[0] is not None]
-        _conn_m.close()
+        try:
+            _cur_m   = _conn_m.cursor()
+            _ph_m    = '%s' if USE_POSTGRES else '?'
+            _cur_m.execute(f"""
+                SELECT (SELECT SUM(v::int) FROM json_array_elements_text(predicted_numbers::json) v)
+                FROM predictions
+                WHERE predicted_numbers IS NOT NULL
+                ORDER BY draw_number DESC LIMIT {_ph_m}
+            """ if USE_POSTGRES else f"""
+                SELECT (SELECT SUM(value) FROM json_each(predicted_numbers))
+                FROM predictions WHERE predicted_numbers IS NOT NULL
+                ORDER BY draw_number DESC LIMIT {_ph_m}
+            """, (_check_n,))
+            _sums = [row[0] for row in _cur_m.fetchall() if row[0] is not None]
+        finally:
+            _conn_m.close()
 
         def _sz(s): return 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
         _sizes = [_sz(int(s)) for s in _sums]
@@ -2838,15 +2858,17 @@ def process_actual_result(draw_number: int, actual_numbers: List[int]) -> dict:
         recent_wl: list = []
         try:
             conn_wl = db.get_connection()
-            cur_wl  = conn_wl.cursor()
-            ph_wl   = db._ph()
-            cur_wl.execute(
-                f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
-                f"ORDER BY draw_number DESC LIMIT 7",
-                (draw_number,)
-            )
-            recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
-            conn_wl.close()
+            try:
+                cur_wl  = conn_wl.cursor()
+                ph_wl   = db._ph()
+                cur_wl.execute(
+                    f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
+                    f"ORDER BY draw_number DESC LIMIT 7",
+                    (draw_number,)
+                )
+                recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
+            finally:
+                conn_wl.close()
         except Exception:
             pass
 
