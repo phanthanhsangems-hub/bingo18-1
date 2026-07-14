@@ -516,9 +516,14 @@ def sync_from_github():
                             "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (draw_number) DO NOTHING",
                             (draw_number, json.dumps(numbers), draw_time, total, size)
                         )
-                        new_count += cur.rowcount
                     else:
-                        new_count += 1
+                        cur.execute(
+                            "INSERT OR IGNORE INTO draw_history "
+                            "(draw_number, numbers, draw_time, sum_value, size_category) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (draw_number, json.dumps(numbers), draw_time, total, size)
+                        )
+                    new_count += cur.rowcount
             conn.commit()
         finally:
             conn.close()
