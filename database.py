@@ -224,6 +224,10 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_presult_pid    ON prediction_results(prediction_id)",
                     "CREATE INDEX IF NOT EXISTS idx_presult_create ON prediction_results(created_at DESC)",
                     "CREATE INDEX IF NOT EXISTS idx_markov_from    ON markov_transitions(from_state)",
+                    # Covering index for win-rate queries (draw_number + model_name hot path)
+                    "CREATE INDEX IF NOT EXISTS idx_pred_draw_model ON predictions(draw_number, model_name)",
+                    # Partial index: filters is_win_size IS NOT NULL rows (majority in analytics)
+                    "CREATE INDEX IF NOT EXISTS idx_presult_win_draw ON prediction_results(draw_number DESC) WHERE is_win_size IS NOT NULL",
                 ]:
                     cur.execute(ddl)
 
@@ -239,20 +243,22 @@ class DatabaseManager:
                 ]:
                     cur.execute(ddl)
 
-                # Backfill is_win_sum cho các row chưa có
-                cur.execute("""
-                    UPDATE prediction_results pr
-                    SET is_win_sum = (
-                        (SELECT SUM(elem::integer)
-                         FROM json_array_elements_text(p.predicted_numbers::json) AS elem)
-                        =
-                        (SELECT SUM(elem::integer)
-                         FROM json_array_elements_text(pr.actual_numbers::json) AS elem)
-                    )
-                    FROM predictions p
-                    WHERE p.id = pr.prediction_id
-                      AND pr.is_win_sum IS NULL
-                """)
+                # Backfill is_win_sum only when rows still need it (skip full scan on warm starts)
+                cur.execute("SELECT 1 FROM prediction_results WHERE is_win_sum IS NULL LIMIT 1")
+                if cur.fetchone():
+                    cur.execute("""
+                        UPDATE prediction_results pr
+                        SET is_win_sum = (
+                            (SELECT SUM(elem::integer)
+                             FROM json_array_elements_text(p.predicted_numbers::json) AS elem)
+                            =
+                            (SELECT SUM(elem::integer)
+                             FROM json_array_elements_text(pr.actual_numbers::json) AS elem)
+                        )
+                        FROM predictions p
+                        WHERE p.id = pr.prediction_id
+                          AND pr.is_win_sum IS NULL
+                    """)
 
             else:  # SQLite
                 cur.execute("""

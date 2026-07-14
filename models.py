@@ -464,7 +464,8 @@ class HybridModel:
 
     name = "hybrid_model"
 
-    def __init__(self, exploration_rate: float = 0.1, temperature: float = 0.5,
+    def __init__(self, exploration_rate: float = float(os.environ.get("EXPLORE", "0")),
+                 temperature: float = 0.5,
                  decay_rate: float = 0.005, db=None):
         self.markov_model = MarkovModel(order=2, decay_rate=decay_rate)
         self.cold_model   = ColdNumberModel(window_size=30)

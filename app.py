@@ -658,18 +658,28 @@ def morning_digest():
         wr_row = cur.fetchone()
 
         # WR by predicted SIZE (majority_vote only, last 24h)
+        # predictions has no predicted_size column — compute from predicted_numbers sum
         cur.execute("""
-            SELECT p.predicted_size,
-                   COUNT(*) AS total,
-                   SUM(CASE WHEN pr.is_win_size THEN 1 ELSE 0 END) AS wins
-            FROM predictions p
-            JOIN prediction_results pr ON pr.prediction_id = p.id
-            JOIN draw_history dh ON dh.draw_number = p.draw_number
-            WHERE p.model_name = 'majority_vote'
-              AND dh.draw_time >= NOW() - INTERVAL '24 hours'
-              AND pr.is_win_size IS NOT NULL
-            GROUP BY p.predicted_size
-            ORDER BY p.predicted_size
+            SELECT predicted_size, COUNT(*) AS total,
+                   SUM(CASE WHEN is_win_size THEN 1 ELSE 0 END) AS wins
+            FROM (
+                SELECT CASE
+                           WHEN (SELECT SUM(v::int)
+                                 FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
+                           WHEN (SELECT SUM(v::int)
+                                 FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
+                           ELSE 'LON'
+                       END AS predicted_size,
+                       pr.is_win_size
+                FROM predictions p
+                JOIN prediction_results pr ON pr.prediction_id = p.id
+                JOIN draw_history dh ON dh.draw_number = p.draw_number
+                WHERE p.model_name = 'majority_vote'
+                  AND dh.draw_time >= NOW() - INTERVAL '24 hours'
+                  AND pr.is_win_size IS NOT NULL
+            ) t
+            GROUP BY predicted_size
+            ORDER BY predicted_size
         """)
         size_wr_rows = cur.fetchall()
 
@@ -1085,6 +1095,7 @@ def calibration_chart():
 # ── Model vs random chart (#39) ───────────────────────────────
 @app.route('/api/model-vs-random')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=60)
 def model_vs_random():
     """#39 Rolling WR (20 and 50 draws) vs baseline 37.5%."""
     n = min(int(request.args.get('n', 500)), 2000)
