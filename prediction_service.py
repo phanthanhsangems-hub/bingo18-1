@@ -395,6 +395,61 @@ _EXCESS_THRESH = 0.05   # min excess to count as "persistently over"
 # ── EMA Smoother (#31) ───────────────────────────────────────
 _EMA_ALPHA = 0.35          # 0=frozen, 1=no smoothing; 0.35 ≈ 3-draw half-life
 _sw_ema: dict = {}         # {NHO, HOA, LON} normalized EMA fractions (0..1)
+_SW_EMA_CONFIG_KEY = 'sw_ema_state'
+
+
+def _load_sw_ema(db) -> None:
+    """Load _sw_ema from system_config on cold start so all instances share EMA state."""
+    global _sw_ema
+    if _sw_ema:
+        return
+    try:
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            ph = db._ph()
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key={ph}",
+                        (_SW_EMA_CONFIG_KEY,))
+            row = cur.fetchone()
+            if row:
+                loaded = json.loads(row[0])
+                if all(k in loaded for k in ('NHO', 'HOA', 'LON')):
+                    _sw_ema = loaded
+                    logger.debug("_sw_ema loaded from DB: %s", _sw_ema)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("_load_sw_ema error: %s", e)
+
+
+def _save_sw_ema(db) -> None:
+    """Persist _sw_ema to system_config so cold-start instances inherit current state."""
+    if not _sw_ema:
+        return
+    try:
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            ph = db._ph()
+            val = json.dumps(_sw_ema)
+            if USE_POSTGRES:
+                cur.execute(f"""
+                    INSERT INTO system_config (config_key, config_value, description)
+                    VALUES ({ph},{ph},{ph})
+                    ON CONFLICT (config_key) DO UPDATE
+                      SET config_value = EXCLUDED.config_value, updated_at = NOW()
+                """, (_SW_EMA_CONFIG_KEY, val, 'EMA smoother size weights — shared across instances'))
+            else:
+                cur.execute(
+                    f"INSERT OR REPLACE INTO system_config (config_key, config_value, description) "
+                    f"VALUES ({ph},{ph},{ph})",
+                    (_SW_EMA_CONFIG_KEY, val, 'EMA smoother size weights'))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("_save_sw_ema error: %s", e)
+
 
 # ── Time-of-day SIZE distribution (static, 6000 kỳ gần nhất) ────────────────
 # Dùng trực tiếp thay vì live DB query → nhanh hơn, ổn định hơn.
@@ -2418,6 +2473,7 @@ def run_prediction_cycle() -> dict:
         voter_mults     = _get_voter_multipliers(db, next_draw)
         adaptive_thres  = _get_adaptive_thresholds(db, next_draw)
         _conformal_q    = get_conformal_quantile(db, next_draw)
+        _load_sw_ema(db)  # restore EMA state on cold start so instances share history
         # P-FIX2: loss streak boost — giảm LON anchor, tăng NHO khi thua >= 7 liên tiếp
         if _current_loss_streak >= 7:
             _boost = min(1.5, 1.0 + (_current_loss_streak - 6) * 0.08)
@@ -2432,6 +2488,7 @@ def run_prediction_cycle() -> dict:
             df, next_draw, hybrid, selector, fwbr, ensemble, banned, prev_sum,
             voter_multipliers=voter_mults,
             adaptive_thresholds=adaptive_thres)
+        _save_sw_ema(db)  # persist updated EMA so next cold-start picks up current state
         # Conformal prediction set (informational — P142 still blocks HOA from being chosen)
         if _vote_info and _conformal_q is not None:
             _ema_fracs = _vote_info.get('size_weights_ema', {})
