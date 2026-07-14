@@ -284,19 +284,21 @@ def _build_multi_window_combo_freq(df, windows=(60, 100)) -> dict:
 _pred_diversity_window = 15          # số kỳ gần nhất theo dõi
 _recent_pred_history: list  = []     # list[tuple[int,...]] newest ở cuối
 _recent_pred_nums:  Counter = Counter()  # num → tổng lần xuất hiện trong window
+_pred_diversity_lock = __import__('threading').Lock()
 
 def _update_pred_diversity(numbers: list) -> None:
     """Cập nhật counter sau mỗi prediction để track over-predicted numbers."""
     global _recent_pred_history, _recent_pred_nums
-    _recent_pred_history.append(tuple(numbers))
-    if len(_recent_pred_history) > _pred_diversity_window:
-        removed = _recent_pred_history.pop(0)
-        for n in removed:
-            _recent_pred_nums[n] -= 1
-            if _recent_pred_nums[n] <= 0:
-                _recent_pred_nums.pop(n, None)
-    for n in numbers:
-        _recent_pred_nums[n] += 1
+    with _pred_diversity_lock:
+        _recent_pred_history.append(tuple(numbers))
+        if len(_recent_pred_history) > _pred_diversity_window:
+            removed = _recent_pred_history.pop(0)
+            for n in removed:
+                _recent_pred_nums[n] -= 1
+                if _recent_pred_nums[n] <= 0:
+                    _recent_pred_nums.pop(n, None)
+        for n in numbers:
+            _recent_pred_nums[n] += 1
 
 
 # ── Dynamic voter weight cache ───────────────────────────────
@@ -495,6 +497,130 @@ _CARRYOVER_STATS: dict = {
 }
 _CARRYOVER_MIN_PCT  = 45.0   # ngưỡng để tính là "hot carry" (trên baseline ~41%)
 _CARRYOVER_MAX_CONF = 0.38   # confidence tối đa của carry-over voter
+
+# ── Auto-refresh static stats từ DB ──────────────────────────────────────────
+_STATS_REFRESH_EVERY = 2000   # refresh mỗi ~2000 draws (~8 ngày)
+_stats_refresh_draw: int = 0  # draw_number lần refresh gần nhất
+
+def _refresh_static_stats(db, current_draw: int) -> None:
+    """
+    Tự động cập nhật _TOD_SIZE_STATS, _SIZE_MARKOV2, _CARRYOVER_STATS từ DB
+    mỗi _STATS_REFRESH_EVERY draws. Fallback về bảng hardcode nếu query lỗi.
+    """
+    global _TOD_SIZE_STATS, _SIZE_MARKOV2, _CARRYOVER_STATS, _stats_refresh_draw
+    if current_draw - _stats_refresh_draw < _STATS_REFRESH_EVERY:
+        return
+    if not config.DATABASE_URL:
+        return
+    try:
+        conn = db.get_connection()
+        cur  = conn.cursor()
+
+        # ── 1. TOD SIZE distribution (6000 kỳ gần nhất) ──────────────────────
+        cur.execute("""
+            SELECT
+                EXTRACT(HOUR FROM draw_time AT TIME ZONE 'UTC'
+                                           AT TIME ZONE 'Asia/Ho_Chi_Minh')::int AS vn_hour,
+                COUNT(*) AS total,
+                SUM(CASE WHEN size_category = 'NHO' THEN 1 ELSE 0 END) AS nho,
+                SUM(CASE WHEN size_category = 'HOA' THEN 1 ELSE 0 END) AS hoa,
+                SUM(CASE WHEN size_category = 'LON' THEN 1 ELSE 0 END) AS lon
+            FROM (SELECT * FROM draw_history ORDER BY draw_number DESC LIMIT 6000) sub
+            WHERE draw_time IS NOT NULL
+            GROUP BY vn_hour
+            HAVING COUNT(*) >= 200
+            ORDER BY vn_hour
+        """)
+        tod_rows = cur.fetchall()
+        if len(tod_rows) >= 8:
+            new_tod = {}
+            for vn_hour, total, nho, hoa, lon in tod_rows:
+                h = int(vn_hour)
+                if 6 <= h <= 21:
+                    new_tod[h] = {
+                        'NHO': round(nho / total, 4),
+                        'HOA': round(hoa / total, 4),
+                        'LON': round(lon / total, 4),
+                    }
+            if new_tod:
+                _TOD_SIZE_STATS = new_tod
+                logger.info("_TOD_SIZE_STATS refreshed: %d hours from DB", len(new_tod))
+
+        # ── 2. Size Markov2 transitions (6000 kỳ gần nhất) ───────────────────
+        cur.execute("""
+            WITH ordered AS (
+                SELECT size_category,
+                       LAG(size_category, 1) OVER (ORDER BY draw_number) AS prev1,
+                       LAG(size_category, 2) OVER (ORDER BY draw_number) AS prev2
+                FROM (SELECT * FROM draw_history ORDER BY draw_number DESC LIMIT 6000) sub
+            )
+            SELECT prev2, prev1,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN size_category = 'NHO' THEN 1 ELSE 0 END) AS nho,
+                   SUM(CASE WHEN size_category = 'HOA' THEN 1 ELSE 0 END) AS hoa,
+                   SUM(CASE WHEN size_category = 'LON' THEN 1 ELSE 0 END) AS lon
+            FROM ordered
+            WHERE prev1 IS NOT NULL AND prev2 IS NOT NULL
+              AND prev1 IN ('NHO','HOA','LON') AND prev2 IN ('NHO','HOA','LON')
+            GROUP BY prev2, prev1
+            HAVING COUNT(*) >= 50
+        """)
+        mk_rows = cur.fetchall()
+        if len(mk_rows) >= 7:
+            new_mk = {}
+            for prev2, prev1, total, nho, hoa, lon in mk_rows:
+                new_mk[(prev2, prev1)] = (
+                    round(nho / total, 4),
+                    round(hoa / total, 4),
+                    round(lon / total, 4),
+                )
+            if new_mk:
+                _SIZE_MARKOV2 = new_mk
+                logger.info("_SIZE_MARKOV2 refreshed: %d transitions from DB", len(new_mk))
+
+        # ── 3. Carryover stats by VN hour (6000 kỳ gần nhất) ─────────────────
+        cur.execute("""
+            WITH pairs AS (
+                SELECT
+                    EXTRACT(HOUR FROM curr.draw_time AT TIME ZONE 'UTC'
+                                       AT TIME ZONE 'Asia/Ho_Chi_Minh')::int AS vn_hour,
+                    prev_num,
+                    (curr.numbers::jsonb @> jsonb_build_array(prev_num)) AS carried
+                FROM (
+                    SELECT draw_number, draw_time, numbers,
+                           LAG(numbers) OVER (ORDER BY draw_number) AS prev_numbers
+                    FROM (SELECT * FROM draw_history ORDER BY draw_number DESC LIMIT 6000) t
+                ) curr
+                CROSS JOIN LATERAL (
+                    SELECT value::int AS prev_num
+                    FROM jsonb_array_elements_text(curr.prev_numbers::jsonb)
+                ) pn
+                WHERE curr.prev_numbers IS NOT NULL AND curr.draw_time IS NOT NULL
+            )
+            SELECT vn_hour, prev_num,
+                   ROUND(100.0 * SUM(CASE WHEN carried THEN 1 ELSE 0 END) / COUNT(*), 1) AS carry_pct,
+                   COUNT(*) AS n
+            FROM pairs
+            WHERE vn_hour BETWEEN 6 AND 21
+            GROUP BY vn_hour, prev_num
+            HAVING COUNT(*) >= 50
+            ORDER BY vn_hour, prev_num
+        """)
+        co_rows = cur.fetchall()
+        if co_rows:
+            new_co: dict = {}
+            for vn_hour, prev_num, carry_pct, _ in co_rows:
+                h = int(vn_hour)
+                new_co.setdefault(h, {})[int(prev_num)] = float(carry_pct)
+            if len(new_co) >= 8:
+                _CARRYOVER_STATS = new_co
+                logger.info("_CARRYOVER_STATS refreshed: %d hours from DB", len(new_co))
+
+        conn.close()
+        _stats_refresh_draw = current_draw
+        logger.info("Static stats refresh done at draw #%d", current_draw)
+    except Exception as e:
+        logger.warning("_refresh_static_stats error: %s", e)
 
 
 def _get_tod_priors(db, current_draw: int) -> dict:
@@ -1603,6 +1729,29 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     except Exception as _pce:
         logger.debug("pair_cooc voter error: %s", _pce)
 
+    # ── LLM voter (OpenRouter/Groq/Gemini) ────────────────────────────────────
+    # Chỉ kích hoạt khi có ít nhất 1 API key. Timeout 8s để không block cycle.
+    # Kết quả được cache theo draw_number — không gọi LLM 2 lần cho cùng kỳ.
+    try:
+        from ai_predictor import get_llm_vote as _get_llm_vote
+        from models import _parse_numbers as _pn_llm
+        _llm_draws = [
+            {
+                'draw_number': int(row.draw_number),
+                'numbers':     [int(x) for x in _pn_llm(row.numbers)],
+                'size_category': row.size_category if hasattr(row, 'size_category') else '',
+                'sum_value':   int(row.sum_value) if hasattr(row, 'sum_value') else 0,
+            }
+            for _, row in df.head(30).iterrows()
+        ]
+        _llm_draws.reverse()  # chronological order (oldest first)
+        _llm_vote = _get_llm_vote(_llm_draws)
+        if _llm_vote:
+            votes.append(_llm_vote)
+            logger.debug("llm voter: %s conf=%.3f", _llm_vote['size'], _llm_vote['conf'])
+    except Exception as _llme:
+        logger.debug("llm voter error: %s", _llme)
+
     if not votes:
         return None, 0.0, {}
 
@@ -2163,6 +2312,7 @@ def run_prediction_cycle() -> dict:
         return {"skipped": True, "draw_number": next_draw, "processed": processed_results}
 
     _ensure_transition_cache(db, last)
+    _refresh_static_stats(db, last)  # auto-refresh TOD/Markov2/Carryover tables từ DB
 
     df = db.get_recent_draws(300)
     if len(df) < 20:

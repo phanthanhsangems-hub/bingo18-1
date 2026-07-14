@@ -468,6 +468,52 @@ def ask_ai(draws: list) -> Optional[dict]:
     return None
 
 
+# ── 7b. LLM voter (dùng trong VotingEnsemble) ────────────────────────────────
+# Cache kết quả LLM để tránh gọi lại khi draw chưa đổi.
+_llm_voter_cache: dict = {}   # {'draw_number': int, 'result': dict|None, 'ts': float}
+_LLM_VOTER_TIMEOUT   = 8.0   # giây — bỏ qua nếu LLM chậm hơn timeout
+
+def get_llm_vote(draws: list) -> dict | None:
+    """
+    Trả về voter dict tương thích với VotingEnsemble:
+      {'name': 'llm', 'size': 'NHO'|'HOA'|'LON', 'conf': float}
+    Dùng cache theo draw_number để không gọi LLM nhiều lần cho cùng 1 kỳ.
+    Trả về None nếu không có API key hoặc LLM timeout/lỗi.
+    """
+    import threading as _td, time as _t
+    if not draws:
+        return None
+    if not (OPENROUTER_API_KEY or GROQ_API_KEY or GEMINI_API_KEY):
+        return None
+
+    current_draw = draws[-1].get('draw_number', 0) if draws else 0
+    cached = _llm_voter_cache.get('data')
+    if cached and cached.get('draw_number') == current_draw:
+        return cached.get('result')
+
+    result_box = [None]
+    def _call():
+        try:
+            result_box[0] = ask_ai(draws)
+        except Exception:
+            pass
+
+    t = _td.Thread(target=_call, daemon=True)
+    t.start()
+    t.join(timeout=_LLM_VOTER_TIMEOUT)
+
+    raw = result_box[0]
+    voter = None
+    if raw and raw.get('prediction') in ('NHO', 'HOA', 'LON'):
+        # Confidence từ LLM (0-100) → scale xuống 0.15-0.45 phù hợp với các voter khác
+        conf_raw = int(raw.get('confidence', 50))
+        conf = round(max(0.15, min(0.45, conf_raw / 200.0)), 3)
+        voter = {'name': 'llm', 'size': raw['prediction'], 'conf': conf}
+
+    _llm_voter_cache['data'] = {'draw_number': current_draw, 'result': voter}
+    return voter
+
+
 # ── 8. Telegram ───────────────────────────────────────────────────────────────
 def send_telegram(message: str) -> bool:
     try:
