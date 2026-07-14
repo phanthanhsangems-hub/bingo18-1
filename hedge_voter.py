@@ -28,6 +28,8 @@ _HEDGE_MULT_MIN = 0.5       # clamp floor — raised from 0.3 to preserve divers
 _HEDGE_MULT_MAX = 3.0       # clamp ceiling
 _PRUNE_LOG_W_FLOOR = -100.0 # voters below this are unrecoverable; pruned during backfill
 
+_hedge_cache: Optional['HedgeWeights'] = None  # module-level singleton; reset on update
+
 
 class HedgeWeights:
     """Log-weight vector over voter names with online Hedge updates."""
@@ -85,7 +87,11 @@ def _use_postgres() -> bool:
 
 
 def load_hedge_weights(db) -> Optional[HedgeWeights]:
-    """Load HedgeWeights from system_config. Returns None if not yet stored."""
+    """Load HedgeWeights from system_config. Returns None if not yet stored.
+    Uses module-level singleton cache; invalidated by save_hedge_weights."""
+    global _hedge_cache
+    if _hedge_cache is not None:
+        return _hedge_cache
     try:
         conn = db.get_connection()
         cur = conn.cursor()
@@ -95,14 +101,17 @@ def load_hedge_weights(db) -> Optional[HedgeWeights]:
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
-            return HedgeWeights.from_dict(json.loads(row[0]))
+            _hedge_cache = HedgeWeights.from_dict(json.loads(row[0]))
+            return _hedge_cache
     except Exception as e:
         logger.debug("load_hedge_weights error: %s", e)
     return None
 
 
 def save_hedge_weights(db, hw: HedgeWeights) -> None:
-    """Upsert HedgeWeights into system_config."""
+    """Upsert HedgeWeights into system_config. Invalidates the module-level cache."""
+    global _hedge_cache
+    _hedge_cache = hw  # update cache immediately so next load_hedge_weights sees fresh data
     try:
         payload = json.dumps(hw.to_dict())
         conn = db.get_connection()
