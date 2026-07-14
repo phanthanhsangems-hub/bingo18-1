@@ -33,7 +33,8 @@ db  = DatabaseManager()
 logger = logging.getLogger(__name__)
 
 # ── In-memory response cache (GET only, TTL-based) ───────────
-_resp_cache: dict = {}  # full_path -> (payload_bytes, expiry_ts)
+_resp_cache: dict = {}   # full_path -> (payload_bytes, expiry_ts)
+_RESP_CACHE_MAX = 200    # max live entries; evict expired then oldest-expiry when full
 
 def cache_resp(ttl: int = 120):
     """Cache a GET endpoint's JSON response for `ttl` seconds per unique URL."""
@@ -55,6 +56,15 @@ def cache_resp(ttl: int = 120):
             resp_obj = result[0] if isinstance(result, tuple) else result
             if not isinstance(result, tuple) or result[1] == 200:
                 try:
+                    if len(_resp_cache) >= _RESP_CACHE_MAX:
+                        # Evict expired entries first
+                        expired = [k for k, v in list(_resp_cache.items()) if now >= v[1]]
+                        for k in expired:
+                            _resp_cache.pop(k, None)
+                        # Still full → evict the entry with the smallest (oldest) expiry
+                        if len(_resp_cache) >= _RESP_CACHE_MAX:
+                            oldest = min(_resp_cache, key=lambda k: _resp_cache[k][1])
+                            _resp_cache.pop(oldest, None)
                     _resp_cache[key] = (resp_obj.get_data(), now + ttl)
                 except Exception:
                     pass
@@ -646,6 +656,34 @@ def morning_digest():
               AND pr.is_win_size IS NOT NULL
         """)
         wr_row = cur.fetchone()
+
+        # WR by predicted SIZE (majority_vote only, last 24h)
+        cur.execute("""
+            SELECT p.predicted_size,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN pr.is_win_size THEN 1 ELSE 0 END) AS wins
+            FROM predictions p
+            JOIN prediction_results pr ON pr.prediction_id = p.id
+            JOIN draw_history dh ON dh.draw_number = p.draw_number
+            WHERE p.model_name = 'majority_vote'
+              AND dh.draw_time >= NOW() - INTERVAL '24 hours'
+              AND pr.is_win_size IS NOT NULL
+            GROUP BY p.predicted_size
+            ORDER BY p.predicted_size
+        """)
+        size_wr_rows = cur.fetchall()
+
+        # Current W/L streak (majority_vote, last 20)
+        cur.execute("""
+            SELECT pr.is_win_size
+            FROM predictions p
+            JOIN prediction_results pr ON pr.prediction_id = p.id
+            WHERE p.model_name = 'majority_vote'
+              AND pr.is_win_size IS NOT NULL
+            ORDER BY p.draw_number DESC LIMIT 20
+        """)
+        streak_rows = [r[0] for r in cur.fetchall()]
+
         cur.close()
         conn.close()
 
@@ -665,6 +703,28 @@ def morning_digest():
                 nums = [numbers_raw]
             hot_lines += f"  🔥 {'-'.join(str(n) for n in nums)} ×{cnt}\n"
 
+        # Build WR-by-size line
+        size_wr_parts = []
+        for pred_size, total, wins in size_wr_rows:
+            if total and pred_size:
+                wr_s = round(int(wins or 0) / int(total) * 100)
+                size_wr_parts.append(f"{pred_size} {wr_s}% ({wins}/{total})")
+        size_wr_line = " · ".join(size_wr_parts) if size_wr_parts else "N/A"
+
+        # Current streak
+        streak_str = ""
+        if streak_rows:
+            cur_type = streak_rows[0]
+            actual_len = 0
+            for w in streak_rows:
+                if w == cur_type:
+                    actual_len += 1
+                else:
+                    break
+            icon = "🟢" if cur_type else "🔴"
+            label = "THẮNG" if cur_type else "THUA"
+            streak_str = f"{icon} Streak: {actual_len} {label} liên tiếp"
+
         from zoneinfo import ZoneInfo as _ZI
         date_vn = datetime.now(_ZI("Asia/Ho_Chi_Minh")).strftime('%d/%m/%Y')
 
@@ -675,8 +735,11 @@ def morning_digest():
             f"  🟢 NHO: {nho} ({round(nho/total_draws*100) if total_draws else 0}%)\n"
             f"  🟡 HOA: {hoa} ({round(hoa/total_draws*100) if total_draws else 0}%)\n"
             f"  🔴 LON: {lon} ({round(lon/total_draws*100) if total_draws else 0}%)\n"
-            f"🎯 Win rate: {wr_wins}/{wr_total} = {wr_pct}\n"
+            f"🎯 Win rate 24h: {wr_wins}/{wr_total} = {wr_pct}\n"
+            f"📈 WR theo SIZE: {size_wr_line}\n"
         )
+        if streak_str:
+            msg += f"{streak_str}\n"
         if hot_lines:
             msg += f"🔥 Bộ ra ≥2 lần:\n{hot_lines}"
 
@@ -11134,6 +11197,7 @@ def smart_summary():
 
 @app.route('/api/combo-detail')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=300)
 def combo_detail():
     """Chi tiết thống kê combo cụ thể: tần suất, gap, hot/cold — dựa toàn bộ lịch sử."""
     import re as _re
@@ -11149,22 +11213,43 @@ def combo_detail():
     try:
         conn = db.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT draw_number, numbers FROM draw_history ORDER BY draw_number")
-        rows = cur.fetchall()
-        conn.close()
 
-        total_draws = len(rows)
-        occurrences = []
-        for draw_n, nums_raw in rows:
-            try:
-                nums = json.loads(nums_raw) if isinstance(nums_raw, str) else (nums_raw or [])
-            except Exception:
-                nums = []
-            if tuple(sorted(int(n) for n in nums)) == combo_key:
-                occurrences.append(draw_n)
+        if USE_POSTGRES:
+            # Fast path: use SQL to filter by sum_value + LEAST/GREATEST (avoids full Python scan)
+            # sorted(a,b,c) is uniquely identified by (sum, min, max) for values in [1,6]
+            cur.execute("SELECT COUNT(*) FROM draw_history")
+            total_draws = int(cur.fetchone()[0])
+            cur.execute("""
+                SELECT draw_number FROM draw_history
+                WHERE sum_value = %s
+                  AND LEAST((numbers::json->>0)::int,
+                             (numbers::json->>1)::int,
+                             (numbers::json->>2)::int) = %s
+                  AND GREATEST((numbers::json->>0)::int,
+                               (numbers::json->>1)::int,
+                               (numbers::json->>2)::int) = %s
+                ORDER BY draw_number
+            """, (s, combo_key[0], combo_key[2]))
+            occurrences = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT MAX(draw_number) FROM draw_history")
+            latest_draw = int(cur.fetchone()[0] or 0)
+            conn.close()
+        else:
+            cur.execute("SELECT draw_number, numbers FROM draw_history ORDER BY draw_number")
+            rows = cur.fetchall()
+            conn.close()
+            total_draws = len(rows)
+            occurrences = []
+            for draw_n, nums_raw in rows:
+                try:
+                    nums = json.loads(nums_raw) if isinstance(nums_raw, str) else (nums_raw or [])
+                except Exception:
+                    nums = []
+                if tuple(sorted(int(n) for n in nums)) == combo_key:
+                    occurrences.append(draw_n)
+            latest_draw = rows[-1][0] if rows else 0
 
         n_occ = len(occurrences)
-        latest_draw = rows[-1][0] if rows else 0
 
         gaps = []
         for i in range(1, len(occurrences)):
@@ -11364,6 +11449,7 @@ def weight_optimizer():
 
 @app.route('/api/today-combos')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=60)
 def today_combos():
     """P55: Combos (3-number sets) appeared today vs not-appeared yet (VN time).
 
@@ -11426,7 +11512,8 @@ def today_combos():
         appeared.sort(key=lambda x: -x['count'])
         not_appeared.sort(key=lambda x: x['sum'])
 
-        vn_now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7)))
+        from zoneinfo import ZoneInfo as _ZI_tc
+        vn_now = datetime.now(_ZI_tc("Asia/Ho_Chi_Minh"))
         total_draws = sum(len(v) for v in combo_draws.values())
 
         return jsonify({
