@@ -881,43 +881,62 @@ class ModelSelector:
         scored: List[Tuple[str, float, int]] = []   # (name, avg_wr, total_samples)
         unexplored: List[Tuple[str, int]] = []       # models chưa đủ MIN_SAMPLES
 
+        # Single batched query instead of 27 connections (9 models × 3 windows)
+        db_rows: dict = {}
+        try:
+            conn = self.db.get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT model_name,
+                        SUM(CASE WHEN rn <= 30  THEN 1 ELSE 0 END) AS n30,
+                        SUM(CASE WHEN is_win    AND rn <= 30 THEN 1 ELSE 0 END) AS wins30,
+                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 30 THEN 1 ELSE 0 END) AS sw30,
+                        SUM(CASE WHEN rn <= 60  THEN 1 ELSE 0 END) AS n60,
+                        SUM(CASE WHEN is_win    AND rn <= 60 THEN 1 ELSE 0 END) AS wins60,
+                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 60 THEN 1 ELSE 0 END) AS sw60,
+                        COUNT(*) AS n100,
+                        SUM(CASE WHEN is_win    THEN 1 ELSE 0 END) AS wins100,
+                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) THEN 1 ELSE 0 END) AS sw100
+                    FROM (
+                        SELECT p.model_name, pr.is_win, pr.is_win_sum,
+                               ROW_NUMBER() OVER (PARTITION BY p.model_name ORDER BY pr.created_at DESC) AS rn
+                        FROM prediction_results pr
+                        JOIN predictions p ON pr.prediction_id = p.id
+                    ) t
+                    WHERE rn <= 100
+                    GROUP BY model_name
+                """)
+                db_rows = {row[0]: row for row in cur.fetchall()}
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning("ModelSelector batch query error: %s", e)
+
         for name in self._models:
             weighted_size_wr = 0.0
             weighted_sum_wr  = 0.0
             weight_sum       = 0.0
             total_n          = 0
-            for w in windows:
-                w_coeff = self.WINDOW_WEIGHTS.get(w, 1.0 / len(windows))
-                try:
-                    conn = self.db.get_connection()
-                    try:
-                        cur = conn.cursor()
-                        ph  = self.db._ph()
-                        cur.execute(f"""
-                            SELECT COUNT(*) as total,
-                                   SUM(CASE WHEN is_win THEN 1 ELSE 0 END) as wins,
-                                   SUM(CASE WHEN COALESCE(is_win_sum, FALSE) THEN 1 ELSE 0 END) as sum_wins
-                            FROM (
-                                SELECT pr.is_win, pr.is_win_sum
-                                FROM prediction_results pr
-                                JOIN predictions p ON pr.prediction_id = p.id
-                                WHERE p.model_name = {ph}
-                                ORDER BY pr.created_at DESC
-                                LIMIT {ph}
-                            ) sub
-                        """, (name, w))
-                        row = cur.fetchone()
-                        if row and row[0]:
-                            size_wr = (row[1] or 0) / row[0]
-                            sum_wr  = (row[2] or 0) / row[0]
-                            weighted_size_wr += size_wr * w_coeff
-                            weighted_sum_wr  += sum_wr  * w_coeff
-                            weight_sum       += w_coeff
-                            total_n           = max(total_n, row[0])
-                    finally:
-                        conn.close()
-                except Exception as e:
-                    logger.debug("ModelSelector stats error %s w=%d: %s", name, w, e)
+
+            row = db_rows.get(name)
+            if row:
+                # (model_name, n30, wins30, sw30, n60, wins60, sw60, n100, wins100, sw100)
+                win_data = {
+                    30:  (int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)),
+                    60:  (int(row[4] or 0), int(row[5] or 0), int(row[6] or 0)),
+                    100: (int(row[7] or 0), int(row[8] or 0), int(row[9] or 0)),
+                }
+                for w in windows:
+                    w_coeff = self.WINDOW_WEIGHTS.get(w, 1.0 / len(windows))
+                    n, wins, sw = win_data.get(w, (0, 0, 0))
+                    if n:
+                        size_wr = wins / n
+                        sum_wr  = sw   / n
+                        weighted_size_wr += size_wr * w_coeff
+                        weighted_sum_wr  += sum_wr  * w_coeff
+                        weight_sum       += w_coeff
+                        total_n           = max(total_n, n)
 
             avg_size_wr = weighted_size_wr / weight_sum if weight_sum > 0 else 0.0
             avg_sum_wr  = weighted_sum_wr  / weight_sum if weight_sum > 0 else 0.0
