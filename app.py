@@ -553,8 +553,8 @@ def last_draw_id():
     if secret != config.TRIGGER_SECRET:
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        draws = db.get_recent_draws(limit=1)
-        last_id = draws[0]['draw_number'] if draws else 0
+        df = db.get_recent_draws(limit=1)
+        last_id = int(df.iloc[0]['draw_number']) if not df.empty else 0
         return jsonify({"draw_number": last_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
