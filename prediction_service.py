@@ -38,6 +38,7 @@ ALL_MODEL_NAMES = [
 _model_cache = None
 _model_cache_lock = threading.Lock()  # FIX: thread-safe access
 _last_retrain_time: Optional[datetime] = None
+_retrain_failure_count: int = 0
 
 def invalidate_model_cache():
     """Gọi sau khi retrain để force reload model mới lên RAM"""
@@ -48,7 +49,7 @@ def invalidate_model_cache():
 
 def _background_retrain():
     """Retrain HybridModel + VotingEnsemble + SizePredictor từ 500 kỳ gần nhất, chạy ngầm."""
-    global _model_cache, _last_retrain_time
+    global _model_cache, _last_retrain_time, _retrain_failure_count
     try:
         logger.info("Auto-Retrain: bắt đầu...")
         db = DatabaseManager()
@@ -86,11 +87,13 @@ def _background_retrain():
                         new_selector.add_model(m)
                 _model_cache = (hybrid, new_selector, old[2], ensemble, size_pred)
             # Nếu cache chưa có, để None — lần sau _get_models() sẽ rebuild đầy đủ
+            _last_retrain_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
 
-        _last_retrain_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+        _retrain_failure_count = 0
         logger.info("Auto-Retrain: hoàn tất (df=%d rows, ensemble+ML retrained).", len(df))
     except Exception as e:
-        logger.error("Auto-Retrain error: %s", e)
+        _retrain_failure_count += 1
+        logger.error("Auto-Retrain error (attempt %d): %s", _retrain_failure_count, e)
         traceback.print_exc()
 
 def _get_models(db):
@@ -513,6 +516,7 @@ def _refresh_static_stats(db, current_draw: int) -> None:
         return
     if not config.DATABASE_URL:
         return
+    _stats_refresh_draw = current_draw  # mark attempted upfront; prevents retry storm on DB failure
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -618,7 +622,6 @@ def _refresh_static_stats(db, current_draw: int) -> None:
                 logger.info("_CARRYOVER_STATS refreshed: %d hours from DB", len(new_co))
 
         conn.close()
-        _stats_refresh_draw = current_draw
         logger.info("Static stats refresh done at draw #%d", current_draw)
     except Exception as e:
         logger.warning("_refresh_static_stats error: %s", e)
@@ -2811,7 +2814,7 @@ def process_actual_result(draw_number: int, actual_numbers: List[int]) -> dict:
         logger.warning(f"Không thể update hybrid weights: {e}")
 
     # ── Logic Auto Retrain chạy ngầm ──
-    if draw_number % getattr(config, 'AUTO_RETRAIN_INTERVAL', 500) == 0:
+    if draw_number > 0 and draw_number % getattr(config, 'AUTO_RETRAIN_INTERVAL', 500) == 0:
         logger.info(f"🔄 Đã đạt mốc {draw_number} kỳ. Bắt đầu tự động Retrain model ở background...")
         threading.Thread(target=_background_retrain, daemon=True).start()
 

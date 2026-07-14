@@ -559,9 +559,9 @@ def check_wr_alert(conn, wr_alerted: dict):
     if wr < 0.30 and not wr_alerted.get('low'):
         wr_alerted['low'] = True
         wr_alerted.pop('recovered', None)
-        _tg_send(
-            f"📉 *WR THẤP!*\n"
-            f"20 kỳ gần nhất: *{wins}/20 ({wr*100:.0f}%)*\n"
+        _tg_html(
+            f"📉 <b>WR THẤP!</b>\n"
+            f"20 kỳ gần nhất: <b>{wins}/20 ({wr*100:.0f}%)</b>\n"
             f"Baseline: 37.5% — đang dưới xa\n"
             f"⚠️ Cân nhắc kiểm tra model"
         )
@@ -612,11 +612,11 @@ def check_hoa_reeval(conn, reeval_state: dict):
 
         # P142 was blocked when HOA WR ≈ 18-24%. Alert if HOA frequency rebounds
         if n_30 >= 100 and delta >= 3.0:
-            _tg_send(
-                f"📊 *HOA Re-evaluation (#49)*\n"
-                f"HOA 30 ngày gần: *{hoa_30}%* (n={n_30})\n"
+            _tg_html(
+                f"📊 <b>HOA Re-evaluation (#49)</b>\n"
+                f"HOA 30 ngày gần: <b>{hoa_30}%</b> (n={n_30})\n"
                 f"HOA lịch sử: {hoa_all}% (n={n_all})\n"
-                f"Delta: *+{delta}%* — HOA đang tăng tần suất\n"
+                f"Delta: <b>+{delta}%</b> — HOA đang tăng tần suất\n"
                 f"⚠️ Cân nhắc đánh giá lại block P142"
             )
             logger.info("#49 HOA reeval: recent=%.1f%% all=%.1f%% delta=+%.1f%% → alert sent", hoa_30, hoa_all, delta)
@@ -654,14 +654,14 @@ def check_system_health_alert(conn, sh_alerted: dict):
         return
     sh_alerted['status'] = status
     if status == 'GOOD':
-        _tg_send(f"✅ *System Health phục hồi*\nWR 50 kỳ: *{wr50*100:.1f}%* ≥ 34%")
+        _tg_html(f"✅ <b>System Health phục hồi</b>\nWR 50 kỳ: <b>{wr50*100:.1f}%</b> ≥ 34%")
         logger.info("System health recovered: WR50=%.1f%%", wr50 * 100)
     else:
         icon = '❌' if status == 'BAD' else '⚠️'
         msg  = 'Cần kiểm tra model ngay!' if status == 'BAD' else 'Đang dưới baseline, theo dõi.'
-        _tg_send(
-            f"{icon} *System Health: {status}*\n"
-            f"WR 50 kỳ: *{wr50*100:.1f}%*\n{msg}"
+        _tg_html(
+            f"{icon} <b>System Health: {status}</b>\n"
+            f"WR 50 kỳ: <b>{wr50*100:.1f}%</b>\n{msg}"
         )
         logger.info("System health %s: WR50=%.1f%%", status, wr50 * 100)
 
@@ -692,12 +692,12 @@ def check_confidence_gap(conn, gap_alerted: dict):
     gap      = avg_conf - wr
     if gap > 0.15 and not gap_alerted.get('active'):
         gap_alerted['active'] = True
-        _tg_send(
-            f"⚠️ *Confidence Gap (#47)*\n"
+        _tg_html(
+            f"⚠️ <b>Confidence Gap (#47)</b>\n"
             f"20 kỳ gần nhất:\n"
-            f"Avg confidence: *{avg_conf*100:.1f}%*\n"
-            f"Actual WR: *{wr*100:.1f}%*\n"
-            f"Gap: *+{gap*100:.1f}%* > 15% — model đang overcalibrated"
+            f"Avg confidence: <b>{avg_conf*100:.1f}%</b>\n"
+            f"Actual WR: <b>{wr*100:.1f}%</b>\n"
+            f"Gap: <b>+{gap*100:.1f}%</b> &gt; 15% — model đang overcalibrated"
         )
         logger.info("#47 Conf gap: conf=%.1f%% wr=%.1f%% gap=+%.1f%%",
                     avg_conf * 100, wr * 100, gap * 100)

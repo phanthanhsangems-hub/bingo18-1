@@ -33,7 +33,9 @@ db  = DatabaseManager()
 logger = logging.getLogger(__name__)
 
 # ── In-memory response cache (GET only, TTL-based) ───────────
+import threading as _threading
 _resp_cache: dict = {}   # full_path -> (payload_bytes, expiry_ts)
+_resp_cache_lock = _threading.Lock()
 _RESP_CACHE_MAX = 200    # max live entries; evict expired then oldest-expiry when full
 
 def cache_resp(ttl: int = 120):
@@ -45,27 +47,29 @@ def cache_resp(ttl: int = 120):
                 return fn(*args, **kwargs)
             key = request.full_path  # includes query string
             now = _time.time()
-            hit = _resp_cache.get(key)
-            if hit and now < hit[1]:
-                resp = make_response(hit[0])
-                resp.headers['Content-Type'] = 'application/json'
-                resp.headers['X-Cache'] = 'HIT'
-                return resp
+            with _resp_cache_lock:
+                hit = _resp_cache.get(key)
+                if hit and now < hit[1]:
+                    resp = make_response(hit[0])
+                    resp.headers['Content-Type'] = 'application/json'
+                    resp.headers['X-Cache'] = 'HIT'
+                    return resp
             result = fn(*args, **kwargs)
             # Only cache 200 responses; result may be (Response, status) tuple
             resp_obj = result[0] if isinstance(result, tuple) else result
             if not isinstance(result, tuple) or result[1] == 200:
                 try:
-                    if len(_resp_cache) >= _RESP_CACHE_MAX:
-                        # Evict expired entries first
-                        expired = [k for k, v in list(_resp_cache.items()) if now >= v[1]]
-                        for k in expired:
-                            _resp_cache.pop(k, None)
-                        # Still full → evict the entry with the smallest (oldest) expiry
+                    with _resp_cache_lock:
                         if len(_resp_cache) >= _RESP_CACHE_MAX:
-                            oldest = min(_resp_cache, key=lambda k: _resp_cache[k][1])
-                            _resp_cache.pop(oldest, None)
-                    _resp_cache[key] = (resp_obj.get_data(), now + ttl)
+                            # Evict expired entries first
+                            expired = [k for k, v in list(_resp_cache.items()) if now >= v[1]]
+                            for k in expired:
+                                _resp_cache.pop(k, None)
+                            # Still full → evict the entry with the smallest (oldest) expiry
+                            if len(_resp_cache) >= _RESP_CACHE_MAX:
+                                oldest = min(_resp_cache, key=lambda k: _resp_cache[k][1])
+                                _resp_cache.pop(oldest, None)
+                        _resp_cache[key] = (resp_obj.get_data(), now + ttl)
                 except Exception:
                     pass
             return result
