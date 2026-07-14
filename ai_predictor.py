@@ -44,13 +44,13 @@ DEFAULT_SQLITE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "d
 
 # ── SSL context (Windows-compatible) ─────────────────────────────────────────
 def _ssl_ctx():
-    """Trả về SSL context. Trên Windows có thể gặp CRYPT_E_NO_REVOCATION_CHECK."""
+    """Trả về SSL context với certifi bundle (tương thích Windows + Linux)."""
     import platform
-    ctx = ssl.create_default_context()
-    if platform.system() == "Windows":
-        # Windows đôi khi lỗi CRYPT_E_NO_REVOCATION_CHECK với CRL check
-        ctx.check_hostname = False
-        ctx.verify_mode    = ssl.CERT_NONE
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ctx = ssl.create_default_context()
     return ctx
 
 

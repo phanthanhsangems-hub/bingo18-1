@@ -422,23 +422,31 @@ def _tg_html(text: str):
 
 def announce_prediction(conn, draw_number: int):
     """
-    #2 — Đợi Cloud Run compute xong (~8s) rồi fetch dự đoán mới nhất và gửi Telegram.
+    #2 — Poll Supabase until prediction for next draw appears (max 24s), then send Telegram.
+    Replaces flat sleep(10): wakes as soon as Cloud Run writes the prediction.
     """
-    time.sleep(10)
+    row = None
+    for _ in range(12):
+        time.sleep(2)
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT predicted_numbers, model_name, confidence,
+                       CASE WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 9  THEN 'NHO'
+                            WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 11 THEN 'HOA'
+                            ELSE 'LON' END AS pred_size
+                FROM predictions
+                WHERE draw_number = %s
+                ORDER BY prediction_time DESC
+                LIMIT 1
+            """, (draw_number + 1,))
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                break
+        except Exception as _pe:
+            logger.debug("announce_prediction poll: %s", _pe)
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT predicted_numbers, model_name, confidence,
-                   CASE WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 9  THEN 'NHO'
-                        WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 11 THEN 'HOA'
-                        ELSE 'LON' END AS pred_size
-            FROM predictions
-            WHERE draw_number = %s
-            ORDER BY prediction_time DESC
-            LIMIT 1
-        """, (draw_number + 1,))
-        row = cur.fetchone()
-        cur.close()
         if not row:
             logger.info("announce_prediction: chưa có dự đoán cho kỳ %d", draw_number + 1)
             return
@@ -723,6 +731,8 @@ def check_triple_number(draw: dict, triple_alerted: dict):
         logger.warning("check_triple_number: %s", e)
 
 
+_drought_history_cache: dict = {}  # {latest_draw_number: history_list}
+
 def check_pair_triple_drought(conn, drought_alerted: dict):
     """Alert khi triple hoặc pair chưa ra trong nhiều kỳ liên tiếp (GAN RA)."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
@@ -731,11 +741,13 @@ def check_pair_triple_drought(conn, drought_alerted: dict):
         import json as _j
         cur = conn.cursor()
         cur.execute("""
-            SELECT numbers FROM draw_history
+            SELECT draw_number, numbers FROM draw_history
             ORDER BY draw_number DESC LIMIT 120
         """)
-        rows = [r[0] for r in cur.fetchall()]
+        raw_rows = cur.fetchall()
         cur.close()
+        _latest_draw_num = raw_rows[0][0] if raw_rows else None
+        rows = [r[1] for r in raw_rows]
 
         def parse(raw):
             if isinstance(raw, list): return [int(x) for x in raw]
@@ -759,13 +771,17 @@ def check_pair_triple_drought(conn, drought_alerted: dict):
             pair_drought += 1
 
         # ── Tìm triple lạnh nhất (chưa ra lâu nhất) ──────────────
-        cur2 = conn.cursor()
-        cur2.execute("""
-            SELECT draw_number, numbers FROM draw_history
-            ORDER BY draw_number DESC LIMIT 2000
-        """)
-        history = [(r[0], parse(r[1])) for r in cur2.fetchall()]
-        cur2.close()
+        # Cache 2000-row history by latest draw_number — only re-query when a new draw arrives
+        if _latest_draw_num not in _drought_history_cache:
+            cur2 = conn.cursor()
+            cur2.execute("""
+                SELECT draw_number, numbers FROM draw_history
+                ORDER BY draw_number DESC LIMIT 2000
+            """)
+            _drought_history_cache.clear()
+            _drought_history_cache[_latest_draw_num] = [(r[0], parse(r[1])) for r in cur2.fetchall()]
+            cur2.close()
+        history = _drought_history_cache[_latest_draw_num]
 
         triples_all = [(v, v, v) for v in range(1, 7)]
         triple_last_seen = {}  # value → draws ago

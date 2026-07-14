@@ -644,8 +644,11 @@ def _get_tod_priors(db, current_draw: int) -> dict:
                     SUM(CASE WHEN size_category = 'NHO' THEN 1 ELSE 0 END) AS nho_cnt,
                     SUM(CASE WHEN size_category = 'HOA' THEN 1 ELSE 0 END) AS hoa_cnt,
                     SUM(CASE WHEN size_category = 'LON' THEN 1 ELSE 0 END) AS lon_cnt
-                FROM draw_history
-                WHERE draw_time IS NOT NULL
+                FROM (
+                    SELECT draw_time, size_category FROM draw_history
+                    WHERE draw_time IS NOT NULL
+                    ORDER BY draw_number DESC LIMIT 2000
+                ) sub
                 GROUP BY vn_hour
                 ORDER BY vn_hour
             """)
@@ -1670,9 +1673,8 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # bias towards combos containing it and vote for the resulting SIZE.
     try:
         from models import _parse_numbers as _pn_na
-        _na_window = [(_, row) for _, row in df.head(30).iterrows()]
         _na_last_seen: dict = {}
-        for _i, (_, row) in enumerate(_na_window):
+        for _i, row in enumerate(df.head(30).itertuples(index=False)):
             for _n in _pn_na(row.numbers):
                 if _n not in _na_last_seen:
                     _na_last_seen[int(_n)] = _i
@@ -1697,7 +1699,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # If significantly above expected frequency, build a combo and vote its SIZE.
     try:
         from models import _parse_numbers as _pn_pc
-        _pc_draws = [_pn_pc(row.numbers) for _, row in df.head(50).iterrows()]
+        _pc_draws = [_pn_pc(row.numbers) for row in df.head(50).itertuples(index=False)]
         _pc_pair_cnt: Counter = Counter()
         for _d in _pc_draws:
             _uniq = sorted(set(int(x) for x in _d))
@@ -1739,10 +1741,10 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
             {
                 'draw_number': int(row.draw_number),
                 'numbers':     [int(x) for x in _pn_llm(row.numbers)],
-                'size_category': row.size_category if hasattr(row, 'size_category') else '',
+                'size_category': getattr(row, 'size_category', ''),
                 'sum_value':   int(row.sum_value) if hasattr(row, 'sum_value') else 0,
             }
-            for _, row in df.head(30).iterrows()
+            for row in df.head(30).itertuples(index=False)
         ]
         _llm_draws.reverse()  # chronological order (oldest first)
         _llm_vote = _get_llm_vote(_llm_draws)
