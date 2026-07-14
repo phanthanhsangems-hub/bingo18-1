@@ -145,9 +145,10 @@ def _check_checkpoint_alert():
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM predictions WHERE created_at > %s", (_CHECKPOINT_TS,))
+        ts, n = _get_checkpoint_config(cur)
+        cur.execute("SELECT COUNT(*) FROM predictions WHERE created_at > %s", (ts,))
         n_fresh = int(cur.fetchone()[0])
-        if n_fresh < _CHECKPOINT_N:
+        if n_fresh < n:
             conn.close()
             return
         cur.execute("SELECT 1 FROM alert_log WHERE alert_key = %s LIMIT 1", (_CHECKPOINT_ALERT_KEY,))
@@ -184,7 +185,7 @@ def _check_checkpoint_alert():
                 WHERE p.created_at > %s AND pr.is_win_size IS NOT NULL
                   AND p.vote_breakdown IS NOT NULL
                   AND p.vote_breakdown->'all_votes'->>'ml' IS NOT NULL
-            """, (_CHECKPOINT_TS,))
+            """, (ts,))
             r2 = cur.fetchone()
             ctrl_t, ctrl_w, over_t, over_w, lon_t, lon_w = (int(x or 0) for x in r2)
             wr_ctrl = ctrl_w / ctrl_t if ctrl_t > 0 else None
@@ -209,7 +210,7 @@ def _check_checkpoint_alert():
                        "⏳ Chưa đủ z ≤ −2.0 — chạy /checkpoint kiểm tra chi tiết")
         cur.execute(
             "INSERT INTO alert_log (alert_key, message) VALUES (%s, %s)",
-            (_CHECKPOINT_ALERT_KEY, f"Checkpoint reached: {n_fresh}/{_CHECKPOINT_N} fresh predictions")
+            (_CHECKPOINT_ALERT_KEY, f"Checkpoint reached: {n_fresh}/{n} fresh predictions")
         )
         conn.commit()
         conn.close()
@@ -217,8 +218,8 @@ def _check_checkpoint_alert():
         from zoneinfo import ZoneInfo
         now_vn = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%H:%M %d/%m/%Y")
         TelegramBot().send_message(
-            f"✅ <b>CHECKPOINT ĐẠT {_CHECKPOINT_N} DỰ ĐOÁN!</b>\n\n"
-            f"Đã có <b>{n_fresh}</b> predictions kể từ p128 deploy.\n\n"
+            f"✅ <b>CHECKPOINT ĐẠT {n} DỰ ĐOÁN!</b>\n\n"
+            f"Đã có <b>{n_fresh}</b> predictions kể từ checkpoint.\n\n"
             f"1️⃣ <b>ML-LON (pre-reg #1)</b>\n"
             f"   {z_lon_str}\n\n"
             f"2️⃣ <b>ML controls (pre-reg #2)</b>\n"
@@ -475,28 +476,32 @@ def sync_from_github():
         # Chỉ insert kỳ mới hơn
         new_count = 0
         conn = db.get_connection()
-        cur = conn.cursor()
-        for rec in records:
-            draw_number = rec.get("id") or rec.get("draw_number")
-            numbers = rec.get("result") or rec.get("numbers")
-            if not draw_number or not numbers:
-                continue
-            draw_number = int(draw_number)
-            if draw_number <= latest_in_db:
-                continue
-            if isinstance(numbers, list) and len(numbers) == 3:
-                total = sum(numbers)
-                size = "NHO" if total <= 9 else ("HOA" if total <= 11 else "LON")
-                draw_time = rec.get("date") or rec.get("draw_time") or datetime.now().isoformat()
-                if USE_POSTGRES:
-                    cur.execute(
-                        "INSERT INTO draw_history (draw_number, numbers, draw_time, sum_value, size_category) "
-                        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (draw_number) DO NOTHING",
-                        (draw_number, json.dumps(numbers), draw_time, total, size)
-                    )
-                new_count += 1
-        conn.commit()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            for rec in records:
+                draw_number = rec.get("id") or rec.get("draw_number")
+                numbers = rec.get("result") or rec.get("numbers")
+                if not draw_number or not numbers:
+                    continue
+                draw_number = int(draw_number)
+                if draw_number <= latest_in_db:
+                    continue
+                if isinstance(numbers, list) and len(numbers) == 3:
+                    total = sum(numbers)
+                    size = "NHO" if total <= 9 else ("HOA" if total <= 11 else "LON")
+                    draw_time = rec.get("date") or rec.get("draw_time") or datetime.now().isoformat()
+                    if USE_POSTGRES:
+                        cur.execute(
+                            "INSERT INTO draw_history (draw_number, numbers, draw_time, sum_value, size_category) "
+                            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (draw_number) DO NOTHING",
+                            (draw_number, json.dumps(numbers), draw_time, total, size)
+                        )
+                        new_count += cur.rowcount
+                    else:
+                        new_count += 1
+            conn.commit()
+        finally:
+            conn.close()
 
         return jsonify({
             "status": "success",
@@ -660,7 +665,8 @@ def morning_digest():
                 nums = [numbers_raw]
             hot_lines += f"  🔥 {'-'.join(str(n) for n in nums)} ×{cnt}\n"
 
-        date_vn = (datetime.now(timezone.utc) + _td(hours=7)).strftime('%d/%m/%Y')
+        from zoneinfo import ZoneInfo as _ZI
+        date_vn = datetime.now(_ZI("Asia/Ho_Chi_Minh")).strftime('%d/%m/%Y')
 
         msg = (
             f"☀️ DIGEST SÁNG {date_vn}\n"
