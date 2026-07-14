@@ -60,6 +60,12 @@ DB_PATH     = os.environ.get("DB_PATH", "data/bingo18.db")
 BACKUP_PATH = os.environ.get("BACKUP_PATH", "data/backups/")
 MODELS_PATH ='multiset_markov'
 
+import sys as _sys
+if DATABASE_URL and not ADMIN_SECRET_KEY:
+    print("WARNING: ADMIN_SECRET_KEY is not set — all admin endpoints are unprotected!", file=_sys.stderr)
+if DATABASE_URL and not TRIGGER_SECRET:
+    print("WARNING: TRIGGER_SECRET is not set — trigger endpoint is unprotected!", file=_sys.stderr)
+
 MAX_RETRIES = 3
 RETRY_DELAY = 30
 # Combo Filter Mode

@@ -1638,6 +1638,8 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                 _bc_dist = _bocpd_cache[next_draw]
             else:
                 _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+                if len(_bocpd_cache) >= 200:
+                    _bocpd_cache.pop(next(iter(_bocpd_cache)))
                 _bocpd_cache[next_draw] = _bc_dist
             _bocpd_dist = {k: round(v, 3) for k, v in _bc_dist.items()}
             _bc_winner = max(_bc_dist, key=_bc_dist.get)

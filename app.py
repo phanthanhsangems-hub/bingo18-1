@@ -1427,6 +1427,20 @@ def art_page():
     return resp
 
 
+@app.route('/healthz')
+def healthz():
+    """Fast Cloud Run health check — DB ping + config validation."""
+    try:
+        conn = db.get_connection()
+        conn.cursor().execute("SELECT 1")
+        conn.close()
+    except Exception as e:
+        return jsonify({"status": "error", "db": str(e)}), 503
+    if not config.ADMIN_SECRET_KEY or not config.TRIGGER_SECRET:
+        return jsonify({"status": "error", "reason": "missing secrets"}), 503
+    return jsonify({"status": "ok"}), 200
+
+
 @app.route('/api/health')
 def health_check():
     global _last_alert_ts

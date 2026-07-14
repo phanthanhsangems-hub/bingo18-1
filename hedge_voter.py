@@ -109,9 +109,8 @@ def load_hedge_weights(db) -> Optional[HedgeWeights]:
 
 
 def save_hedge_weights(db, hw: HedgeWeights) -> None:
-    """Upsert HedgeWeights into system_config. Invalidates the module-level cache."""
+    """Upsert HedgeWeights into system_config. Updates cache only after successful DB write."""
     global _hedge_cache
-    _hedge_cache = hw  # update cache immediately so next load_hedge_weights sees fresh data
     try:
         payload = json.dumps(hw.to_dict())
         conn = db.get_connection()
@@ -130,6 +129,7 @@ def save_hedge_weights(db, hw: HedgeWeights) -> None:
             )
         conn.commit()
         conn.close()
+        _hedge_cache = hw  # only update cache after DB write succeeded
         logger.debug("HedgeWeights saved (n_updates=%d)", hw.n_updates)
     except Exception as e:
         logger.warning("save_hedge_weights error: %s", e)

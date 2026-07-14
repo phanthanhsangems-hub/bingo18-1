@@ -313,16 +313,9 @@ def send_telegram(draw: dict):
         f"📊 Tổng {total} | {cat}"
         f"{note}"
     )
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT, "text": msg},
-            timeout=5
-        )
-        if is_triple:
-            logger.info(f"🎰 TRIPLE alert sent: {nums[0]}-{nums[0]}-{nums[0]}")
-    except Exception as e:
-        logger.warning(f"Telegram: {e}")
+    _tg_send(msg)
+    if is_triple:
+        logger.info(f"🎰 TRIPLE alert sent: {nums[0]}-{nums[0]}-{nums[0]}")
 
 
 def check_and_alert_hot_combo(conn, draw: dict, alerted: dict):
