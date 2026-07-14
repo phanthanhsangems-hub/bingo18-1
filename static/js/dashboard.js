@@ -209,20 +209,17 @@ async function loadNextPrediction() {
     if (alertEl) {
       const share = vb.vote_share;
       const nVoters = Object.keys(vb.all_votes || {}).length;
-      if (share != null && nVoters >= 2) {
+      if (share != null && nVoters >= 2 && share < 0.65) {
         const pct = Math.round(share * 100);
         let style, msg, tipTxt;
         if (share < 0.45) {
           style = 'background:rgba(255,77,77,.12);border:1px solid rgba(255,77,77,.35);color:var(--red)';
           msg   = `🔴 SPLIT CAO — đồng thuận ${pct}% · Rủi ro cao`;
           tipTxt= 'Các model voter chia rẽ mạnh. Xác suất dự đoán đúng thường thấp hơn khi consensus thấp.';
-        } else if (share < 0.65) {
+        } else {
           style = 'background:rgba(255,193,7,.1);border:1px solid rgba(255,193,7,.3);color:var(--gold)';
           msg   = `⚠ SPLIT — đồng thuận ${pct}% · Cẩn thận`;
           tipTxt= 'Có sự phân tán giữa các model voter. Nên thận trọng hơn khi đặt cược.';
-        } else {
-          alertEl.style.display = 'none';
-          return;
         }
         alertEl.style.cssText = style + ';margin:6px 0 2px;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:default;';
         alertEl.innerHTML = `<span data-tip="${tipTxt}">${msg}</span>`;

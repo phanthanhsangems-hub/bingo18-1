@@ -120,6 +120,7 @@ _triple_drought_notified_gap: int = 0  # gap lúc gửi alert gần nhất (rese
 _CHECKPOINT_TS = '2026-05-15 16:15:00'
 _CHECKPOINT_N  = 200
 _CHECKPOINT_ALERT_KEY = 'checkpoint_200_reached'
+_checkpoint_last_draw: int = -1   # skip duplicate queries for same draw
 
 
 def _get_checkpoint_config(cur):
@@ -152,10 +153,15 @@ def _save_checkpoint_config(cur, ts: str, n: int):
         """, (key, val, desc))
 
 
-def _check_checkpoint_alert():
+def _check_checkpoint_alert(draw_number: int = 0):
     """P152: Gửi Telegram alert khi đạt 200 fresh predictions. Dùng alert_log để dedup qua restarts."""
+    global _checkpoint_last_draw
     if not USE_POSTGRES:
         return
+    if draw_number and draw_number == _checkpoint_last_draw:
+        return
+    if draw_number:
+        _checkpoint_last_draw = draw_number
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -537,7 +543,7 @@ def auto_predict_cron():
         result = run_prediction_cycle()
         _check_sync_lag()
         _check_lon_excess_alert(result)
-        _check_checkpoint_alert()
+        _check_checkpoint_alert(result.get('draw_number', 0))
         _check_triple_drought_alert()
         return jsonify({"status": "success", "cycles": 1, "data": [result]})
     except Exception as e:

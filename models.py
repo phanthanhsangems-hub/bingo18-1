@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from database import USE_POSTGRES
 
 logger = logging.getLogger(__name__)
 
@@ -881,33 +882,52 @@ class ModelSelector:
         scored: List[Tuple[str, float, int]] = []   # (name, avg_wr, total_samples)
         unexplored: List[Tuple[str, int]] = []       # models chưa đủ MIN_SAMPLES
 
-        # Single batched query instead of 27 connections (9 models × 3 windows)
         db_rows: dict = {}
         try:
             conn = self.db.get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("""
-                    SELECT model_name,
-                        SUM(CASE WHEN rn <= 30  THEN 1 ELSE 0 END) AS n30,
-                        SUM(CASE WHEN is_win    AND rn <= 30 THEN 1 ELSE 0 END) AS wins30,
-                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 30 THEN 1 ELSE 0 END) AS sw30,
-                        SUM(CASE WHEN rn <= 60  THEN 1 ELSE 0 END) AS n60,
-                        SUM(CASE WHEN is_win    AND rn <= 60 THEN 1 ELSE 0 END) AS wins60,
-                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 60 THEN 1 ELSE 0 END) AS sw60,
-                        COUNT(*) AS n100,
-                        SUM(CASE WHEN is_win    THEN 1 ELSE 0 END) AS wins100,
-                        SUM(CASE WHEN COALESCE(is_win_sum, FALSE) THEN 1 ELSE 0 END) AS sw100
-                    FROM (
-                        SELECT p.model_name, pr.is_win, pr.is_win_sum,
-                               ROW_NUMBER() OVER (PARTITION BY p.model_name ORDER BY pr.created_at DESC) AS rn
-                        FROM prediction_results pr
-                        JOIN predictions p ON pr.prediction_id = p.id
-                    ) t
-                    WHERE rn <= 100
-                    GROUP BY model_name
-                """)
-                db_rows = {row[0]: row for row in cur.fetchall()}
+                if USE_POSTGRES:
+                    # Single batched query (9 models × 3 windows → 1 round-trip)
+                    cur.execute("""
+                        SELECT model_name,
+                            SUM(CASE WHEN rn <= 30  THEN 1 ELSE 0 END) AS n30,
+                            SUM(CASE WHEN is_win    AND rn <= 30 THEN 1 ELSE 0 END) AS wins30,
+                            SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 30 THEN 1 ELSE 0 END) AS sw30,
+                            SUM(CASE WHEN rn <= 60  THEN 1 ELSE 0 END) AS n60,
+                            SUM(CASE WHEN is_win    AND rn <= 60 THEN 1 ELSE 0 END) AS wins60,
+                            SUM(CASE WHEN COALESCE(is_win_sum, FALSE) AND rn <= 60 THEN 1 ELSE 0 END) AS sw60,
+                            COUNT(*) AS n100,
+                            SUM(CASE WHEN is_win    THEN 1 ELSE 0 END) AS wins100,
+                            SUM(CASE WHEN COALESCE(is_win_sum, FALSE) THEN 1 ELSE 0 END) AS sw100
+                        FROM (
+                            SELECT p.model_name, pr.is_win, pr.is_win_sum,
+                                   ROW_NUMBER() OVER (PARTITION BY p.model_name ORDER BY pr.created_at DESC) AS rn
+                            FROM prediction_results pr
+                            JOIN predictions p ON pr.prediction_id = p.id
+                        ) t
+                        WHERE rn <= 100
+                        GROUP BY model_name
+                    """)
+                    db_rows = {row[0]: row for row in cur.fetchall()}
+                else:
+                    # SQLite fallback: per-model queries (local dev)
+                    for name in self._models:
+                        cur.execute("""
+                            SELECT pr.is_win, pr.is_win_sum
+                            FROM prediction_results pr
+                            JOIN predictions p ON pr.prediction_id = p.id
+                            WHERE p.model_name = ?
+                            ORDER BY pr.created_at DESC
+                            LIMIT 100
+                        """, (name,))
+                        rows = cur.fetchall()
+                        if rows:
+                            r30, r60 = rows[:30], rows[:60]
+                            n30  = len(r30);  w30 = sum(1 for r in r30 if r[0]); s30 = sum(1 for r in r30 if r[1])
+                            n60  = len(r60);  w60 = sum(1 for r in r60 if r[0]); s60 = sum(1 for r in r60 if r[1])
+                            n100 = len(rows); w100 = sum(1 for r in rows if r[0]); s100 = sum(1 for r in rows if r[1])
+                            db_rows[name] = (name, n30, w30, s30, n60, w60, s60, n100, w100, s100)
             finally:
                 conn.close()
         except Exception as e:
