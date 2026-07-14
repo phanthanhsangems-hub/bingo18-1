@@ -262,10 +262,12 @@ def _check_sync_lag():
         if vn_hour < 6 or vn_hour >= 22:
             return  # ngoài giờ game, không cần alert
         conn = db.get_connection()
-        cur  = conn.cursor()
-        cur.execute("SELECT draw_time FROM draw_history ORDER BY draw_number DESC LIMIT 1")
-        row = cur.fetchone()
-        conn.close()
+        try:
+            cur  = conn.cursor()
+            cur.execute("SELECT draw_time FROM draw_history ORDER BY draw_number DESC LIMIT 1")
+            row = cur.fetchone()
+        finally:
+            conn.close()
         if not row:
             return
         draw_dt = row[0]
@@ -331,29 +333,31 @@ def _check_triple_drought_alert():
         if now_t - _last_triple_alert_ts < _TRIPLE_ALERT_COOLDOWN_SEC:
             return
         conn = db.get_connection()
-        cur  = conn.cursor()
-        if USE_POSTGRES:
-            cur.execute("""
-                SELECT draw_number,
-                       (numbers::json->>0)::int AS n1,
-                       (numbers::json->>1)::int AS n2,
-                       (numbers::json->>2)::int AS n3
-                FROM draw_history
-                ORDER BY draw_number DESC
-                LIMIT 200
-            """)
-        else:
-            cur.execute("""
-                SELECT draw_number,
-                       json_extract(numbers, '$[0]') AS n1,
-                       json_extract(numbers, '$[1]') AS n2,
-                       json_extract(numbers, '$[2]') AS n3
-                FROM draw_history
-                ORDER BY draw_number DESC
-                LIMIT 200
-            """)
-        rows = cur.fetchall()
-        conn.close()
+        try:
+            cur  = conn.cursor()
+            if USE_POSTGRES:
+                cur.execute("""
+                    SELECT draw_number,
+                           (numbers::json->>0)::int AS n1,
+                           (numbers::json->>1)::int AS n2,
+                           (numbers::json->>2)::int AS n3
+                    FROM draw_history
+                    ORDER BY draw_number DESC
+                    LIMIT 200
+                """)
+            else:
+                cur.execute("""
+                    SELECT draw_number,
+                           json_extract(numbers, '$[0]') AS n1,
+                           json_extract(numbers, '$[1]') AS n2,
+                           json_extract(numbers, '$[2]') AS n3
+                    FROM draw_history
+                    ORDER BY draw_number DESC
+                    LIMIT 200
+                """)
+            rows = cur.fetchall()
+        finally:
+            conn.close()
         if not rows:
             return
         latest_draw = rows[0][0]

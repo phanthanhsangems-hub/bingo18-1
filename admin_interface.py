@@ -4,7 +4,7 @@ Admin Interface - Nhập kết quả Bingo 18 thủ công
 
 from flask import request, jsonify, render_template_string
 from functools import wraps
-from app import app, db
+from app import app, db, limiter
 from datetime import datetime
 import json
 import config
@@ -206,6 +206,7 @@ def admin_interface():
 
 
 @app.route('/api/admin/submit-result', methods=['POST'])
+@limiter.limit("10 per minute")
 @require_admin_key
 def submit_result():
     """API endpoint to submit result manually"""

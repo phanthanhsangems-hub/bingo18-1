@@ -95,8 +95,15 @@ class DatabaseManager:
     # ── Connection ────────────────────────────────────────────
     def get_connection(self):
         if USE_POSTGRES:
+            import time as _t
             pool = _get_pg_pool()
-            return _PooledConnection(pool, pool.getconn())
+            for _attempt in range(3):
+                try:
+                    return _PooledConnection(pool, pool.getconn())
+                except pg_pool.PoolError:
+                    if _attempt == 2:
+                        raise
+                    _t.sleep(0.05 * (2 ** _attempt))  # 50ms, 100ms
         else:
             conn = sqlite3.connect(config.DB_PATH)
             conn.execute("PRAGMA journal_mode=WAL")
