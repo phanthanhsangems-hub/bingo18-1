@@ -889,6 +889,7 @@ def draw_search():
 # ── Number frequency by VN hour (#38) ────────────────────────
 @app.route('/api/number-by-hour')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=120)
 def number_by_hour():
     """#38 Heatmap: VN hour × number (1-6) → frequency."""
     limit_draws = min(int(request.args.get('n', 10000)), 50000)
@@ -1049,6 +1050,7 @@ def drawdown():
 # ── Calibration chart (#35) ──────────────────────────────────
 @app.route('/api/calibration-chart')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def calibration_chart():
     """#35 Bin predictions by confidence, compute actual WR per bin."""
     n = min(int(request.args.get('n', 2000)), 10000)
@@ -1162,6 +1164,7 @@ def monthly_wr():
 # ── HOA status (#49) ─────────────────────────────────────────
 @app.route('/api/hoa-status')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def hoa_status():
     """#49 HOA actual rate across time windows + P142 block recommendation."""
     try:
@@ -1360,6 +1363,7 @@ def db_monitor():
 # ── #36 Multi-window WR ───────────────────────────────────────
 @app.route('/api/multi-window-wr')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=120)
 def multi_window_wr():
     windows = [7, 14, 30, 50, 100]
     conn = db.get_connection()
@@ -1383,6 +1387,7 @@ def multi_window_wr():
 # ── #40 Number frequency last N draws ─────────────────────────
 @app.route('/api/number-freq-n')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=120)
 def number_freq_n():
     n = max(7, min(int(request.args.get('n', 30)), 500))
     conn = db.get_connection()
@@ -1807,6 +1812,7 @@ def prediction_coverage():
 
 @app.route('/api/statistics')
 @limiter.limit("60 per minute")
+@cache_resp(ttl=120)
 def get_statistics():
     try:
         stats = db.get_statistics()
@@ -1966,6 +1972,7 @@ def cold_streaks():
 
 
 @app.route('/api/transition-stats')
+@cache_resp(ttl=120)
 def get_transition_stats():
     """P(next_size | prev_sum) and top-3 next sums, computed from full draw history."""
     try:
@@ -2264,6 +2271,7 @@ def get_predictions_history():
 
 @app.route('/api/win-rate-history')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=300)
 def win_rate_history():
     """Win rate theo ngày trong N ngày gần nhất."""
     try:
@@ -2328,6 +2336,7 @@ def win_rate_history():
 
 @app.route('/api/size-distribution')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=300)
 def size_distribution():
     """P60: Predicted vs actual SIZE distribution from evaluated draws (aligned window).
     Uses JOIN so both come from the same set of draws."""
@@ -2398,6 +2407,7 @@ def size_distribution():
 
 @app.route('/api/calibration-report')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def calibration_report():
     """P61: Brier score + ECE + reliability diagram data from evaluated draws.
 
@@ -2491,6 +2501,7 @@ def calibration_report():
 
 @app.route('/api/calibration-by-size')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def calibration_by_size():
     """P80: Per-SIZE Brier score, avg confidence vs actual WR, calibration gap."""
     try:
@@ -2580,6 +2591,7 @@ def calibration_by_size():
 
 @app.route('/api/conf-hist-by-size')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def conf_hist_by_size():
     """P107: Confidence distribution split by predicted SIZE (NHO/HOA/LON), 10 bins each."""
     try:
@@ -2640,6 +2652,7 @@ def conf_hist_by_size():
 
 @app.route('/api/confidence-histogram')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def confidence_histogram():
     """P62: Distribution of confidence scores for last N predictions.
 
@@ -2718,6 +2731,7 @@ def confidence_histogram():
 
 @app.route('/api/size-accuracy-trend')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def size_accuracy_trend():
     """P79: NHO/HOA/LON win rate per batch over time."""
     try:
@@ -2786,6 +2800,7 @@ def size_accuracy_trend():
 
 @app.route('/api/hoa-trend')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def hoa_trend():
     """P68: Predicted vs actual HOA/NHO/LON% per batch, to monitor HOA correction trend."""
     try:
@@ -2864,6 +2879,7 @@ def hoa_trend():
 
 @app.route('/api/number-frequency')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=120)
 def number_frequency():
     """P82: Actual vs predicted frequency per number (1-6) for last N draws."""
     try:
@@ -2953,6 +2969,7 @@ def number_frequency():
 
 @app.route('/api/prediction-heatmap')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def prediction_heatmap():
     """P81: Prediction count heatmap — (day-of-week) × (hour-of-day) grid."""
     try:
@@ -3022,6 +3039,7 @@ def prediction_heatmap():
 
 @app.route('/api/wr-by-dow')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def wr_by_dow():
     """P73: Win rate (SIZE) per day-of-week in VN time."""
     try:
@@ -3099,6 +3117,7 @@ def wr_by_dow():
 
 @app.route('/api/daily-wincal')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def daily_wincal():
     """P128: Win-rate per calendar day in VN time — last N days for heatmap calendar."""
     try:
@@ -3160,6 +3179,7 @@ def daily_wincal():
 
 @app.route('/api/hoa-by-hour')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def hoa_by_hour():
     """P72: HOA predicted/win rate per VN hour-of-day (6–22)."""
     try:
@@ -3237,6 +3257,7 @@ def hoa_by_hour():
 
 @app.route('/api/wr-by-hour')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=120)
 def wr_by_hour():
     """P115: Overall win rate (SIZE) by VN hour of day (6-22)."""
     try:
@@ -3383,6 +3404,7 @@ def autotune_history():
 
 @app.route('/api/voter-wr-trend')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def voter_wr_trend():
     """P129: Per-voter win rate per batch — actual WR trajectory for each voter over time."""
     import json as _json
@@ -3483,6 +3505,7 @@ def voter_wr_trend():
 
 @app.route('/api/voter-conf-trend')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=300)
 def voter_conf_trend():
     """P96: Average confidence per voter per batch (from all_votes_detail in vote_breakdown)."""
     try:
