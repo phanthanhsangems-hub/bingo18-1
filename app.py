@@ -927,6 +927,7 @@ def number_by_hour():
 # ── Sum distribution (#43) ───────────────────────────────────
 @app.route('/api/sum-distribution')
 @limiter.limit("20 per minute")
+@cache_resp(ttl=120)
 def sum_distribution():
     """#43 Histogram of actual sum (3-18) vs theoretical distribution."""
     limit_n = min(int(request.args.get('n', 10000)), 100000)

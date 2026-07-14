@@ -228,6 +228,8 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_pred_draw_model ON predictions(draw_number, model_name)",
                     # Partial index: filters is_win_size IS NOT NULL rows (majority in analytics)
                     "CREATE INDEX IF NOT EXISTS idx_presult_win_draw ON prediction_results(draw_number DESC) WHERE is_win_size IS NOT NULL",
+                    # GIN index for draw_search containment queries on numbers JSONB
+                    "CREATE INDEX IF NOT EXISTS idx_draw_numbers_gin ON draw_history USING GIN ((numbers::jsonb))",
                 ]:
                     cur.execute(ddl)
 

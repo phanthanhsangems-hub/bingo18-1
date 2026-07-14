@@ -1330,10 +1330,12 @@ def mode_watch():
     conf_gap_alerted:  dict = {}  # {active} (#47)
     sh_alerted:        dict = {}  # {status, last_check} system health
     last_draw_time_utc       = None  # #24 gap detector
+    conn = None  # persistent connection — reconnect only on error
 
     while True:
         try:
-            conn    = get_conn()
+            if conn is None:
+                conn = get_conn()
             last_id = get_last_draw_id(conn)
             new     = get_new_since(last_id)
 
@@ -1426,13 +1428,25 @@ def mode_watch():
                 reminder_due_at = 0
                 reminder_draw   = 0
 
-            conn.close()
-
         except KeyboardInterrupt:
             logger.info("Dừng (Ctrl+C)")
+            if conn:
+                conn.close()
             break
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            logger.error(f"Lỗi kết nối DB, sẽ reconnect: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
         except Exception as e:
             logger.error(f"Lỗi: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
 
         time.sleep(FETCH_INTERVAL)
 

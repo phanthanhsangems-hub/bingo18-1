@@ -304,6 +304,7 @@ def _update_pred_diversity(numbers: list) -> None:
 # ── Dynamic voter weight cache ───────────────────────────────
 _voter_weight_cache: dict = {}
 _voter_weight_ts: int = 0
+_bocpd_cache: dict = {}        # {draw_number: {NHO: float, HOA: float, LON: float}}
 _last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
 _last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 8 draws
 _TRIPLE_DROUGHT_THRESH = 25       # alert when ≥25 draws without a triple (near expected 36; fire early)
@@ -904,7 +905,6 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
                 ORDER BY p.draw_number DESC LIMIT 200
             """)
         rows = cur.fetchall()
-        conn.close()
 
         from collections import defaultdict
         acc = defaultdict(lambda: {'correct': 0, 'total': 0})
@@ -1031,15 +1031,12 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
 
         # P146: ml_voter_mult_override — hard cap from system_config (0.0 = disable ML)
         try:
-            conn_cfg = db.get_connection()
-            cur_cfg  = conn_cfg.cursor()
-            ph_cfg   = db._ph()
+            cur_cfg = conn.cursor()
             cur_cfg.execute(
-                f"SELECT config_value FROM system_config WHERE config_key = {ph_cfg}",
+                f"SELECT config_value FROM system_config WHERE config_key = {ph}",
                 ('ml_voter_mult_override',)
             )
             row_cfg = cur_cfg.fetchone()
-            conn_cfg.close()
             if row_cfg is not None:
                 cap     = float(row_cfg[0])
                 current = multipliers.get('ml', 1.0)
@@ -1051,12 +1048,10 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
 
         # ── #50 Manual overrides from system_config ──────────────
         try:
-            conn_ov = db.get_connection()
-            cur_ov  = conn_ov.cursor()
-            ph_ov   = '%s' if USE_POSTGRES else '?'
+            cur_ov = conn.cursor()
             cur_ov.execute(
                 f"SELECT config_key, config_value FROM system_config "
-                f"WHERE config_key LIKE {ph_ov}",
+                f"WHERE config_key LIKE {ph}",
                 ('voter_override_%',)
             )
             for ck, cv in cur_ov.fetchall():
@@ -1069,10 +1064,10 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
                         logger.info("#50 voter_override %s: %.3f × %.2f = %.3f", vname, prev, cap, multipliers[vname])
                 except ValueError:
                     pass
-            conn_ov.close()
         except Exception as _ov_e:
             logger.debug("voter_override read error: %s", _ov_e)
 
+        conn.close()
         _voter_weight_cache = multipliers
         _voter_weight_ts    = current_draw
         if multipliers:
@@ -1148,10 +1143,14 @@ def _query_transition_probs(db) -> tuple:
     try:
         cur = conn.cursor()
         cur.execute("""
-            WITH ordered AS (
+            WITH recent AS (
+                SELECT sum_value, draw_number
+                FROM draw_history ORDER BY draw_number DESC LIMIT 5000
+            ),
+            ordered AS (
                 SELECT sum_value,
                        LEAD(sum_value) OVER (ORDER BY draw_number) AS next_sum
-                FROM draw_history
+                FROM recent
             ),
             totals AS (
                 SELECT sum_value, COUNT(*) AS total
@@ -1178,10 +1177,14 @@ def _query_transition_probs(db) -> tuple:
             probs[prev_sum][next_size] = float(pct) / 100.0  # pct stored as 0-100, normalize to 0-1
 
         cur.execute("""
-            WITH ordered AS (
+            WITH recent AS (
+                SELECT sum_value, draw_number
+                FROM draw_history ORDER BY draw_number DESC LIMIT 5000
+            ),
+            ordered AS (
                 SELECT sum_value,
                        LEAD(sum_value) OVER (ORDER BY draw_number) AS next_sum
-                FROM draw_history
+                FROM recent
             ),
             totals AS (
                 SELECT sum_value, COUNT(*) AS total
@@ -1631,7 +1634,11 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
                 for row in df.head(_bc_window).itertuples()
             ]
             _bc_sizes.reverse()  # df is most-recent-first; detector needs chronological order
-            _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+            if next_draw in _bocpd_cache:
+                _bc_dist = _bocpd_cache[next_draw]
+            else:
+                _bc_dist = SizeRegimeDetector().run(_bc_sizes)
+                _bocpd_cache[next_draw] = _bc_dist
             _bocpd_dist = {k: round(v, 3) for k, v in _bc_dist.items()}
             _bc_winner = max(_bc_dist, key=_bc_dist.get)
             if _bc_winner != 'HOA':
@@ -1649,7 +1656,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
         from models import _parse_numbers as _pn_as
         _as_sizes = [
             SizePredictor._cat(sum(int(x) for x in _pn_as(row.numbers)))
-            for _, row in df.head(10).iterrows()
+            for row in df.head(10).itertuples(index=False)
         ]
         if _as_sizes:
             _as_last, _as_streak = _as_sizes[0], 1
@@ -1748,7 +1755,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
         ]
         _llm_draws.reverse()  # chronological order (oldest first)
         _llm_vote = _get_llm_vote(_llm_draws)
-        if _llm_vote:
+        if _llm_vote and _llm_vote.get('size') != 'HOA':
             votes.append(_llm_vote)
             logger.debug("llm voter: %s conf=%.3f", _llm_vote['size'], _llm_vote['conf'])
     except Exception as _llme:
