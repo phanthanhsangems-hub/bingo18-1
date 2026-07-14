@@ -18,32 +18,6 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# ── Wrapper cho pooled connection ─────────────────────────────
-class _PooledConnection:
-    """Wrap psycopg2 connection để close() trả về pool thay vì đóng hẳn."""
-    def __init__(self, pool, conn):
-        self._pool = pool
-        self._conn = conn
-
-    def close(self):
-        try:
-            self._pool.putconn(self._conn)
-        except Exception as e:
-            logger.warning("putconn error: %s", e)
-            self._conn.close()
-
-    def cursor(self, *args, **kwargs):
-        return self._conn.cursor(*args, **kwargs)
-
-    def commit(self):
-        return self._conn.commit()
-
-    def rollback(self):
-        return self._conn.rollback()
-
-    def __getattr__(self, name):
-        return getattr(self._conn, name)
-
 # ── Detect backend ────────────────────────────────────────────
 USE_POSTGRES = bool(config.DATABASE_URL)
 
@@ -80,25 +54,29 @@ def _get_pg_pool() -> "pg_pool.ThreadedConnectionPool":
 
 
 class _PooledConnection:
-    """Context manager: tự trả connection về pool khi xong."""
-    def __init__(self, pool):
+    """Wraps a pooled psycopg2 connection; close() returns it to the pool."""
+    def __init__(self, pool, conn):
         self._pool = pool
-        self.conn  = None
+        self._conn = conn
+        conn.autocommit = False
 
-    def __enter__(self):
-        self.conn = self._pool.getconn()
-        self.conn.autocommit = False
-        return self.conn
+    def cursor(self, *a, **kw):  return self._conn.cursor(*a, **kw)
+    def commit(self):             return self._conn.commit()
+    def rollback(self):           return self._conn.rollback()
+    def __getattr__(self, name):  return getattr(self._conn, name)
 
-    def __exit__(self, exc_type, *_):
-        if self.conn:
-            if exc_type:
-                try:
-                    self.conn.rollback()
-                except Exception:
-                    pass
-            self._pool.putconn(self.conn)
-            self.conn = None
+    def close(self):
+        try:
+            if self._conn.status != psycopg2.extensions.STATUS_READY:
+                self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            self._pool.putconn(self._conn)
+        except Exception as e:
+            logger.warning("putconn error: %s", e)
+            try: self._conn.close()
+            except Exception: pass
 
 
 class DatabaseManager:
@@ -116,14 +94,9 @@ class DatabaseManager:
 
     # ── Connection ────────────────────────────────────────────
     def get_connection(self):
-        """
-        PostgreSQL: tạo direct connection (phù hợp Cloud Run serverless + Supabase transaction pooler).
-        SQLite:     tạo connection mới (WAL mode).
-        """
         if USE_POSTGRES:
-            conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
-            conn.autocommit = False
-            return conn
+            pool = _get_pg_pool()
+            return _PooledConnection(pool, pool.getconn())
         else:
             conn = sqlite3.connect(config.DB_PATH)
             conn.execute("PRAGMA journal_mode=WAL")
