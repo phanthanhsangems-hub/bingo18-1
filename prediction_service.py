@@ -765,9 +765,9 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
 
     defaults = {
         'hoa_suppress':   0.70,
-        'nho_share_min':  0.45,
-        'prior_nho_conf': 0.44,
-        'prior_lon_conf': 0.40,
+        'nho_share_min':  0.50,
+        'prior_nho_conf': 0.36,
+        'prior_lon_conf': 0.48,
     }
     conn = None
     try:
@@ -829,8 +829,8 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
         hoa_suppress = round(max(0.45, min(0.85, 0.70 - (hoa_f - 0.25) * 1.2)), 3)
 
         # Prior confidences (before P51 adjustment)
-        prior_nho_conf = round(max(0.30, min(0.60, 0.44 * nho_f / 0.375)), 3)
-        prior_lon_conf = round(max(0.25, min(0.50, 0.35 * lon_f / 0.375)), 3)
+        prior_nho_conf = round(max(0.25, min(0.55, 0.36 * nho_f / 0.375)), 3)
+        prior_lon_conf = round(max(0.30, min(0.65, 0.48 * lon_f / 0.403)), 3)
         # P65: prior_hoa removed in P144 — HOA permanently blocked
 
         # #4 ToD bias correction: giờ nào hệ thống lịch sử over-predict LON/NHO → dampen
@@ -2500,16 +2500,16 @@ def run_prediction_cycle() -> dict:
         adaptive_thres  = _get_adaptive_thresholds(db, next_draw)
         _conformal_q    = get_conformal_quantile(db, next_draw)
         _load_sw_ema(db)  # restore EMA state on cold start so instances share history
-        # P-FIX2: loss streak boost — giảm LON anchor, tăng NHO khi thua >= 7 liên tiếp
+        # P-FIX2: loss streak boost — tăng LON anchor, giảm NHO khi thua >= 7 liên tiếp
         if _current_loss_streak >= 7:
             _boost = min(1.5, 1.0 + (_current_loss_streak - 6) * 0.08)
             adaptive_thres = dict(adaptive_thres)  # copy, không mutate cache
-            adaptive_thres['prior_nho_conf'] = round(min(0.65, adaptive_thres.get('prior_nho_conf', 0.44) * _boost), 3)
-            adaptive_thres['prior_lon_conf'] = round(max(0.20, adaptive_thres.get('prior_lon_conf', 0.40) / _boost), 3)
+            adaptive_thres['prior_lon_conf'] = round(min(0.70, adaptive_thres.get('prior_lon_conf', 0.48) * _boost), 3)
+            adaptive_thres['prior_nho_conf'] = round(max(0.20, adaptive_thres.get('prior_nho_conf', 0.36) / _boost), 3)
             adaptive_thres['streak_boost']   = _current_loss_streak
-            logger.info("StreakBoost: streak=%d factor=%.2f → prior_nho=%.3f prior_lon=%.3f",
+            logger.info("StreakBoost: streak=%d factor=%.2f → prior_lon=%.3f prior_nho=%.3f",
                         _current_loss_streak, _boost,
-                        adaptive_thres['prior_nho_conf'], adaptive_thres['prior_lon_conf'])
+                        adaptive_thres['prior_lon_conf'], adaptive_thres['prior_nho_conf'])
         numbers, confidence, _vote_info = _run_majority_vote(
             df, next_draw, hybrid, selector, fwbr, ensemble, banned, prev_sum,
             voter_multipliers=voter_mults,
