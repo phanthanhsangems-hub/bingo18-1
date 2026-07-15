@@ -456,27 +456,28 @@ def _save_sw_ema(db) -> None:
         logger.debug("_save_sw_ema error: %s", e)
 
 
-# ── Time-of-day SIZE distribution (static, 6000 kỳ gần nhất) ────────────────
+# ── Time-of-day SIZE distribution (static, 10,000 kỳ gần nhất) ──────────────
 # Dùng trực tiếp thay vì live DB query → nhanh hơn, ổn định hơn.
-# Cập nhật: 2026-06-04. Blend weight = 0.50 cho giờ lệch >2pp, 0.30 cho giờ bình thường.
+# Cập nhật: 2026-07-15 (bias_analysis.py, n≈600-640/giờ). Blend weight = 0.50 cho giờ lệch >2pp, 0.30 cho giờ bình thường.
 _TOD_SIZE_STATS: dict = {
-    #  h:  {NHO,  HOA,  LON}       (n ≈ 280-400 mỗi giờ)
-    6:  {'NHO': 0.375, 'HOA': 0.293, 'LON': 0.332},  # LON thấp hơn baseline
-    7:  {'NHO': 0.375, 'HOA': 0.257, 'LON': 0.367},
-    8:  {'NHO': 0.356, 'HOA': 0.282, 'LON': 0.362},
-    9:  {'NHO': 0.356, 'HOA': 0.257, 'LON': 0.388},  # LON cao
-    10: {'NHO': 0.367, 'HOA': 0.241, 'LON': 0.391},  # LON cao nhất
-    11: {'NHO': 0.376, 'HOA': 0.248, 'LON': 0.376},
-    12: {'NHO': 0.375, 'HOA': 0.266, 'LON': 0.359},
-    13: {'NHO': 0.355, 'HOA': 0.264, 'LON': 0.381},  # LON cao
-    14: {'NHO': 0.383, 'HOA': 0.259, 'LON': 0.359},  # NHO cao nhất
-    15: {'NHO': 0.356, 'HOA': 0.269, 'LON': 0.376},
-    16: {'NHO': 0.338, 'HOA': 0.290, 'LON': 0.372},  # NHO thấp nhất
-    17: {'NHO': 0.374, 'HOA': 0.268, 'LON': 0.359},
-    18: {'NHO': 0.366, 'HOA': 0.260, 'LON': 0.374},
-    19: {'NHO': 0.376, 'HOA': 0.256, 'LON': 0.368},
-    20: {'NHO': 0.365, 'HOA': 0.255, 'LON': 0.380},  # LON hơi cao
-    21: {'NHO': 0.379, 'HOA': 0.261, 'LON': 0.361},
+    #  h:  {NHO,  HOA,  LON}
+    6:  {'NHO': 0.375, 'HOA': 0.293, 'LON': 0.332},  # LON thấp (giữ nguyên, chưa có data mới)
+    7:  {'NHO': 0.366, 'HOA': 0.241, 'LON': 0.394},  # LON cao
+    8:  {'NHO': 0.400, 'HOA': 0.262, 'LON': 0.338},  # NHO cao, LON thấp
+    9:  {'NHO': 0.408, 'HOA': 0.209, 'LON': 0.383},  # NHO cao nhất, HOA thấp
+    10: {'NHO': 0.405, 'HOA': 0.228, 'LON': 0.367},  # NHO cao
+    11: {'NHO': 0.403, 'HOA': 0.255, 'LON': 0.342},  # NHO cao, LON thấp
+    12: {'NHO': 0.361, 'HOA': 0.255, 'LON': 0.384},  # LON cao
+    13: {'NHO': 0.367, 'HOA': 0.252, 'LON': 0.381},  # LON cao
+    14: {'NHO': 0.368, 'HOA': 0.232, 'LON': 0.400},  # LON cao nhất
+    15: {'NHO': 0.361, 'HOA': 0.269, 'LON': 0.370},
+    16: {'NHO': 0.400, 'HOA': 0.237, 'LON': 0.363},  # NHO cao
+    17: {'NHO': 0.352, 'HOA': 0.250, 'LON': 0.398},  # LON cao
+    18: {'NHO': 0.348, 'HOA': 0.261, 'LON': 0.390},  # NHO thấp nhất
+    19: {'NHO': 0.373, 'HOA': 0.242, 'LON': 0.385},
+    20: {'NHO': 0.363, 'HOA': 0.245, 'LON': 0.392},
+    21: {'NHO': 0.379, 'HOA': 0.245, 'LON': 0.376},
+    22: {'NHO': 0.364, 'HOA': 0.281, 'LON': 0.355},  # HOA cao bất thường
 }
 
 # ── K: Per-voter WR by hour multiplier (3000-kỳ vote_breakdown analysis) ─────
@@ -766,8 +767,8 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
     defaults = {
         'hoa_suppress':   0.70,
         'nho_share_min':  0.50,
-        'prior_nho_conf': 0.36,
-        'prior_lon_conf': 0.48,
+        'prior_nho_conf': 0.40,  # P70: actual NHO=LON=37.6% → equal priors
+        'prior_lon_conf': 0.40,
     }
     conn = None
     try:
@@ -829,8 +830,8 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
         hoa_suppress = round(max(0.45, min(0.85, 0.70 - (hoa_f - 0.25) * 1.2)), 3)
 
         # Prior confidences (before P51 adjustment)
-        prior_nho_conf = round(max(0.25, min(0.55, 0.36 * nho_f / 0.375)), 3)
-        prior_lon_conf = round(max(0.30, min(0.65, 0.48 * lon_f / 0.403)), 3)
+        prior_nho_conf = round(max(0.28, min(0.58, 0.40 * nho_f / 0.376)), 3)
+        prior_lon_conf = round(max(0.28, min(0.58, 0.40 * lon_f / 0.376)), 3)
         # P65: prior_hoa removed in P144 — HOA permanently blocked
 
         # #4 ToD bias correction: giờ nào hệ thống lịch sử over-predict LON/NHO → dampen
@@ -2504,8 +2505,8 @@ def run_prediction_cycle() -> dict:
         if _current_loss_streak >= 7:
             _boost = min(1.5, 1.0 + (_current_loss_streak - 6) * 0.08)
             adaptive_thres = dict(adaptive_thres)  # copy, không mutate cache
-            adaptive_thres['prior_lon_conf'] = round(min(0.70, adaptive_thres.get('prior_lon_conf', 0.48) * _boost), 3)
-            adaptive_thres['prior_nho_conf'] = round(max(0.20, adaptive_thres.get('prior_nho_conf', 0.36) / _boost), 3)
+            adaptive_thres['prior_lon_conf'] = round(min(0.70, adaptive_thres.get('prior_lon_conf', 0.40) * _boost), 3)
+            adaptive_thres['prior_nho_conf'] = round(max(0.20, adaptive_thres.get('prior_nho_conf', 0.40) / _boost), 3)
             adaptive_thres['streak_boost']   = _current_loss_streak
             logger.info("StreakBoost: streak=%d factor=%.2f → prior_lon=%.3f prior_nho=%.3f",
                         _current_loss_streak, _boost,
