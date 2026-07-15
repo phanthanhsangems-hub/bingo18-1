@@ -14,8 +14,10 @@ def require_admin_key(f):
     """Yêu cầu header X-Admin-Key khớp ADMIN_SECRET_KEY"""
     @wraps(f)
     def decorated(*args, **kwargs):
+        if not config.ADMIN_SECRET_KEY:
+            return jsonify({"error": "Server misconfigured: ADMIN_SECRET_KEY not set"}), 503
         key = request.headers.get("X-Admin-Key", "")
-        if key != config.ADMIN_SECRET_KEY:
+        if not key or key != config.ADMIN_SECRET_KEY:
             return jsonify({"error": "Unauthorized"}), 401
         return f(*args, **kwargs)
     return decorated

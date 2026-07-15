@@ -86,13 +86,16 @@ def _background_retrain():
                     if name not in new_selector._models:
                         new_selector.add_model(m)
                 _model_cache = (hybrid, new_selector, old[2], ensemble, size_pred)
-            # Nếu cache chưa có, để None — lần sau _get_models() sẽ rebuild đầy đủ
+            else:
+                _model_cache = (hybrid, new_selector, None, ensemble, size_pred)
             _last_retrain_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
 
-        _retrain_failure_count = 0
+        with _model_cache_lock:
+            _retrain_failure_count = 0
         logger.info("Auto-Retrain: hoàn tất (df=%d rows, ensemble+ML retrained).", len(df))
     except Exception as e:
-        _retrain_failure_count += 1
+        with _model_cache_lock:
+            _retrain_failure_count += 1
         logger.error("Auto-Retrain error (attempt %d): %s", _retrain_failure_count, e)
         traceback.print_exc()
 
@@ -699,6 +702,7 @@ def _get_tod_priors(db, current_draw: int) -> dict:
     global _tod_prior_cache, _tod_prior_ts
     if _tod_prior_cache and (current_draw - _tod_prior_ts) < _TOD_PRIOR_REFRESH:
         return _tod_prior_cache
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -722,7 +726,6 @@ def _get_tod_priors(db, current_draw: int) -> dict:
             rows = cur.fetchall()
         else:
             rows = []
-        conn.close()
 
         result = {}
         for vn_hour, total, nho_cnt, hoa_cnt, lon_cnt in rows:
@@ -740,6 +743,9 @@ def _get_tod_priors(db, current_draw: int) -> dict:
     except Exception as e:
         logger.warning("ToD prior load error: %s", e)
         return {}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _get_adaptive_thresholds(db, current_draw: int) -> dict:
@@ -763,6 +769,7 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
         'prior_nho_conf': 0.44,
         'prior_lon_conf': 0.40,
     }
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -799,7 +806,6 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
         lon_f = freq.get('LON', 0) / total
 
         if total < 20:
-            conn.close()
             return defaults
 
         # P48/P150: blend recent-50 freq with static ToD table (6000 kỳ)
@@ -882,8 +888,6 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
         except Exception as _pe:
             logger.debug("P51/P63 DistCorr query failed: %s", _pe)
 
-        conn.close()
-
         # P63 + P64: Auto-tune nho_share_min with adaptive TUNE_K.
         # K escalates when pred_lon_excess stays positive across refresh cycles.
         global _lon_excess_history
@@ -933,6 +937,9 @@ def _get_adaptive_thresholds(db, current_draw: int) -> dict:
     except Exception as e:
         logger.warning("AdaptiveThresh load error: %s", e)
         return defaults
+    finally:
+        if conn is not None:
+            conn.close()
 
 def _get_voter_multipliers(db, current_draw: int) -> dict:
     """
@@ -944,6 +951,7 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
     global _voter_weight_cache, _voter_weight_ts
     if _voter_weight_cache and (current_draw - _voter_weight_ts) < _VOTER_WEIGHT_REFRESH_EVERY:
         return _voter_weight_cache
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -1133,7 +1141,6 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
         except Exception as _ov_e:
             logger.debug("voter_override read error: %s", _ov_e)
 
-        conn.close()
         _voter_weight_cache = multipliers
         _voter_weight_ts    = current_draw
         if multipliers:
@@ -1143,6 +1150,9 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
     except Exception as e:
         logger.warning("VoterWeights load error: %s", e)
         return {}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _get_voter_decay() -> dict:
@@ -1468,7 +1478,6 @@ def _query_triple_drought(db) -> tuple:
     Returns (None, None) on error or if no triple found in history.
     """
     try:
-        ph = db._ph()
         conn = db.get_connection()
         cur = conn.cursor()
         if config.DATABASE_URL:
@@ -1855,9 +1864,9 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     votes.append({'name': 'prior_nho', 'nums': [1, 1, 1], 'size': 'NHO', 'conf': _prior_nho_conf})
 
     # P-CARRYOVER: voter dựa trên xác suất lặp số theo giờ VN
+    _vn_hour = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).hour
     try:
         from models import _parse_numbers as _pn
-        _vn_hour = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).hour
         _co_stats = _CARRYOVER_STATS.get(_vn_hour, {})
         if _co_stats and len(df) > 0:
             _prev_nums = [int(x) for x in _pn(df.iloc[0]['numbers']) if x]
@@ -1961,7 +1970,8 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     best_combo, best_count = _top[0] if _top else (None, 0)
 
     combo_freq, num_freq, sum_freq = _build_recent_freq(df, window=15)
-    _pnf = _recent_pred_nums if _recent_pred_nums else None
+    with _pred_diversity_lock:
+        _pnf = list(_recent_pred_nums) if _recent_pred_nums else None
     _mfreq = _build_multi_window_combo_freq(df, windows=(60, 100))  # B: multi-window cold
 
     # Mode sum within each SIZE (highest base probability by combinatorics)
