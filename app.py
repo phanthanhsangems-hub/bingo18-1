@@ -439,8 +439,6 @@ def handle_500(e):
 @limiter.limit("20 per minute")
 def fetch_latest_result():
     """Fetch kết quả mới nhất từ Vietlott và lưu vào DB. Cloud Scheduler gọi mỗi 6 phút."""
-    if request.headers.get("X-Trigger-Secret") != config.TRIGGER_SECRET:
-        return jsonify({"error": "Unauthorized"}), 401
     try:
         from vietlott_fetcher import get_latest_result
         result = get_latest_result()
