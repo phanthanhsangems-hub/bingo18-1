@@ -1839,7 +1839,17 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     except Exception as _llme:
         logger.debug("llm voter error: %s", _llme)
 
-    if not votes:
+    # P45/P71: prior voters added BEFORE empty check — they are always present to anchor
+    # the vote so _run_majority_vote never returns None even when all optional voters fail.
+    _at = adaptive_thresholds or {}
+    _prior_lon_conf = _at.get('prior_lon_conf', 0.40)
+    _prior_nho_conf = _at.get('prior_nho_conf', 0.44)
+    # P144: prior_hoa removed — HOA is permanently blocked by P142, so the voter
+    # only adds HOA weight that always falls to runner-up, contributing noise.
+    votes.append({'name': 'prior_lon', 'nums': [1, 2, 6], 'size': 'LON', 'conf': _prior_lon_conf})
+    votes.append({'name': 'prior_nho', 'nums': [1, 1, 1], 'size': 'NHO', 'conf': _prior_nho_conf})
+
+    if not votes:  # unreachable (prior voters always added), kept as safety net
         return None, 0.0, {}
 
     # D: Calibration cap — raw model confidence > 0.45 has no added WR signal
@@ -1853,16 +1863,6 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # NOTE: Transition voter removed (P23). DB analysis shows max transition signal is
     # only ~1.4% above base rate (game is essentially memoryless). Adding it introduced
     # NHO bias with zero predictive value. Transition logic kept in _apply_size_prediction.
-
-    # P45: prior voter confidence is adaptive — scales with actual SIZE freq (last 50 draws).
-    # Falls back to P44 defaults (lon=0.40, nho=0.36) when insufficient data.
-    _at = adaptive_thresholds or {}
-    _prior_lon_conf = _at.get('prior_lon_conf', 0.40)
-    _prior_nho_conf = _at.get('prior_nho_conf', 0.44)
-    # P144: prior_hoa removed — HOA is permanently blocked by P142, so the voter
-    # only adds HOA weight that always falls to runner-up, contributing noise.
-    votes.append({'name': 'prior_lon', 'nums': [1, 2, 6], 'size': 'LON', 'conf': _prior_lon_conf})
-    votes.append({'name': 'prior_nho', 'nums': [1, 1, 1], 'size': 'NHO', 'conf': _prior_nho_conf})
 
     # P-CARRYOVER: voter dựa trên xác suất lặp số theo giờ VN
     _vn_hour = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).hour
