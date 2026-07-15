@@ -4948,6 +4948,66 @@ def retrain_models():
     })
 
 
+@app.route('/api/reset-model-config', methods=['POST'])
+@limiter.limit("5 per minute")
+def reset_model_config():
+    """P71: Reset model_selection_mode to 'auto' in system_config.
+    Fixes regression when DB has 'forced' + 'markov_order_2' from a previous debug session.
+    """
+    secret = request.headers.get("X-Trigger-Secret", "")
+    if secret and secret != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            ph  = db._ph()
+            cur.execute(
+                f"SELECT config_key, config_value FROM system_config "
+                f"WHERE config_key IN ({ph},{ph})",
+                ('model_selection_mode', 'active_model')
+            )
+            before = dict(cur.fetchall())
+
+            if USE_POSTGRES:
+                cur.execute(
+                    "INSERT INTO system_config (config_key, config_value) VALUES (%s,%s) "
+                    "ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value",
+                    ('model_selection_mode', 'auto')
+                )
+                # Remove active_model override so system uses auto path
+                cur.execute(
+                    "DELETE FROM system_config WHERE config_key = %s",
+                    ('active_model',)
+                )
+            else:
+                cur.execute(
+                    "INSERT OR REPLACE INTO system_config (config_key, config_value) VALUES (?,?)",
+                    ('model_selection_mode', 'auto')
+                )
+                cur.execute("DELETE FROM system_config WHERE config_key = ?", ('active_model',))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Invalidate module-level cache so next prediction re-reads config
+        try:
+            from prediction_service import invalidate_model_cache
+            invalidate_model_cache()
+        except Exception as _ce:
+            pass
+
+        return jsonify({
+            "status": "ok",
+            "before": before,
+            "after":  {"model_selection_mode": "auto", "active_model": "(deleted)"},
+            "message": "Model config reset to auto. Next prediction will use majority_vote.",
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/weekly-summary', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def weekly_summary():
