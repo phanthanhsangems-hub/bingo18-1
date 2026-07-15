@@ -138,6 +138,9 @@ print("TEST 5: Happy path (local SQLite only)")
 print("="*60)
 
 def _happy_path_local_only():
+    if not REAL_KEY:
+        print("         ADMIN_SECRET_KEY not configured — skipping")
+        return
     if config.DATABASE_URL:
         print("         DATABASE_URL is configured (production Postgres) — "
               "skipping to avoid inserting a fabricated draw")
