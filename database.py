@@ -95,15 +95,12 @@ class DatabaseManager:
     # ── Connection ────────────────────────────────────────────
     def get_connection(self):
         if USE_POSTGRES:
-            import time as _t
-            pool = _get_pg_pool()
-            for _attempt in range(3):
-                try:
-                    return _PooledConnection(pool, pool.getconn())
-                except pg_pool.PoolError:
-                    if _attempt == 2:
-                        raise
-                    _t.sleep(0.05 * (2 ** _attempt))  # 50ms, 100ms
+            # Direct connect per request — correct for Supabase pgbouncer
+            # transaction mode. ThreadedConnectionPool causes pool exhaustion
+            # because many endpoints still have connection leaks.
+            conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
+            conn.autocommit = False
+            return conn
         else:
             conn = sqlite3.connect(config.DB_PATH)
             conn.execute("PRAGMA journal_mode=WAL")
