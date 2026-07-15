@@ -162,6 +162,7 @@ def _check_checkpoint_alert(draw_number: int = 0):
         return
     if draw_number:
         _checkpoint_last_draw = draw_number
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -169,12 +170,10 @@ def _check_checkpoint_alert(draw_number: int = 0):
         cur.execute("SELECT COUNT(*) FROM predictions WHERE created_at > %s", (ts,))
         n_fresh = int(cur.fetchone()[0])
         if n_fresh < n:
-            conn.close()
             return
         cur.execute("SELECT 1 FROM alert_log WHERE alert_key = %s LIMIT 1", (_CHECKPOINT_ALERT_KEY,))
         already_sent = cur.fetchone() is not None
         if already_sent:
-            conn.close()
             return
         # Fetch ml stats for the alert body
         import math as _math
@@ -233,7 +232,6 @@ def _check_checkpoint_alert(draw_number: int = 0):
             (_CHECKPOINT_ALERT_KEY, f"Checkpoint reached: {n_fresh}/{n} fresh predictions")
         )
         conn.commit()
-        conn.close()
         from telegram_bot import TelegramBot
         from zoneinfo import ZoneInfo
         now_vn = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%H:%M %d/%m/%Y")
@@ -251,6 +249,9 @@ def _check_checkpoint_alert(draw_number: int = 0):
         )
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _check_sync_lag():
@@ -438,6 +439,8 @@ def handle_500(e):
 @limiter.limit("20 per minute")
 def fetch_latest_result():
     """Fetch kết quả mới nhất từ Vietlott và lưu vào DB. Cloud Scheduler gọi mỗi 6 phút."""
+    if request.headers.get("X-Trigger-Secret") != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
     try:
         from vietlott_fetcher import get_latest_result
         result = get_latest_result()
@@ -471,6 +474,8 @@ def fetch_latest_result():
 @limiter.limit("10 per minute")
 def sync_from_github():
     """Sync dữ liệu từ GitHub (vietvudanh/vietlott-data). Cloud Scheduler gọi mỗi sáng."""
+    if request.headers.get("X-Trigger-Secret") != config.TRIGGER_SECRET:
+        return jsonify({"error": "Unauthorized"}), 401
     try:
         import requests as req
 
@@ -641,6 +646,7 @@ def morning_digest():
     if secret != config.TRIGGER_SECRET:
         return jsonify({"error": "Unauthorized"}), 401
 
+    conn = None
     try:
         import json as _json
         from datetime import timedelta as _td
@@ -714,7 +720,6 @@ def morning_digest():
         streak_rows = [r[0] for r in cur.fetchall()]
 
         cur.close()
-        conn.close()
 
         wr_total = wr_row[0] or 0
         wr_wins  = int(wr_row[1] or 0)
@@ -780,6 +785,9 @@ def morning_digest():
         import traceback as _tb
         logger.error("morning-digest error: %s\n%s", e, _tb.format_exc())
         return jsonify({"error": str(e), "type": type(e).__name__}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 # ── PWA helpers (#51) ────────────────────────────────────────
@@ -851,6 +859,7 @@ def draw_search():
     draw_from = request.args.get('from', type=int)
     draw_to   = request.args.get('to',   type=int)
     limit_n   = min(int(request.args.get('limit', 50)), 200)
+    conn = None
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
@@ -888,7 +897,6 @@ def draw_search():
             LIMIT %s
         """, params + [limit_n])
         rows = cur.fetchall()
-        conn.close()
         results = []
         for dn, nums_raw, sz, sv, dt in rows:
             try:
@@ -903,6 +911,9 @@ def draw_search():
         return jsonify({'results': results, 'count': len(results)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 # ── Number frequency by VN hour (#38) ────────────────────────
@@ -1663,7 +1674,8 @@ def health_check():
     except Exception:
         pass
 
-    conn.close()
+    if conn is not None:
+        conn.close()
 
     # ── Aggregate overall status ──────────────────────────────
     statuses = [c["status"] for c in result["components"].values()]
