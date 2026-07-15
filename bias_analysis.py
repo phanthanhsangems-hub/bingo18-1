@@ -98,7 +98,7 @@ def size_of(s: int) -> str:
 def fetch_draws(db, limit=None):
     conn = db.get_connection()
     cur  = conn.cursor()
-    q    = "SELECT draw_number, numbers, draw_time FROM draws ORDER BY draw_number ASC"
+    q    = "SELECT draw_number, numbers, draw_time FROM draw_history ORDER BY draw_number ASC"
     if limit:
         q += f" LIMIT {limit}"
     cur.execute(q)
