@@ -22,7 +22,7 @@ import config
 logger = logging.getLogger(__name__)
 
 _HEDGE_CONFIG_KEY = 'hedge_log_weights'
-_DEFAULT_ETA = 0.05         # learning rate; 0.05 → slower decay, prevents single-voter dominance
+_DEFAULT_ETA = 0.10         # learning rate; 0.10 → faster convergence toward winning voters
 _HEDGE_WARMUP = 20          # minimum draw updates before Hedge takes effect
 _HEDGE_MULT_MIN = 0.5       # clamp floor — raised from 0.3 to preserve diversity among active voters
 _HEDGE_MULT_MAX = 3.0       # clamp ceiling
