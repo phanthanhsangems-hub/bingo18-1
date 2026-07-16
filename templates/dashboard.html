@@ -3,659 +3,179 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Bingo18 · Dự đoán</title>
-<!-- PWA (#51) -->
+<title>Bingo18 · Sạp Số</title>
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#00e5ff">
+<meta name="theme-color" content="#C8322B">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Bingo18">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css">
-<link rel="manifest" href="/static/manifest.json">
-<meta name="theme-color" content="#1a0533">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Bingo18">
-<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p154">
 <script>
-// Unregister tất cả SW cũ + xóa cache → chạy như plain web app
-if('serviceWorker'in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
-  navigator.serviceWorker.getRegistrations().then(regs=>{
-    regs.forEach(r=>r.unregister());
-  });
-  caches.keys().then(keys=>keys.forEach(k=>caches.delete(k)));
-}
+(function(){var t=localStorage.getItem('bingo18-theme');
+if(t){document.documentElement.setAttribute('data-theme',t);}
+else if(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches){document.documentElement.setAttribute('data-theme','dark');}})();
 </script>
-<script>(function(){var t=localStorage.getItem('bingo18-theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');})();</script>
 <script>
-// ── Browser Notification permission (#52) ────────────────────
-// ── Browser Notification permission (#52) ────────────────────
-function requestNotifPermission() {
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-}
-function showBrowserNotif(title, body) {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    const n = new Notification(title, { body, icon: '/icon-192.png', tag: 'bingo18-draw', renotify: true });
-    setTimeout(() => n.close(), 6000);
-  }
-}
-window.addEventListener('load', () => setTimeout(requestNotifPermission, 3000));
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}
 </script>
 </head>
 <body>
 <div id="live-toast"></div>
-<div class="shell">
 
-  <!-- HEADER -->
-  <header class="card header">
-    <div class="brand">
-      <div class="brand-icon">B</div>
-      <div>
-        <div class="brand-name">BINGO18</div>
-        <div class="brand-sub">AI Prediction</div>
-      </div>
+<!-- ═══ TOP BAR ═══ -->
+<div class="topbar"><div class="topbar-in">
+  <div class="logo">
+    <div class="logo-die"><b></b></div>
+    <div>
+      <div class="logo-name">BINGO<em>18</em></div>
+      <div class="logo-sub">Sạp số · AI dự đoán</div>
     </div>
-    <div class="hstatus">
-      <div class="spill">
-        <span class="lbl">Trạng thái</span>
-        <span class="val live">ONLINE</span>
-      </div>
-      <div class="spill">
-        <span class="lbl">Giờ</span>
-        <span class="val" id="current-time">--:--</span>
-      </div>
-      <div class="spill">
-        <span class="lbl">Kỳ mới nhất</span>
-        <span class="val" id="last-draw">---</span>
-      </div>
-      <div class="spill">
-        <span class="lbl">Sync</span>
-        <span class="val" id="sync-lag-display">---</span>
-      </div>
-      <div class="spill">
-        <span class="lbl">Pred lag</span>
-        <span class="val" id="pred-gap-display">---</span>
-      </div>
-      <button class="icon-btn" onclick="toggleTheme()" id="theme-toggle">☀️</button>
-      <button class="icon-btn" onclick="toggleSound()" id="snd-toggle" title="Bật/tắt âm thanh">🔊</button>
-    </div>
-  </header>
-
-  <!-- DRAW TICKER -->
-  <div class="draw-ticker">
-    <span class="dt-label">Recent</span>
-    <div id="dt-chips" class="dt-chips"><span style="color:var(--muted);font-size:11px">Đang tải...</span></div>
   </div>
-
-  <!-- PWA INSTALL BANNER (top) -->
-  <div id="pwa-banner-top">
-    <span style="flex:1" id="pwa-text">📲 Cài Bingo18 như app — dùng được offline</span>
-    <button class="pwa-install-btn" id="pwa-install-btn2">Cài</button>
-    <button class="pwa-dismiss-btn" onclick="dismissPwa()">✕</button>
+  <div class="top-status">
+    <span class="chip"><span class="dot" id="sys-dot"></span> <b id="sys-status">LIVE</b></span>
+    <span class="chip">Kỳ <b class="mono" id="last-draw">---</b></span>
+    <span class="chip hide-sm">Sync <b id="sync-lag">--</b></span>
+    <span class="chip mono hide-sm" id="clock">--:--:--</span>
+    <button class="icon-btn" id="theme-btn" title="Đổi giao diện Sứ / Sơn mài" aria-label="Đổi giao diện">◐</button>
   </div>
+</div></div>
 
-  <!-- CHECKPOINT BANNER -->
-  <div id="checkpoint-banner">
-    <span id="cp-label" data-tip="200 kỳ kiểm tra sau mỗi lần retrain. z > 1.96 = kết quả có ý nghĩa thống kê (95% confidence)">🔬 Checkpoint</span>
-    <div id="cp-bar-wrap"><div id="cp-bar" style="width:0%"></div></div>
-    <span id="cp-pct">0 / 200</span>
-    <span id="cp-wr" style="color:var(--muted);font-size:12px"></span>
-    <span id="cp-ctrl" style="color:var(--muted);font-size:12px"></span>
-    <span id="cp-eta" style="color:var(--muted);font-size:12px"></span>
-    <div id="cp-trend" style="display:none"></div>
-  </div>
+<div class="wrap">
 
-  <!-- SMART SUMMARY BANNER -->
-  <div id="smart-summary-banner">
-    <div class="smry-item"><span class="smry-lbl" data-tip="Win rate trên 20 kỳ gần nhất. HOT ≥ 50%, COLD < 30%">WR 20 kỳ</span><span class="smry-val" id="smry-wr20">--</span></div>
-    <div class="smry-sep"></div>
-    <div class="smry-item"><span class="smry-lbl" data-tip="Chuỗi thắng (🟢) hoặc thua (🔴) liên tiếp hiện tại">Streak</span><span class="smry-val" id="smry-streak">--</span></div>
-    <div class="smry-sep"></div>
-    <div class="smry-item"><span class="smry-lbl" data-tip="SIZE xuất hiện nhiều nhất trong 10 kỳ gần nhất. NHO = tổng 3–9, HOA = 10–11, LON = 12–18">Size hot 10 kỳ</span><span class="smry-val" id="smry-hot-size">--</span></div>
-    <div class="smry-sep"></div>
-    <div class="smry-item"><span class="smry-lbl" data-tip="Trong 56 bộ số (tổ hợp lặp 1–6), bộ nào chưa xuất hiện lâu nhất (kỳ) trong 2000 kỳ gần nhất">Combo chờ lâu nhất</span><span class="smry-val" id="smry-coldest">--</span></div>
-    <div style="flex:1"></div>
-    <span class="smry-badge" id="smry-status" style="opacity:.4">---</span>
-  </div>
+  <!-- ═══ HERO ═══ -->
+  <div class="hero">
+    <div class="hero-main">
+      <div class="eyebrow">
+        <span class="live-tag"><span class="dot"></span> Dự đoán hiện tại</span>
+        <span>·</span><span id="pred-model">--</span>
+      </div>
+      <div class="hero-draw">Kỳ <span class="mono" id="pred-draw">#---</span> <small id="pred-time"></small></div>
 
-  <div class="tab-panel active" id="tab-top" data-tab="top">
-  <!-- HERO + CONFIDENCE -->
-  <div class="main-grid">
-
-    <div class="card card-hi">
-      <div class="hero-lbl">Dự đoán kỳ tiếp theo</div>
-      <div class="hero-meta">
-        Kỳ <strong id="pred-draw">------</strong>
-        · Cập nhật <strong id="pred-updated">--:--</strong>
-        · <span class="hero-eta" id="refresh-eta">--</span>
+      <div class="dice-row" id="dice-row" aria-label="Bộ số dự đoán">
+        <div class="die" data-v="0"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="die" data-v="0"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="die" data-v="0"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       </div>
 
-      <div class="digits">
-        <div class="digit-box" id="d1"><div class="d-inner"><span class="d-num">?</span><div class="d-dots"><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span></div></div></div>
-        <div class="digit-box" id="d2"><div class="d-inner"><span class="d-num">?</span><div class="d-dots"><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span></div></div></div>
-        <div class="digit-box" id="d3"><div class="d-inner"><span class="d-num">?</span><div class="d-dots"><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span><span class="dot off"></span></div></div></div>
+      <div class="pred-meta">
+        <span class="size-pill" id="pred-size">--</span>
+        <span class="meta-chip" id="pred-probs" hidden></span>
+        <span class="meta-chip" id="last-result" hidden></span>
       </div>
 
-      <div class="meta-row">
-        <div class="mi"><div class="k">Model</div><div class="v cyan" id="pred-model">---</div></div>
-        <div class="mi"><div class="k">Tổng</div><div class="v gold" id="pred-sum">-</div></div>
-        <div class="mi"><div class="k">Size</div><div class="v" id="pred-size">---</div></div>
-        <div class="mi" id="streak-badge-wrap" style="display:none">
-          <div class="k">Streak</div>
-          <div class="v" id="streak-badge">-</div>
-        </div>
-        <div class="mi" id="wl-streak-wrap" style="display:none">
-          <div class="k">W/L</div>
-          <div class="v" id="wl-streak-badge">-</div>
-        </div>
-        <div class="mi">
-          <div class="k">Kỳ trước</div>
-          <div class="v cyan" id="last-draw-ago">--</div>
-        </div>
-      </div>
-
-      <div id="vote-breakdown-panel" style="display:none">
-        <div class="vb-hdr">Bầu chọn model — NHỎ / HÒA / LỚN</div>
-        <div id="vb-table-wrap"></div>
-        <div class="vb-tally" id="vb-tally"></div>
-        <div class="vb-adaptive" id="vb-adaptive"></div>
-      </div>
-
-      <div id="last-draw-result" style="display:none;margin:8px 0 4px;padding:8px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;font-size:12px">
-        <div style="color:var(--muted);font-size:10px;margin-bottom:4px">3 kỳ vừa ra</div>
-        <div id="last-draw-rows"></div>
-      </div>
-
-      <div id="disagree-alert" style="display:none"></div>
-
-      <div class="wl-sect">
-        <div class="wl-lbl">20 kỳ gần nhất (trái = cũ hơn)</div>
-        <div id="wl-bar">---</div>
+      <div class="forecast-strip" id="forecast-strip" hidden>
+        <span style="letter-spacing:.1em;text-transform:uppercase;font-size:10.5px">Dự báo</span>
       </div>
     </div>
 
-    <!-- #37 3-draw forecast -->
+    <div class="hero-side">
+      <div class="conf-card">
+        <div class="side-label">Xác suất thắng (calibrated)</div>
+        <div class="conf-val num" id="conf-val">--<small> %</small></div>
+        <div class="meter">
+          <div class="meter-fill" id="conf-fill"></div>
+          <div class="meter-base" title="Baseline 35%"></div>
+        </div>
+        <div class="meter-note"><span>Baseline 35%</span><span id="conf-delta"></span></div>
+      </div>
+      <div class="next-card">
+        <div class="side-label">Kỳ tiếp theo sau</div>
+        <div class="cd mono" id="cd">--:--</div>
+        <div class="next-bar"><i id="cd-bar"></i></div>
+        <div class="next-sub">Ước tính theo chu kỳ 6 phút</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TICKER ═══ -->
+  <div class="ticker" id="ticker">
+    <span class="tk-label">Vừa xổ</span>
+    <span class="skeleton">Đang tải...</span>
+  </div>
+
+  <!-- ═══ STAT TILES ═══ -->
+  <div class="tiles">
+    <div class="tile">
+      <div class="t-lbl">WR hôm nay</div>
+      <div class="t-val num" id="wr-today">--</div>
+      <div class="t-sub" id="wr-today-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="t-lbl">WR 50 kỳ</div>
+      <div class="t-val num" id="wr-50">--</div>
+      <div class="t-sub" id="wr-50-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="t-lbl">Chuỗi hiện tại</div>
+      <div class="t-val" id="streak-val">--</div>
+      <div class="t-sub" id="streak-sub"></div>
+    </div>
+    <div class="tile">
+      <div class="t-lbl">Đã học 24h</div>
+      <div class="t-val num" id="learned-24h">--</div>
+      <div class="t-sub" id="learned-sub"></div>
+    </div>
+  </div>
+
+  <!-- ═══ CHARTS ═══ -->
+  <div class="grid2">
     <div class="card">
-      <div class="card-title">Dự báo 3 kỳ tiếp theo</div>
-      <div id="forecast-body">
-        <table class="vb-table" style="width:100%">
-          <thead><tr><th>Kỳ</th><th>Size dự đoán</th><th class="r">NHỎ</th><th class="r">HÒA</th><th class="r">LỚN</th><th>Phương pháp</th></tr></thead>
-          <tbody id="forecast-rows"><tr><td colspan="6" style="color:var(--muted);font-size:12px">Đang tải...</td></tr></tbody>
-        </table>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px">N+1: model AI · N+2/N+3: Markov chain từ 2000 kỳ gần nhất</div>
-      </div>
+      <h2>Win rate 7 ngày</h2>
+      <p class="sub">Tỷ lệ đoán đúng theo ngày · nét đứt = baseline 35%</p>
+      <div class="chart-wrap" id="wr-chart"><span class="skeleton">Đang tải...</span></div>
     </div>
-
     <div class="card">
-      <div class="conf-lbl" data-tip="Model tự đánh giá xác suất dự đoán đúng SIZE. Baseline 37.5% = chọn ngẫu nhiên. Giá trị cao hơn = model tự tin hơn, chưa chắc đúng hơn.">Xác suất thắng · baseline 37.5%</div>
-      <div class="gauge-wrap">
-        <svg viewBox="0 0 150 150">
-          <defs>
-            <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stop-color="#a855f7"/>
-              <stop offset="100%" stop-color="#00e5ff"/>
-            </linearGradient>
-          </defs>
-          <circle class="track" cx="75" cy="75" r="60" fill="none" stroke-width="10"/>
-          <circle class="fill" id="gauge-fill" cx="75" cy="75" r="60" fill="none" stroke-width="10"
-            stroke-dasharray="376.9" stroke-dashoffset="376.9"/>
-          <line x1="75" y1="7" x2="75" y2="18" stroke="rgba(168,85,247,.4)" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-        <div class="gauge-inner">
-          <div class="gauge-pct"><span id="conf-value">--</span><span class="gauge-unit">%</span></div>
-          <div class="gauge-state" id="conf-label">ĐANG TẢI</div>
-        </div>
-      </div>
-      <div class="conf-source" id="conf-source" data-tip="Độ tin cậy được tính theo tỷ lệ thắng thực tế của các kỳ trước có mức đồng thuận (vote_share) tương tự, không phải con số model tự báo">Đang tải...</div>
-      <div class="conf-grid">
-        <div class="cstat"><div class="k">Đã học 24h</div><div class="v good" id="learned-24h">---</div></div>
-        <div class="cstat"><div class="k">Win 24h</div><div class="v" id="wins-24h">---</div></div>
-      </div>
+      <h2>Phân bố SIZE hôm nay</h2>
+      <p class="sub" id="size-dist-sub">Theo kết quả thực tế</p>
+      <div class="szbars" id="size-bars"></div>
     </div>
   </div>
 
+  <!-- ═══ HOT / COLD NUMBERS ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Số nóng · Số lạnh</h2>
+    <p class="sub">Tần suất từng số trong 100 kỳ gần nhất (300 lượt số) · mỗi số một màu riêng</p>
+    <div class="hc-grid" id="hc-grid"><span class="skeleton">Đang tải...</span></div>
+  </div>
 
-
-  <!-- QUICK STATS -->
-  <div class="stats-row">
-    <div class="card stat-card">
-      <div class="num"><span id="win-rate">--</span><span class="unit">%</span></div>
-      <div class="lbl" data-tip="Tỷ lệ dự đoán đúng SIZE (NHO/HOA/LON). Baseline ngẫu nhiên ≈ 37.5%">Win Rate</div>
-      <div class="note" id="vs-baseline">vs 37.5%</div>
+  <!-- ═══ COLD COMBOS + ALERTS ═══ -->
+  <div class="grid2 even">
+    <div class="card">
+      <h2>Bộ 3 lạnh nhất</h2>
+      <p class="sub">Số kỳ vắng mặt · so với combo lạnh nhất</p>
+      <div class="cold-list" id="cold-list"><span class="skeleton">Đang tải...</span></div>
     </div>
-    <div class="card stat-card">
-      <div class="num" id="today-wl" style="font-size:17px;line-height:1.5">---</div>
-      <div class="lbl">Hôm nay</div>
-      <div class="note" id="today-best" style="display:none"></div>
-    </div>
-    <div class="card stat-card">
-      <div class="num" id="wins-last50-stat" style="font-size:17px;line-height:1.5">--</div>
-      <div class="lbl" data-tip="Win rate trên 50 kỳ gần nhất (majority_vote model)">Win 50 kỳ</div>
-      <div class="note" id="wr50-note"></div>
-    </div>
-    <div class="card stat-card" id="today-wr-card">
-      <div class="num" id="today-wr-pct" style="font-size:17px;line-height:1.5">--</div>
-      <div class="lbl" data-tip="Win rate trong ngày hôm nay (giờ VN)">WR hôm nay</div>
-      <div class="note" id="today-wr-note"></div>
-    </div>
-    <div class="card stat-card">
-      <div class="num" id="pred-count-display" style="font-size:17px;line-height:1.5">--</div>
-      <div class="lbl" data-tip="Tổng số kỳ xổ số đã lưu trong database">Tổng kỳ DB</div>
+    <div class="card">
+      <h2>Cảnh báo thông minh</h2>
+      <p class="sub">Tín hiệu gần nhất từ hệ thống</p>
+      <div class="alerts" id="alerts"><span class="skeleton">Đang tải...</span></div>
     </div>
   </div>
 
-  </div>
-  <div class="tab-panel" id="tab-signal" data-tab="signal">
-  <div class="sec-hdr" id="sec-signal"><span class="sec-title">TÍN HIỆU HÔM NAY</span></div>
-  <!-- BET SIGNAL #56 + NUMBER HOT TODAY #57 + NUMBER GAP #59 -->
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Tín hiệu đánh <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· WR + streak + conf</span></div>
-      <div id="bet-signal-body"><span class="loading">Đang tải</span></div>
-    </div>
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Số nóng hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· tần suất 1-6</span></div>
-      <div id="number-hot-today-body"><span class="loading">Đang tải</span></div>
-    </div>
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Số chưa ra <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· kỳ từ lần xuất hiện cuối</span></div>
-      <div id="number-gap-body"><span class="loading">Đang tải</span></div>
-    </div>
-  </div>
-
-  <div class="sec-hdr" id="sec-dist"><span class="sec-title">PHÂN BỐ & MÔ HÌNH</span></div>
-  <!-- 3 PANELS -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Voter Win Rate</div>
-    <div id="voter-stats-body"><span class="loading">Đang tải</span></div>
-    <div id="voter-fresh-note" style="display:none;font-size:11px;color:var(--muted);margin-top:8px;border-top:1px solid var(--border);padding-top:6px"></div>
-  </div>
-
-  <!-- PAIR TODAY (moved from Streak tab) -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Cặp số hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· cặp số xuất hiện cùng nhiều nhất</span></div>
-    <div id="pair-today-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  </div>
-  <div class="tab-panel" id="tab-wr" data-tab="wr">
-  <div class="sec-hdr" id="sec-wr"><span class="sec-title">WIN RATE & HIỆU SUẤT</span></div>
-  <!-- WIN RATE THEO GIỜ -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Win Rate theo giờ <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· khung giờ đánh trúng nhiều nhất</span></div>
-    <div id="wr-hour-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- MODEL WR BREAKDOWN -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Win Rate theo Model</div>
-      <div style="display:flex;gap:5px">
-        <button class="mwr-n-btn active" data-n="500" onclick="setModelWrN(500,this)">500</button>
-        <button class="mwr-n-btn" data-n="1000" onclick="setModelWrN(1000,this)">1000</button>
-        <button class="mwr-n-btn" data-n="2000" onclick="setModelWrN(2000,this)">2000</button>
-      </div>
-    </div>
-    <div id="model-wr-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- CONFIDENCE TREND #12 -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Confidence Trend <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· rolling avg confidence vs WR thực tế</span></div>
-      <div style="display:flex;gap:5px">
-        <button class="mwr-n-btn active" data-n="500" onclick="setCtN(500,this)">500</button>
-        <button class="mwr-n-btn" data-n="1000" onclick="setCtN(1000,this)">1000</button>
-        <button class="mwr-n-btn" data-n="2000" onclick="setCtN(2000,this)">2000</button>
-      </div>
-    </div>
-    <div id="conf-trend-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- HOT COMBOS TODAY -->
-  <div class="card" id="hot-combos-card" style="margin-bottom:14px">
-    <div class="panel-ttl">
-      Bộ nóng hôm nay
-      <span id="hot-combos-sub" style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0"></span>
-    </div>
-    <div id="hot-combos-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- PAIR HEATMAP #16 -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Heatmap cặp số <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· 2 số xuất hiện cùng draw</span></div>
-      <div class="ph-tabs">
-        <button class="mwr-n-btn active" onclick="setPairN(200,this)">200</button>
-        <button class="mwr-n-btn" onclick="setPairN(500,this)">500</button>
-        <button class="mwr-n-btn" onclick="setPairN(1000,this)">1000</button>
-      </div>
-    </div>
-    <div id="pair-heatmap-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- NUMBER TREND #20 -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Number Heat Trend <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· 20 kỳ vs 100 kỳ baseline</span></div>
-    </div>
-    <div id="number-trend-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-
-
-  <!-- DB MONITOR #53 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">DB Monitor <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· latency &amp; table stats</span></div>
-    <div id="db-monitor-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- MODEL VS RANDOM #39 -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-      <div class="panel-ttl" style="margin-bottom:0">Model vs Baseline <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· rolling WR vs 37.5%</span></div>
-      <div style="display:flex;gap:5px">
-        <button class="mwr-n-btn active" onclick="setMvrN(300,this)">300</button>
-        <button class="mwr-n-btn" onclick="setMvrN(500,this)">500</button>
-        <button class="mwr-n-btn" onclick="setMvrN(1000,this)">1000</button>
-      </div>
-    </div>
-    <div id="mvr-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  </div>
-  <div class="tab-panel" id="tab-analysis" data-tab="analysis">
-  <div class="sec-hdr" id="sec-analysis"><span class="sec-title">PHÂN TÍCH CHI TIẾT</span></div>
-  <!-- SIZE TRANSITION MATRIX -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Size Transition Matrix
-        <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· xác suất kỳ tiếp sau mỗi SIZE</span>
-      </div>
-      <div style="display:flex;gap:5px">
-        <button class="mwr-n-btn active" onclick="setSizeTransN(500,this)">500</button>
-        <button class="mwr-n-btn" onclick="setSizeTransN(1000,this)">1000</button>
-        <button class="mwr-n-btn" onclick="setSizeTransN(2000,this)">2000</button>
-      </div>
-    </div>
-    <div id="size-trans-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  <!-- DRAW HEATMAP #69 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Heatmap kỳ quay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· 40 kỳ × 6 số · ô sáng = số xuất hiện</span></div>
-    <div id="draw-heatmap-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- COMBO HEATMAP #75 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Heatmap 56 bộ số <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· nền = tần suất · viền đỏ = lạnh &gt;50k · viền xanh = nóng &lt;5k</span></div>
-    <div class="ch-tabs" id="ch-tabs">
-      <button class="tab-btn active" data-n="200" onclick="switchCH(200,this)">200 kỳ</button>
-      <button class="tab-btn" data-n="500" onclick="switchCH(500,this)">500 kỳ</button>
-      <button class="tab-btn" data-n="1000" onclick="switchCH(1000,this)">1000 kỳ</button>
-    </div>
-    <div id="combo-heatmap-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- SIZE SEQUENCE #70 + SUM ROLLING #71 -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Chuỗi SIZE <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· 60 kỳ gần nhất · W=win L=loss</span></div>
-      <div id="size-sequence-body"><span class="loading">Đang tải</span></div>
-    </div>
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Tổng rolling <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· sum 100 kỳ + MA10</span></div>
-      <div id="sum-rolling-body"><span class="loading">Đang tải</span></div>
-    </div>
-  </div>
-
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Độ lệch số <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· thực tế vs lý thuyết · 300 kỳ</span></div>
-    <div id="number-deviation-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- WL CALENDAR #73 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Lịch WR 30 ngày <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· win rate mỗi ngày · xanh=tốt · đỏ=xấu</span></div>
-    <div id="wl-calendar-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  <!-- COMBO HOT TODAY #63 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Bộ số hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· ra nhiều nhất · chưa ra hôm nay</span></div>
-    <div id="combo-hot-today-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  <!-- REPEAT STATS #54 + TODAY DRAWS #55 -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Số lặp <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· ≥2 số giống nhau trong 1 kỳ</span></div>
-      <div id="repeat-stats-body"><span class="loading">Đang tải</span></div>
-    </div>
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Kỳ hôm nay <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· <span id="today-draws-sub">--</span></span></div>
-      <div id="today-draws-body"><span class="loading">Đang tải</span></div>
-    </div>
-  </div>
-
-  <!-- COMBO GAP #60 + RECENT OUTCOMES #52 -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">Bộ số lạnh nhất <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· chưa ra lâu nhất (2000 kỳ)</span></div>
-      <div id="combo-gap-body"><span class="loading">Đang tải</span></div>
-    </div>
-    <div class="card" style="margin-bottom:0">
-      <div class="panel-ttl">10 kỳ gần nhất <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· kết quả thực tế vs dự đoán</span></div>
-      <div id="recent-outcomes-body"><span class="loading">Đang tải</span></div>
-    </div>
-  </div>
-
-  </div>
-  <div class="tab-panel" id="tab-tools" data-tab="tools">
-  <div class="sec-hdr" id="sec-tools"><span class="sec-title">HỆ THỐNG & CÔNG CỤ</span></div>
-
-  <!-- SYSTEM HEALTH BADGE -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">System Health <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· WR50 · voter decay · draw gap</span></div>
-    <div id="sys-health-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- HEDGE VOTER WEIGHTS -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Hedge Voter Weights <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· Exponential Weights · multiplier so với uniform</span></div>
-    <div id="hedge-weights-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- ALGO IMPACT -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Algo Impact <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· WR trước vs sau khi deploy BOCPD/Hedge/Conformal</span></div>
-    <div id="algo-impact-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- WEIGHT OPTIMIZER -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Weight Optimizer <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· grid search voter mults</span></div>
-      <button class="mwr-n-btn active" id="wo-run-btn" onclick="runWeightOptimizer()">▶ Chạy</button>
-    </div>
-    <div id="weight-optimizer-body" style="font-size:12px;color:var(--muted)">Nhấn "Chạy" để tìm voter weights tối ưu trên 500 kỳ gần nhất.</div>
-  </div>
-
-  <!-- ALERT LOG -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Alert Log <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· 15 cảnh báo gần nhất</span></div>
-    <div id="alert-log-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  <!-- WR BY DAY OF WEEK -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">WR theo thứ <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· win rate per day-of-week</span></div>
-    <div id="wr-dow-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-
-  <!-- NUMBER FREQ LAST N DRAWS #40 -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px">
-      <div class="panel-ttl" style="margin-bottom:0">Tần suất số <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· N kỳ gần nhất</span></div>
-      <div style="display:flex;gap:5px">
-        <button class="mwr-n-btn" data-n="14" onclick="loadNumberFreqN(14,this)">14</button>
-        <button class="mwr-n-btn active" data-n="30" onclick="loadNumberFreqN(30,this)">30</button>
-        <button class="mwr-n-btn" data-n="50" onclick="loadNumberFreqN(50,this)">50</button>
-        <button class="mwr-n-btn" data-n="100" onclick="loadNumberFreqN(100,this)">100</button>
-      </div>
-    </div>
-    <div id="numfreqn-body"><span class="loading">Đang tải</span></div>
-  </div>
-
-  <!-- COMBO COLD STREAKS -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Bộ 3 số chưa ra <span id="combo-cold-sub" style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0"></span></div>
-    <div id="combo-cold-grid"><span class="loading">Đang tải</span></div>
-  </div>
-
-  </div>
-  <div class="tab-panel" id="tab-search" data-tab="search">
-  <div class="sec-hdr" id="sec-search"><span class="sec-title">TRA CỨU & LỊCH SỬ</span></div>
-  <!-- COMBO PROBABILITY CALCULATOR -->
-  <div class="card" style="margin-bottom:14px" id="combo-calc-card">
-    <div class="panel-ttl">Xác suất combo cụ thể <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· tần suất, gap, hot/cold</span></div>
-    <div class="calc-grid">
-      <input class="calc-num-in" id="cn1" type="number" min="1" max="6" placeholder="?" />
-      <span class="calc-sep">-</span>
-      <input class="calc-num-in" id="cn2" type="number" min="1" max="6" placeholder="?" />
-      <span class="calc-sep">-</span>
-      <input class="calc-num-in" id="cn3" type="number" min="1" max="6" placeholder="?" />
-      <button class="calc-btn" onclick="doComboDetail()">Tính</button>
-    </div>
-    <div style="font-size:10px;color:var(--muted);margin-bottom:10px">Nhập 3 số từ 1-6 (số lặp được, VD: 1 1 4, kết quả dựa trên ~64k kỳ)</div>
-    <div id="combo-calc-result"></div>
-  </div>
-
-  <!-- SEARCH HISTORY -->
-  <div class="card" style="margin-bottom:14px" id="search-card">
-    <div class="panel-ttl">Tra cứu lịch sử</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
-      <div style="display:flex;gap:6px;background:rgba(255,255,255,0.04);border-radius:var(--rs);padding:3px">
-        <button class="srch-tab active" data-mode="numbers" onclick="setSrchMode('numbers',this)">Bộ số</button>
-        <button class="srch-tab" data-mode="sum" onclick="setSrchMode('sum',this)">Tổng</button>
-        <button class="srch-tab" data-mode="size" onclick="setSrchMode('size',this)">Size</button>
-      </div>
-      <input id="srch-input" type="text" placeholder="VD: 356 hoặc 3 5 6" maxlength="10"
-        style="flex:1;min-width:120px;background:rgba(255,255,255,0.06);border:1px solid var(--border);
-               border-radius:var(--rs);padding:7px 12px;color:var(--text);font-size:14px;outline:none"
-        onkeydown="if(event.key==='Enter')doSearch()" />
-      <button onclick="doSearch()"
-        style="background:var(--cyan);color:#000;border:none;border-radius:var(--rs);
-               padding:7px 18px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap">
-        Tìm kiếm
-      </button>
-    </div>
-    <div id="srch-hint" style="font-size:11px;color:var(--muted);margin-bottom:10px">
-      Nhập 3 chữ số 1-6 · VD: <b>356</b> hoặc <b>1 1 4</b> (số lặp được)
-    </div>
-    <div id="srch-result"></div>
-  </div>
-
-  <!-- BACKTEST QUICK #11 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Backtest nhanh <span style="font-size:11px;color:var(--dim);font-weight:400;text-transform:none;letter-spacing:0">· so sánh model trên lịch sử</span></div>
-    <div class="bt-controls">
-      <select class="bt-sel" id="bt-range">
-        <option value="200">200 kỳ gần nhất</option>
-        <option value="500" selected>500 kỳ gần nhất</option>
-        <option value="1000">1000 kỳ gần nhất</option>
-      </select>
-      <button class="bt-run" id="bt-run-btn" onclick="runBacktest()">▶ Chạy Backtest</button>
-      <span id="bt-status" style="font-size:11px;color:var(--muted)"></span>
-    </div>
-    <div id="bt-result"></div>
-  </div>
-
-  <!-- EXPORT CSV #14 -->
-  <div class="card" style="margin-bottom:14px">
-    <div class="panel-ttl">Export dữ liệu</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
-      <a class="exp-btn" href="/api/analytics/export?format=csv&type=draws&limit=5000" download>
-        ⬇ Draws CSV <span style="font-size:10px;color:var(--muted)">(5000)</span>
-      </a>
-      <a class="exp-btn" href="/api/analytics/export?format=csv&type=predictions&limit=5000" download>
-        ⬇ Predictions CSV <span style="font-size:10px;color:var(--muted)">(5000)</span>
-      </a>
-      <a class="exp-btn" href="/api/analytics/export?format=json&type=draws&limit=1000">
-        { } Draws JSON
-      </a>
-      <a class="exp-btn" href="/api/today-combos" target="_blank">
-        📋 Today Combos JSON
-      </a>
-    </div>
-  </div>
-
-  <!-- HISTORY -->
-  <div class="card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div class="panel-ttl" style="margin-bottom:0">Lịch sử dự đoán</div>
-      <span style="font-size:11px;color:var(--muted)">Dự đoán vs kết quả thật</span>
-    </div>
-    <div class="filter-bar">
-      <button class="filter-btn active" data-filter="all">Tất cả <span class="fbadge" id="count-all">0</span></button>
-      <button class="filter-btn" data-filter="3">3/3 Khớp <span class="fbadge" id="count-3">0</span></button>
-      <button class="filter-btn" data-filter="2plus">2+ Khớp <span class="fbadge" id="count-2plus">0</span></button>
-      <button class="filter-btn" data-filter="win">Thắng <span class="fbadge" id="count-win">0</span></button>
-      <button class="filter-btn" data-filter="loss">Thua <span class="fbadge" id="count-loss">0</span></button>
-    </div>
-    <div class="log-wrap">
-      <table>
+  <!-- ═══ LOG ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Nhật ký dự đoán</h2>
+    <p class="sub">10 kỳ gần nhất · thắng = đúng SIZE</p>
+    <div class="tbl-scroll">
+      <table class="log-table">
         <thead><tr>
-          <th>Kỳ</th><th>Giờ</th><th>Kết quả thật</th>
-          <th>Size</th><th>Tổng</th><th>Dự đoán</th><th>W/L</th>
+          <th>Kỳ</th><th>Giờ</th><th>Dự đoán</th><th>Size</th><th>Kết quả</th><th>Size thật</th><th>Trùng</th><th></th>
         </tr></thead>
-        <tbody id="log-tbody">
-          <tr><td colspan="7" style="text-align:center;padding:36px"><span class="loading">Đang tải</span></td></tr>
-        </tbody>
+        <tbody id="log-body"><tr><td colspan="8" class="skeleton">Đang tải...</td></tr></tbody>
       </table>
     </div>
-    <div class="log-cards" id="log-cards">
-      <div style="text-align:center;padding:28px"><span class="loading">Đang tải</span></div>
-    </div>
   </div>
 
+  <div class="foot">
+    <b>Bingo18</b> · Sạp Số · cập nhật tự động qua SSE + refresh 60s
   </div>
-  <footer class="card">
-    <span>BINGO18 Neural v4.7</span>
-    <span>GCP asia-southeast1</span>
-    <span id="footer-status" style="color:var(--muted)">Đang kết nối</span>
-    <span style="margin-left:auto;display:flex;gap:10px">
-      <a href="/api/analytics/export?format=csv&type=draws&limit=5000" download>⬇ Draws CSV</a>
-      <a href="/api/analytics/export?format=csv&type=predictions&limit=5000" download>⬇ Preds CSV</a>
-    </span>
-  </footer>
 </div>
 
-<button id="scroll-top-btn" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Lên đầu">↑</button>
-
-<nav class="bottom-nav" aria-label="Sections">
-  <a href="#" id="nav-top" class="active"><span class="nav-ico">🏠</span>Top</a>
-  <a href="#sec-signal" id="nav-signal"><span class="nav-ico">📡</span>Tín hiệu</a>
-  <a href="#sec-wr" id="nav-wr"><span class="nav-ico">📊</span>Win Rate</a>
-  <a href="#sec-analysis" id="nav-analysis"><span class="nav-ico">🔍</span>Phân tích</a>
-  <a href="#sec-tools" id="nav-tools"><span class="nav-ico">⚙️</span>Hệ thống</a>
-  <a href="#sec-search" id="nav-search"><span class="nav-ico">🔎</span>Tra cứu</a>
-</nav>
-
-<script src="/static/js/dashboard.js"></script>
+<div class="tooltip" id="tooltip"></div>
+<script src="/static/js/dashboard.js?v=p154"></script>
 </body>
 </html>
