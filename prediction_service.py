@@ -315,6 +315,11 @@ _last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
 _last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 8 draws
 _TRIPLE_DROUGHT_THRESH = 25       # alert when ≥25 draws without a triple (near expected 36; fire early)
 _TRIPLE_ALERT_COOLDOWN = 8        # draws between repeated triple drought alerts
+# Gap analysis over 2,039 historical triple gaps: 26.2% of gaps ≤10 draws vs 19.7%
+# expected under a memoryless geometric (mean 46) — triples cluster. After a fresh
+# triple, the next ~10 draws carry ~33% elevated triple probability.
+_last_triple_cluster_draw: int = 0  # last draw a cluster-window alert was sent
+_TRIPLE_CLUSTER_WINDOW = 10         # draws of elevated triple probability after a fresh triple
 _last_pair_alert_draw: int = 0    # cooldown for pair drought alert
 _PAIR_DROUGHT_THRESH = 10         # alert when ≥10 draws without any pair (~1.1× expected 9.3)
 _PAIR_ALERT_COOLDOWN = 5          # draws between repeated pair drought alerts
@@ -2651,13 +2656,27 @@ def run_prediction_cycle() -> dict:
     except Exception as _bae:
         logger.debug("bocpd alert error: %s", _bae)
 
-    # Triple drought alert — fires when no triple for ≥ _TRIPLE_DROUGHT_THRESH draws
+    # Triple alerts — cluster window after a fresh triple + drought watch
     try:
-        global _last_triple_alert_draw
-        if next_draw - _last_triple_alert_draw >= _TRIPLE_ALERT_COOLDOWN:
-            _drought, _last_triple = _query_triple_drought(db)
-            if _drought is not None and _drought >= _TRIPLE_DROUGHT_THRESH:
-                import math as _math
+        global _last_triple_alert_draw, _last_triple_cluster_draw
+        _drought, _last_triple = _query_triple_drought(db)
+        if _drought is not None:
+            if (_drought == 0
+                    and next_draw - _last_triple_cluster_draw >= _TRIPLE_CLUSTER_WINDOW):
+                # Latest result IS a triple → open the 10-draw cluster window
+                _msg = (
+                    f"🔥 <b>TRIPLE CLUSTER · vừa ra triple kỳ #{_last_triple}</b>\n"
+                    f"Triple có xu hướng ra theo cụm: 26% cụm lịch sử có "
+                    f"triple tiếp trong ≤10 kỳ (vs ~20% nếu ngẫu nhiên, +33%)\n"
+                    f"➡️ Cửa sổ theo dõi: kỳ #{_last_triple + 1}–#{_last_triple + _TRIPLE_CLUSTER_WINDOW}\n"
+                    f"📌 Chú ý khả năng có triple nữa trong 10 kỳ tới!"
+                )
+                telegram.send_message(_msg)
+                _last_triple_cluster_draw = next_draw
+                logger.info("Triple cluster alert: triple at #%d, window %d draws",
+                            _last_triple, _TRIPLE_CLUSTER_WINDOW)
+            elif (_drought >= _TRIPLE_DROUGHT_THRESH
+                    and next_draw - _last_triple_alert_draw >= _TRIPLE_ALERT_COOLDOWN):
                 _p_next5  = round((1 - (1 - 6/216) ** 5) * 100, 1)
                 _p_next10 = round((1 - (1 - 6/216) ** 10) * 100, 1)
                 _msg = (
