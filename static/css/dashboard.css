@@ -259,6 +259,11 @@ svg text{font-family:inherit}
 .hc-track i{display:block;height:100%;border-radius:4px}
 .hc-cnt{font-size:11.5px;color:var(--muted)}
 .hc-cnt b{color:var(--ink)}
+.hc-gap{font-size:10.5px;color:var(--muted)}
+.hc-gap b{color:var(--ink)}
+.hc-gap.just{color:var(--win);font-weight:700}
+.hc-gap.long{color:var(--accent-ink);font-weight:600}
+.hc-gap.long b{color:var(--accent-ink)}
 
 /* cold combos */
 .cold-list{display:flex;flex-direction:column;gap:10px}
