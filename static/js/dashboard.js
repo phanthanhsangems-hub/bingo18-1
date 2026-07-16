@@ -324,6 +324,27 @@ async function loadHotCold() {
   }).join('');
 }
 
+// ── Today combos: bộ nào đã ra / chưa ra hôm nay ─────────────
+async function loadTodayCombos() {
+  const d = await J('/api/today-combos');
+  const ap = d.appeared || [], ny = d.not_appeared || [];
+  if (!ap.length && !ny.length) {
+    $('tc-appeared').innerHTML = '<span class="skeleton">Chưa có kỳ nào hôm nay</span>';
+    $('tc-notyet').innerHTML = '';
+    return;
+  }
+  $('tc-sub').textContent =
+    `${ap.length}/56 bộ đã xuất hiện hôm nay (giờ VN) · ${ny.length} bộ chưa ra`;
+  $('tc-appeared-n').textContent = ap.length;
+  $('tc-notyet-n').textContent = ny.length;
+  $('tc-appeared').innerHTML = ap.map(c =>
+    `<span class="combo-chip" title="${esc(c.label)} · ${SZ_VI[c.size] || ''} · ra ${c.count} lần">` +
+    miniDice(c.combo) + `<span class="cc-count num">×${c.count}</span></span>`).join('');
+  $('tc-notyet').innerHTML = ny.map(c =>
+    `<span class="combo-chip not-yet" title="${esc(c.label)} · ${SZ_VI[c.size] || ''} · chưa ra hôm nay">` +
+    miniDice(c.combo) + `</span>`).join('');
+}
+
 // ── Cold combos (đồng thời cấp gap từng số cho card nóng/lạnh) ─
 async function loadColdCombos() {
   const d = await J('/api/cold-streaks');
@@ -430,6 +451,7 @@ function refreshAll() {
   safe(loadRecent);
   safe(loadTiles);
   safe(loadSizeDist);
+  safe(loadTodayCombos);
   safe(loadHotCold);
   safe(loadColdCombos);
   safe(loadAlerts);

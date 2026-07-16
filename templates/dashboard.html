@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p154">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p156">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -142,6 +142,20 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <div class="hc-grid" id="hc-grid"><span class="skeleton">Đang tải...</span></div>
   </div>
 
+  <!-- ═══ TODAY COMBOS ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Bộ số hôm nay</h2>
+    <p class="sub" id="tc-sub">Trong 56 bộ 3 có thể · giờ VN</p>
+    <div class="tc-block">
+      <div class="tc-head appeared">✅ Đã ra <b id="tc-appeared-n">--</b></div>
+      <div class="combo-chips" id="tc-appeared"><span class="skeleton">Đang tải...</span></div>
+    </div>
+    <div class="tc-block">
+      <div class="tc-head not-yet">⬜ Chưa ra <b id="tc-notyet-n">--</b></div>
+      <div class="combo-chips" id="tc-notyet"></div>
+    </div>
+  </div>
+
   <!-- ═══ COLD COMBOS + ALERTS ═══ -->
   <div class="grid2 even">
     <div class="card">
@@ -176,6 +190,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p154"></script>
+<script src="/static/js/dashboard.js?v=p156"></script>
 </body>
 </html>
