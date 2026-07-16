@@ -265,6 +265,23 @@ svg text{font-family:inherit}
 .hc-gap.long{color:var(--accent-ink);font-weight:600}
 .hc-gap.long b{color:var(--accent-ink)}
 
+/* today combos */
+.tc-block{margin-top:10px}
+.tc-head{font-size:12px;font-weight:700;letter-spacing:.06em;margin-bottom:8px;color:var(--muted)}
+.tc-head.appeared b{color:var(--win)}
+.tc-head.not-yet b{color:var(--accent-ink)}
+.combo-chips{display:flex;flex-wrap:wrap;gap:7px}
+.combo-chip{
+  display:inline-flex;align-items:center;gap:5px;
+  border:1px solid var(--line);border-radius:10px;padding:4px 8px;background:var(--card2);
+}
+.combo-chip .cc-count{
+  font-size:10.5px;font-weight:800;color:var(--win);
+  background:var(--jade-soft);border-radius:999px;padding:1px 7px;
+}
+.combo-chip.not-yet{opacity:.62;background:transparent}
+.combo-chip.not-yet .mini-die{filter:grayscale(.35)}
+
 /* cold combos */
 .cold-list{display:flex;flex-direction:column;gap:10px}
 .cold-row{display:flex;align-items:center;gap:12px}
