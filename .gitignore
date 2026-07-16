@@ -4,6 +4,8 @@
 
 # Database
 data/*.db
+data/*.db-shm
+data/*.db-wal
 data/backups/
 
 # Models
