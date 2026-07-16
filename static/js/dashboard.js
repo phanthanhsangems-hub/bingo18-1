@@ -294,6 +294,7 @@ async function loadSizeDist() {
 }
 
 // ── Hot / cold numbers ────────────────────────────────────────
+let _numGaps = {};   // {"1": kỳ chưa ra, ...} — từ /api/cold-streaks
 async function loadHotCold() {
   const freq = await J('/api/number_frequency?window=100');
   const items = Object.entries(freq)
@@ -308,18 +309,26 @@ async function loadHotCold() {
       : i === items.length - 1
         ? '<span class="hc-badge cold">❄️ LẠNH</span>'
         : '<span class="hc-badge mid">·</span>';
+    const gap = _numGaps[f.n];
+    const gapHtml = gap == null ? ''
+      : gap === 0
+        ? '<div class="hc-gap just">● vừa ra kỳ này</div>'
+        : `<div class="hc-gap${gap >= 5 ? ' long' : ''}">chưa ra <b class="num">${gap}</b> kỳ</div>`;
     return `<div class="hc-cell">
       <div class="hc-num" style="background:var(--n${f.n})">${f.n}</div>
       ${badge}
       <div class="hc-track"><i style="width:${Math.round(f.c / maxC * 100)}%;background:var(--n${f.n})"></i></div>
       <div class="hc-cnt num"><b>${f.c}</b> lần</div>
+      ${gapHtml}
     </div>`;
   }).join('');
 }
 
-// ── Cold combos ───────────────────────────────────────────────
+// ── Cold combos (đồng thời cấp gap từng số cho card nóng/lạnh) ─
 async function loadColdCombos() {
   const d = await J('/api/cold-streaks');
+  _numGaps = d.numbers || {};
+  loadHotCold().catch(() => {});   // vẽ lại card số nóng/lạnh kèm gap
   const combos = (d.combos || []).slice(0, 6);
   if (!combos.length) return;
   const maxGap = combos[0].streak || 1;
