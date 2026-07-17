@@ -121,7 +121,12 @@ async function loadForecast() {
 
 // ── Ticker + Log (recent outcomes) ────────────────────────────
 async function loadRecent() {
-  const d = await J('/api/recent-outcomes');
+  const [dRes, npRes] = await Promise.allSettled([
+    J('/api/recent-outcomes'), J('/api/next_prediction'),
+  ]);
+  if (dRes.status !== 'fulfilled') throw dRes.reason;
+  const d = dRes.value;
+  const np = npRes.status === 'fulfilled' ? npRes.value : null;
   const rows = d.draws || [];
   if (!rows.length) return;
 
@@ -154,8 +159,21 @@ async function loadRecent() {
       `Kỳ trước: <b>${(lr.numbers || []).join('·')} — ${SZ_VI[lr.size] || ''} ${lr.is_win ? '✓' : '✕'}</b>`;
   }
 
-  // log table
-  $('log-body').innerHTML = rows.map(r => {
+  // log table — dòng đầu: dự đoán kỳ SẮP TỚI (chưa xổ)
+  let pendingRow = '';
+  if (np && np.predicted_numbers && np.draw_number > rows[0].draw_number) {
+    const psz = sizeOf(np.predicted_numbers);
+    const ptime = np.display_time_vietnam ? esc(String(np.display_time_vietnam).slice(0, 5)) : '--';
+    pendingRow = `<tr class="pending-row">
+      <td class="mono">#${np.draw_number}</td>
+      <td class="mono">${ptime}</td>
+      <td>${miniDice(np.predicted_numbers)}</td>
+      <td>${szPill(psz)}</td>
+      <td colspan="3" class="pending-note">chờ xổ · win prob ${((np.confidence || 0) * 100).toFixed(1)}%</td>
+      <td><span class="wl pd">DỰ ĐOÁN</span></td>
+    </tr>`;
+  }
+  $('log-body').innerHTML = pendingRow + rows.map(r => {
     const wl = r.is_win == null
       ? '<span class="wl p">CHỜ</span>'
       : (r.is_win ? '<span class="wl w">WIN</span>' : '<span class="wl l">LOSS</span>');

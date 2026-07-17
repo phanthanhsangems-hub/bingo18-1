@@ -315,6 +315,10 @@ svg text{font-family:inherit}
 .wl.w{background:var(--jade-soft);color:var(--win)}
 .wl.l{background:var(--accent-soft);color:var(--loss)}
 .wl.p{background:var(--card2);color:var(--muted)}
+.wl.pd{background:var(--amber-soft);color:var(--amber)}
+.log-table tr.pending-row td{background:var(--card2)}
+.log-table tr.pending-row td:first-child{border-left:3px solid var(--amber)}
+.pending-note{color:var(--muted);font-size:12px;font-style:italic}
 .tbl-scroll{overflow-x:auto}
 
 /* footer */
