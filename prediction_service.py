@@ -2649,6 +2649,10 @@ def run_prediction_cycle() -> dict:
                     f"<i>Kỳ #{next_draw} · BOCPD hazard=1/120</i>"
                 )
                 telegram.send_message(_msg)
+                _alert_mgr.log(db, 'bocpd_regime',
+                               f"Chuỗi SIZE lệch mạnh về {_SLV[_dom]}: {_bd[_dom]*100:.0f}% "
+                               f"vs baseline {_BASE[_dom]*100:.0f}% (Δ+{_delta*100:.0f}pp)",
+                               {'regime': _dom, 'prob': round(_bd[_dom], 4), 'draw': next_draw})
                 _last_bocpd_regime = _dom
                 logger.info("BOCPD regime alert sent: %s %.0f%%", _dom, _bd[_dom] * 100)
             elif _bd.get(_last_bocpd_regime, 0) < _THRESH.get(_last_bocpd_regime, 1):
@@ -2672,6 +2676,11 @@ def run_prediction_cycle() -> dict:
                     f"📌 Chú ý khả năng có triple nữa trong 10 kỳ tới!"
                 )
                 telegram.send_message(_msg)
+                _alert_mgr.log(db, 'triple_cluster',
+                               f"Vừa ra triple kỳ #{_last_triple} — cửa sổ cụm 10 kỳ "
+                               f"(#{_last_triple + 1}–#{_last_triple + _TRIPLE_CLUSTER_WINDOW}), "
+                               f"26% cụm lịch sử có triple tiếp trong ≤10 kỳ",
+                               {'triple_draw': _last_triple, 'window': _TRIPLE_CLUSTER_WINDOW})
                 _last_triple_cluster_draw = next_draw
                 logger.info("Triple cluster alert: triple at #%d, window %d draws",
                             _last_triple, _TRIPLE_CLUSTER_WINDOW)
@@ -2687,6 +2696,10 @@ def run_prediction_cycle() -> dict:
                     f"📌 Triple có khả năng xuất hiện sớm — chú ý theo dõi!"
                 )
                 telegram.send_message(_msg)
+                _alert_mgr.log(db, 'triple_drought',
+                               f"{_drought} kỳ chưa có triple (trung bình 36 kỳ/lần) — "
+                               f"kỳ triple gần nhất #{_last_triple}",
+                               {'drought': _drought, 'last_triple': _last_triple})
                 _last_triple_alert_draw = next_draw
                 logger.info("Triple drought alert: %d draws since #%d", _drought, _last_triple)
     except Exception as _tae:
@@ -2714,6 +2727,10 @@ def run_prediction_cycle() -> dict:
                     _pmsg += f"🧊 Đôi lạnh nhất:\n{_cold_lines}\n"
                 _pmsg += f"📌 Cặp đôi sắp xuất hiện — chú ý theo dõi!"
                 telegram.send_message(_pmsg)
+                _alert_mgr.log(db, 'pair_drought',
+                               f"{_pd} kỳ chưa có cặp đôi (trung bình ~9 kỳ/lần) — "
+                               f"kỳ gần nhất #{_lp_draw}",
+                               {'drought': _pd, 'last_pair': _lp_draw})
                 _last_pair_alert_draw = next_draw
                 logger.info("Pair drought alert: %d draws since #%d, cold=%s",
                             _pd, _lp_draw, _cold_dbls[:3])
