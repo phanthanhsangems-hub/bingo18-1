@@ -1977,7 +1977,8 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
 
     combo_freq, num_freq, sum_freq = _build_recent_freq(df, window=15)
     with _pred_diversity_lock:
-        _pnf = list(_recent_pred_nums) if _recent_pred_nums else None
+        # dict copy — list(Counter) chỉ lấy keys, làm _cold_score crash (.get trên list)
+        _pnf = dict(_recent_pred_nums) if _recent_pred_nums else None
     _mfreq = _build_multi_window_combo_freq(df, windows=(60, 100))  # B: multi-window cold
 
     # Mode sum within each SIZE (highest base probability by combinatorics)
