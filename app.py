@@ -550,6 +550,13 @@ def sync_from_github():
 @limiter.limit("20 per minute")
 def auto_predict_cron():
     """Dành cho Cloud Scheduler gọi mỗi 6 phút — 1 cycle duy nhất mỗi lần."""
+    # Vietlott chỉ xổ 06:00–21:55 giờ VN — ngoài khung này tắt hệ thống dự đoán
+    from zoneinfo import ZoneInfo
+    _vn_now = datetime.now(ZoneInfo('Asia/Ho_Chi_Minh'))
+    if not (6 <= _vn_now.hour < 22):
+        return jsonify({"status": "skipped", "reason": "outside_active_hours",
+                        "active_hours": "06:00-22:00 VN",
+                        "vn_time": _vn_now.strftime('%H:%M')})
     try:
         from prediction_service import run_prediction_cycle
         result = run_prediction_cycle()
