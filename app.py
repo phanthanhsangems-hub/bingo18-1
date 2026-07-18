@@ -559,7 +559,10 @@ def auto_predict_cron():
         _check_triple_drought_alert()
         return jsonify({"status": "success", "cycles": 1, "data": [result]})
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        import traceback as _tb
+        logger.exception("predict cycle failed")
+        _where = [l.strip() for l in _tb.format_exc().strip().splitlines()[-5:]]
+        return jsonify({"status": "error", "message": str(e), "where": _where}), 500
 
 
 @app.route('/api/trigger-prediction', methods=['POST'])
