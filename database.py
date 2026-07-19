@@ -192,6 +192,14 @@ class DatabaseManager:
                         updated_at     TIMESTAMP DEFAULT NOW()
                     )
                 """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS system_config (
+                        config_key   TEXT PRIMARY KEY,
+                        config_value TEXT,
+                        description  TEXT,
+                        updated_at   TIMESTAMP DEFAULT NOW()
+                    )
+                """)
                 for ddl in [
                     "CREATE INDEX IF NOT EXISTS idx_draw_number    ON draw_history(draw_number DESC)",
                     "CREATE INDEX IF NOT EXISTS idx_draw_time      ON draw_history(draw_time DESC)",
@@ -301,6 +309,13 @@ class DatabaseManager:
                         number INTEGER NOT NULL UNIQUE,
                         last_seen_draw INTEGER NOT NULL,
                         absence_count INTEGER NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS system_config (
+                        config_key TEXT PRIMARY KEY,
+                        config_value TEXT,
+                        description TEXT,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""")
                 for ddl in [

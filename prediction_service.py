@@ -40,6 +40,30 @@ _model_cache_lock = threading.Lock()  # FIX: thread-safe access
 _last_retrain_time: Optional[datetime] = None
 _retrain_failure_count: int = 0
 
+def get_last_retrain_time(db=None):
+    """P161: in-memory retrain time, fallback to system_config (survives restarts)."""
+    global _last_retrain_time
+    if _last_retrain_time:
+        return _last_retrain_time
+    try:
+        _db = db or DatabaseManager()
+        conn = _db.get_connection()
+        try:
+            cur = conn.cursor()
+            ph = _db._ph()
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key={ph}",
+                        ('last_retrain_at',))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if row and row[0]:
+            _last_retrain_time = datetime.fromisoformat(row[0])
+            return _last_retrain_time
+    except Exception as e:
+        logger.debug("get_last_retrain_time error: %s", e)
+    return None
+
+
 def invalidate_model_cache():
     """Gọi sau khi retrain để force reload model mới lên RAM"""
     global _model_cache
@@ -89,6 +113,32 @@ def _background_retrain():
             else:
                 _model_cache = (hybrid, new_selector, None, ensemble, size_pred)
             _last_retrain_time = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+
+        # P161: persist retrain time to system_config so restarts don't reset it
+        try:
+            conn_rt = db.get_connection()
+            try:
+                cur_rt = conn_rt.cursor()
+                ph = db._ph()
+                if USE_POSTGRES:
+                    cur_rt.execute(f"""
+                        INSERT INTO system_config (config_key, config_value, description)
+                        VALUES ({ph},{ph},{ph})
+                        ON CONFLICT (config_key) DO UPDATE
+                          SET config_value = EXCLUDED.config_value, updated_at = NOW()
+                    """, ('last_retrain_at', _last_retrain_time.isoformat(),
+                          'Thời điểm auto-retrain gần nhất (persist qua container restart)'))
+                else:
+                    cur_rt.execute(
+                        f"INSERT OR REPLACE INTO system_config (config_key, config_value, description) "
+                        f"VALUES ({ph},{ph},{ph})",
+                        ('last_retrain_at', _last_retrain_time.isoformat(),
+                         'Thời điểm auto-retrain gần nhất'))
+                conn_rt.commit()
+            finally:
+                conn_rt.close()
+        except Exception as _pe:
+            logger.debug("persist retrain time error: %s", _pe)
 
         with _model_cache_lock:
             _retrain_failure_count = 0

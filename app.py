@@ -4946,8 +4946,9 @@ def retrain_models():
     threading.Thread(target=_run_retrain, daemon=True).start()
 
     try:
-        from prediction_service import _last_retrain_time
-        last_rt = _last_retrain_time.isoformat() if _last_retrain_time else None
+        from prediction_service import get_last_retrain_time
+        _rt = get_last_retrain_time(db)
+        last_rt = _rt.isoformat() if _rt else None
     except Exception:
         last_rt = None
 
@@ -5928,7 +5929,7 @@ def learning_status():
             "currently_predicting":  next_predicting,
             "auto_retrain_interval": getattr(config, 'AUTO_RETRAIN_INTERVAL', 100),
             "last_retrain_at":       (lambda rt: rt.isoformat() if rt else None)(
-                                         __import__('prediction_service')._last_retrain_time
+                                         __import__('prediction_service').get_last_retrain_time(db)
                                      ),
         })
     except Exception as e:
