@@ -461,6 +461,30 @@ function connectSSE() {
   } catch { /* SSE unsupported */ }
 }
 
+// ── Bet signal + Kelly stake ──────────────────────────────────
+async function loadBetSignal() {
+  const d = await J('/api/bet-signal');
+  const badge = $('bet-badge');
+  badge.textContent = d.label || '--';
+  badge.className = 'bet-badge ' + (d.color || 'gold');
+  const k = d.kelly || {};
+  if (k.stake_pct > 0) {
+    $('bet-stake').textContent = k.stake_pct.toFixed(1) + '% vốn';
+    $('bet-stake').style.color = 'var(--jade)';
+    $('bet-advice').textContent = k.advice || '';
+  } else {
+    $('bet-stake').textContent = 'BỎ QUA';
+    $('bet-stake').style.color = 'var(--muted)';
+    $('bet-advice').textContent = k.advice ||
+      'Không có edge — chờ tín hiệu tốt hơn';
+  }
+  if (k.breakeven_payout != null) {
+    $('bet-note').textContent =
+      `WR50 ${(k.p_win * 100).toFixed(0)}% · cần trả thưởng ≥ ${k.breakeven_payout}× mới có lời ` +
+      `(giả định ${k.payout_assumed}×)`;
+  }
+}
+
 // ── refresh orchestration ─────────────────────────────────────
 function safe(fn) { return fn().catch(err => console.warn(fn.name, err)); }
 function refreshAll() {
@@ -473,6 +497,7 @@ function refreshAll() {
   safe(loadHotCold);
   safe(loadColdCombos);
   safe(loadAlerts);
+  safe(loadBetSignal);
 }
 refreshAll();
 safe(loadTrend);                       // trend đổi chậm — tải 1 lần + mỗi 10 phút

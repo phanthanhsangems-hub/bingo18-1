@@ -10289,6 +10289,27 @@ def bet_signal():
         else:
             label, color = 'YẾU', 'red'
 
+        # ── Kelly stake sizing (P162) ────────────────────────────
+        # p = tỷ lệ thắng SIZE thực nghiệm gần đây (WR50). payout = tổng hệ số trả
+        # thưởng khi thắng (mặc định 2.0 = net odds 1:1). Kelly f* = p − (1−p)/b.
+        # Dùng HALF-Kelly + cap 5% cho an toàn; f* ≤ 0 → không có edge, KHÔNG cược.
+        p_win = wr50
+        try:
+            payout = float(request.args.get('payout', 2.0))
+        except (TypeError, ValueError):
+            payout = 2.0
+        payout = max(1.01, min(payout, 100.0))
+        net_b = payout - 1.0
+        kelly_full = p_win - (1.0 - p_win) / net_b if net_b > 0 else -1.0
+        breakeven_p = 1.0 / payout           # cần WR > mức này mới có lời
+        breakeven_payout = (1.0 / p_win) if p_win > 0 else None  # payout tối thiểu để hòa vốn
+        if kelly_full <= 0:
+            stake_pct = 0.0
+            stake_advice = 'BỎ QUA — không có edge ở mức trả thưởng này'
+        else:
+            stake_pct = round(min(kelly_full * 0.5, 0.05) * 100, 2)  # half-Kelly, cap 5%
+            stake_advice = f'Cược {stake_pct:.1f}% vốn (half-Kelly, đã chặn tối đa 5%)'
+
         return jsonify({
             'score': score,
             'label': label,
@@ -10300,6 +10321,15 @@ def bet_signal():
             'is_win_streak': is_win_streak,
             'confidence': round(latest_conf, 4),
             'avg_conf': round(avg_conf, 4),
+            'kelly': {
+                'p_win': round(p_win, 4),
+                'payout_assumed': round(payout, 2),
+                'breakeven_win_rate': round(breakeven_p, 4),
+                'breakeven_payout': round(breakeven_payout, 2) if breakeven_payout else None,
+                'kelly_full': round(kelly_full, 4),
+                'stake_pct': stake_pct,
+                'advice': stake_advice,
+            },
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
