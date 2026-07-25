@@ -383,6 +383,8 @@ async function loadColdCombos() {
 
 // ── Alerts ────────────────────────────────────────────────────
 const ALERT_META = [
+  { match: /466.*hit|watch_466_hit/i, icon: '🎯', cls: '' },
+  { match: /466|watch/i, icon: '👀', cls: 'info' },
   { match: /cluster/i, icon: '🔥', cls: '' },
   { match: /triple/i, icon: '⚡', cls: 'watch' },
   { match: /pair|double/i, icon: '🎯', cls: 'watch' },
