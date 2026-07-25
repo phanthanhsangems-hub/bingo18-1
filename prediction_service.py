@@ -2467,10 +2467,36 @@ def run_prediction_cycle() -> dict:
         except Exception as e:
             logger.debug("Streak alert error: %s", e)
 
-        # Trigger retrain khi có đủ results mới — không chờ milestone draw_number
-        if len(processed_results) >= 5:
-            logger.info("Batch %d results → trigger background retrain", len(processed_results))
-            threading.Thread(target=_background_retrain, daemon=True).start()
+        # P164: trigger retrain theo TỔNG results tích luỹ từ lần retrain gần nhất.
+        # Trước đây điều kiện là len(processed_results) >= 5 trong MỘT chu trình —
+        # nhưng mỗi chu trình 6 phút chỉ xử lý ~1 kết quả nên gần như không bao giờ
+        # đạt, khiến auto-retrain thực tế không chạy (chỉ fire khi có backlog).
+        try:
+            _interval = getattr(config, 'AUTO_RETRAIN_INTERVAL', 20)
+            _since = get_last_retrain_time(db)
+            conn_rt = db.get_connection()
+            try:
+                cur_rt = conn_rt.cursor()
+                if _since is None:
+                    cur_rt.execute("SELECT COUNT(*) FROM prediction_results")
+                else:
+                    cur_rt.execute(
+                        f"SELECT COUNT(*) FROM prediction_results WHERE created_at > {ph}",
+                        (_since.astimezone(timezone.utc).replace(tzinfo=None),))
+                _n_since = int(cur_rt.fetchone()[0] or 0)
+            finally:
+                conn_rt.close()
+            if _n_since >= _interval:
+                logger.info("Auto-Retrain: %d results tích luỹ (ngưỡng %d) → retrain ngầm",
+                            _n_since, _interval)
+                threading.Thread(target=_background_retrain, daemon=True).start()
+            else:
+                logger.debug("Auto-Retrain: %d/%d results kể từ lần retrain gần nhất",
+                             _n_since, _interval)
+        except Exception as _rte:
+            logger.debug("auto-retrain trigger error: %s", _rte)
+            if len(processed_results) >= 5:   # fallback: batch lớn vẫn retrain
+                threading.Thread(target=_background_retrain, daemon=True).start()
 
     # ── Bước 2: Xác định kỳ tiếp theo để dự đoán ─────────────
     conn = db.get_connection()
