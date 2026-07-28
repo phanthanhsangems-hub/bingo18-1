@@ -380,14 +380,35 @@ _PAIR_ALERT_COOLDOWN = 5          # draws between repeated pair drought alerts
 # should outrun the others; if all six land near the 0.46% base rate, the whole
 # family is noise. Counts below are historical occurrences over 74,106 draws.
 _WATCH_PAIRS: dict = {
-    # trigger: [(target_triple, historical_count), ...]
-    '123': [('111', 20)],
-    '134': [('222', 19)],
+    # trigger: [(target_triple, historical_count), ...]  — 46 cặp ≥10 lần / 6 trip
+    '123': [('111', 20), ('444', 12)],
+    '124': [('666', 12)],
+    '125': [('444', 10)],
+    '126': [('111', 13), ('333', 13), ('222', 12), ('444', 10)],
+    '134': [('222', 19), ('555', 13)],
+    '135': [('555', 15), ('222', 10)],
+    '136': [('333', 15), ('222', 12), ('444', 11)],
+    '145': [('444', 12)],
+    '146': [('222', 15)],
+    '156': [('222', 10)],
+    '225': [('333', 10)],
+    '234': [('222', 17), ('555', 16), ('666', 14)],
+    '235': [('555', 15), ('444', 14), ('222', 13)],
+    '236': [('666', 13), ('111', 11), ('333', 10)],
+    '245': [('444', 17), ('222', 12), ('111', 11)],
+    '246': [('444', 12), ('222', 10)],
+    '256': [('111', 12), ('222', 12)],
+    '266': [('444', 11)],
     '345': [('333', 16)],
-    '245': [('444', 17)],
-    '234': [('555', 16), ('666', 14)],   # 234 dẫn trước cả 555 lẫn 666
-    '466': [('555', 11)],                # cầu gốc người dùng hỏi
+    '346': [('111', 15)],
+    '356': [('555', 14), ('111', 13), ('333', 13), ('222', 12)],
+    '456': [('222', 14), ('555', 12), ('666', 12)],
+    '466': [('555', 11)],
 }
+# 23/56 combo là trigger → ~41% số kỳ khớp. Ghi alert_log TẤT CẢ (bảng điểm cần
+# đủ dữ liệu), nhưng chỉ gửi Telegram cho tier mạnh nhất để tránh spam ~4 tin/giờ.
+# HIT thì luôn gửi vì hiếm. Hạ ngưỡng này xuống nếu muốn nhận nhiều thông báo hơn.
+_WATCH_NOTIFY_MIN = 17
 _last_watch_draw: int = 0
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
@@ -2807,25 +2828,30 @@ def run_prediction_cycle() -> dict:
                 _last_watch_draw = _ld
                 logger.info("%s->%s HIT at draw #%d", _pcombo, _tgt, _ld)
 
-            # WATCH: kỳ này là trigger → theo dõi kỳ kế
+            # WATCH: kỳ này là trigger → theo dõi kỳ kế. Ghi log mọi cặp, chỉ
+            # gửi Telegram khi có cặp đạt _WATCH_NOTIFY_MIN (tránh spam).
             elif _lcombo in _WATCH_PAIRS:
                 _targets = _WATCH_PAIRS[_lcombo]
-                _tlist = ' hoặc '.join(f"{_dash(t)} (lịch sử {n} lần)" for t, n in _targets)
-                telegram.send_message(
-                    f"👀 <b>WATCH {_lcombo} · kỳ #{_ld}</b>\n"
-                    f"Vừa ra bộ {_dash(_lcombo)}. Theo dõi kỳ kế #{_ld + 1} "
-                    f"xem có {_tlist} không.\n"
-                    f"📊 Forward-test đối chứng — chưa cầu nào đủ ý nghĩa thống kê."
-                )
                 for _t, _n in _targets:
                     _alert_mgr.log(db, f'watch_{_lcombo}_{_t}',
                                    f"Kỳ #{_ld} ra {_lcombo} — theo dõi kỳ kế #{_ld + 1} "
                                    f"có {_t} không (forward-test cầu {_lcombo}→{_t})",
                                    {'draw': _ld, 'next': _ld + 1,
                                     'pair': f'{_lcombo}->{_t}', 'hist': _n})
+                _strong = [(t, n) for t, n in _targets if n >= _WATCH_NOTIFY_MIN]
+                if _strong:
+                    _tlist = ' hoặc '.join(f"{_dash(t)} (lịch sử {n} lần)" for t, n in _strong)
+                    _more = len(_targets) - len(_strong)
+                    telegram.send_message(
+                        f"👀 <b>WATCH {_lcombo} · kỳ #{_ld}</b>\n"
+                        f"Vừa ra bộ {_dash(_lcombo)}. Theo dõi kỳ kế #{_ld + 1} "
+                        f"xem có {_tlist} không.\n"
+                        + (f"<i>(+{_more} cầu yếu hơn đang ghi log im lặng)</i>\n" if _more else "")
+                        + f"📊 Forward-test đối chứng — chưa cầu nào đủ ý nghĩa thống kê."
+                    )
                 _last_watch_draw = _ld
-                logger.info("watch alert %s -> %s at draw #%d",
-                            _lcombo, [t for t, _ in _targets], _ld)
+                logger.info("watch %s -> %s at draw #%d (telegram=%s)",
+                            _lcombo, [t for t, _ in _targets], _ld, bool(_strong))
     except Exception as _we:
         logger.debug("combo watch alert error: %s", _we)
 
