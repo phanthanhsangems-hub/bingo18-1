@@ -406,9 +406,11 @@ _WATCH_PAIRS: dict = {
     '466': [('555', 11)],
 }
 # 23/56 combo là trigger → ~41% số kỳ khớp. Ghi alert_log TẤT CẢ (bảng điểm cần
-# đủ dữ liệu), nhưng chỉ gửi Telegram cho tier mạnh nhất để tránh spam ~4 tin/giờ.
-# HIT thì luôn gửi vì hiếm. Hạ ngưỡng này xuống nếu muốn nhận nhiều thông báo hơn.
-_WATCH_NOTIFY_MIN = 17
+# đủ dữ liệu), Telegram chỉ gửi cho cặp đạt ngưỡng dưới đây. HIT luôn gửi vì hiếm.
+#   17 →  4 cặp | 14 trigger   ~11 tin/ngày
+#   13 → 22 cặp | 14 trigger   ~40 tin/ngày  ← đang dùng (người dùng chọn báo nhiều hơn)
+#   10 → 46 cặp | 23 trigger   ~66 tin/ngày (báo hết)
+_WATCH_NOTIFY_MIN = 13
 _last_watch_draw: int = 0
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
