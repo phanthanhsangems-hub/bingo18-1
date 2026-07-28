@@ -3962,6 +3962,59 @@ def alert_log_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/watch-scoreboard')
+@limiter.limit("30 per minute")
+def watch_scoreboard():
+    """P165: forward-test scoreboard cho các cầu combo→triple đang theo dõi.
+
+    Đếm watch_<trigger>_<target> vs watch_<trigger>_<target>_hit trong alert_log
+    (chỉ dữ liệu SAU khi bật alert → không dính look-elsewhere bias).
+    """
+    try:
+        from prediction_service import _WATCH_PAIRS
+        BASE_RATE = 342 / 74106          # xác suất 1 triple cụ thể ở 1 kỳ bất kỳ
+
+        conn = db.get_connection()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT alert_key, COUNT(*) FROM alert_log "
+            "WHERE alert_key LIKE 'watch_%' GROUP BY alert_key"
+        )
+        counts = {k: int(n) for k, n in cur.fetchall()}
+        conn.close()
+
+        rows, tot_w, tot_h = [], 0, 0
+        for trig, targets in _WATCH_PAIRS.items():
+            for tgt, hist in targets:
+                w = counts.get(f'watch_{trig}_{tgt}', 0)
+                h = counts.get(f'watch_{trig}_{tgt}_hit', 0)
+                tot_w += w
+                tot_h += h
+                rows.append({
+                    'pair':            f'{trig}->{tgt}',
+                    'trigger':         trig,
+                    'target':          tgt,
+                    'historical_count': hist,
+                    'watches':         w,
+                    'hits':            h,
+                    'hit_rate':        round(h / w, 4) if w else None,
+                    'expected_hits':   round(w * BASE_RATE, 2),
+                })
+        rows.sort(key=lambda x: -x['historical_count'])
+
+        return jsonify({
+            'base_rate':       round(BASE_RATE, 5),
+            'pairs':           rows,
+            'total_watches':   tot_w,
+            'total_hits':      tot_h,
+            'total_expected':  round(tot_w * BASE_RATE, 2),
+            'note': 'Chỉ tính dữ liệu sau khi bật alert. Cần vài trăm lượt watch '
+                    'mới đủ ý nghĩa thống kê.',
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/system-health-badge')
 @limiter.limit("30 per minute")
 def system_health_badge():
