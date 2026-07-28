@@ -2314,7 +2314,6 @@ def run_prediction_cycle() -> dict:
         conn.close()
 
     processed_results = []
-    _last_result_info: dict = {}  # kết quả kỳ gần nhất — ghép vào tin dự đoán
     for pred_id, draw_number, pred_json, model_name in pending:
         try:
             conn2 = db.get_connection()
@@ -2357,22 +2356,9 @@ def run_prediction_cycle() -> dict:
             except Exception:
                 pass
 
-            _is_last_pending = (pred_id == pending[-1][0])
-            if _is_last_pending:
-                # Gộp vào tin dự đoán — không gửi riêng để tránh 2 tin/cycle
-                _last_result_info = {
-                    'draw_number':    draw_number,
-                    'actual_numbers': actual_numbers,
-                    'predicted':      predicted,
-                    'match_count':    match_count,
-                    'is_win':         is_win,
-                    'is_win_sum':     is_win_sum,
-                    'recent_wl':      recent_wl,
-                    'model_name':     model_name,
-                }
-            else:
-                telegram.send_result(draw_number, actual_numbers, predicted,
-                                     model_name, match_count, is_win, is_win_sum, recent_wl)
+            # P169: tin dự đoán đã bỏ nên kết quả nào cũng gửi riêng
+            telegram.send_result(draw_number, actual_numbers, predicted,
+                                 model_name, match_count, is_win, is_win_sum, recent_wl)
 
             processed_results.append({
                 "draw_number": draw_number,
@@ -2589,7 +2575,7 @@ def run_prediction_cycle() -> dict:
 
     banned = _get_banned_combos(db)
     skip_size_adjust = False
-    prev_sum = None  # computed below; initialized here for _tg_signal scope safety
+    prev_sum = None  # computed below; initialized here for scope safety
     _vote_info = None  # set only in majority_vote mode; stored in predictions.vote_breakdown
     adaptive_thres = {}  # P70: default; populated in majority_vote path
     try:
@@ -2707,31 +2693,6 @@ def run_prediction_cycle() -> dict:
     win_prob, cal_meta = calibrator.calibrate_by_vote_share(_vote_share_for_cal, best_name, confidence)
     is_confident = cal_meta.get('is_confident', False)
 
-    # Build transition signal line for Telegram ("SIZE P% từ tổng X → tổng Y P%")
-    _tg_signal = ""
-    try:
-        _tc = _transition_cache
-        if _tc and prev_sum is not None:
-            t_probs = _tc['probs'].get(prev_sum) or {}
-            pred_size_final = SizePredictor._cat(sum(numbers))
-            size_pct = t_probs.get(pred_size_final, 0)
-            top_sums = _tc.get('top_sums', {}).get(prev_sum, [])
-            next_sum_val = sum(numbers)
-            # Find the pct for the predicted sum
-            sum_pct = next((pct for ns, pct in top_sums if ns == next_sum_val), None)
-            size_label = {'NHO': 'NHỎ', 'HOA': 'HÒA', 'LON': 'LỚN'}.get(pred_size_final, pred_size_final)
-            if sum_pct is not None:
-                _tg_signal = (f"Tổng trước: {prev_sum} → {size_label} {size_pct:.0%} "
-                              f"| Tổng {next_sum_val}: {sum_pct:.1%}")
-            elif size_pct:
-                _tg_signal = f"Tổng trước: {prev_sum} → {size_label} {size_pct:.0%}"
-    except Exception:
-        pass
-
-    # Pass weighted vote share (%) rather than raw count — weights determine the winner
-    _sw = (_vote_info or {}).get('size_weights', {})
-    _sw_total = sum(_sw.values()) or 1
-    _tg_vote_tally = {k: round(v / _sw_total * 100) for k, v in _sw.items()} if _sw else (_vote_info or {}).get('size_tally')
     pred_id, _is_new_pred = db.insert_prediction(next_draw, best_name, numbers, confidence, _vote_info)
     _update_pred_diversity(numbers)  # B: cập nhật diversity tracker
 
@@ -2740,33 +2701,6 @@ def run_prediction_cycle() -> dict:
         return {"skipped": True, "draw_number": next_draw, "reason": "duplicate_prediction",
                 "processed": processed_results}
 
-    # Build reason_info: absence per number + combo rank within SIZE
-    _reason_info: dict = {'loss_streak': _current_loss_streak,
-                          'hot_adjust': _hot_adjust_note}
-    try:
-        from models import _parse_numbers as _pn_ri
-        _abs_map: dict = {}
-        for _ri, _row in enumerate(df.itertuples()):
-            _ns = [int(x) for x in _pn_ri(_row.numbers)]
-            for _n in _ns:
-                if _n not in _abs_map:
-                    _abs_map[_n] = _ri   # 0 = most recent draw
-        for _n in range(1, 7):
-            if _n not in _abs_map:
-                _abs_map[_n] = len(df)
-        _reason_info['absence'] = {n: _abs_map.get(n, 0) for n in numbers}
-
-        _final_sz = SizePredictor._cat(sum(numbers))
-        _cfr2, _nfr2, _sfr2 = _build_recent_freq(df, window=30)
-        _pnf2 = _recent_pred_nums if _recent_pred_nums else None
-        _same_sz = [c for c in ComboColdModel.ALL_COMBOS
-                    if SizePredictor._cat(sum(c)) == _final_sz]
-        _ranked2 = sorted(_same_sz, key=lambda c: _cold_score(c, _cfr2, _nfr2, _sfr2, _pnf2))
-        _pred_combo_ri = tuple(sorted(int(x) for x in numbers))
-        _reason_info['combo_rank']  = next((i + 1 for i, c in enumerate(_ranked2) if c == _pred_combo_ri), None)
-        _reason_info['combo_total'] = len(_same_sz)
-    except Exception as _rie:
-        logger.debug("reason_info build error: %s", _rie)
 
     # BOCPD regime change alert — only fires when dominant category deviates
     # significantly from base rate (NHO/LON > 55%, HOA > 45%) and the regime
@@ -2933,12 +2867,6 @@ def run_prediction_cycle() -> dict:
                             _pd, _lp_draw, _cold_dbls[:3])
     except Exception as _pae:
         logger.debug("pair alert error: %s", _pae)
-
-    telegram.send_prediction(next_draw, best_name, numbers, win_prob,
-                             signal=_tg_signal, vote_tally=_tg_vote_tally,
-                             vote_info=_vote_info, reason_info=_reason_info,
-                             last_result=_last_result_info or None,
-                             is_confident=is_confident)
 
     logger.info("Predicted draw #%d: %s (model=%s raw_conf=%.1f%% calibrated=%.2f%%)",
                 next_draw, sorted(numbers), best_name, confidence * 100, win_prob * 100)
