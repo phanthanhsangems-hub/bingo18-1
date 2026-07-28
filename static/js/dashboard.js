@@ -94,24 +94,63 @@ async function loadHero() {
   }
 }
 
-// ── Forecast N+2/N+3 (Markov projection) ─────────────────────
-async function loadForecast() {
-  const d = await J('/api/next-prediction');
-  if (!d || !d.n2) return;
-  const strip = $('forecast-strip');
-  const item = (n, label) => {
-    if (!n) return '';
-    const probs = n.size_probs || {};
-    const pct = probs[n.predicted_size] != null
-      ? ` ${Math.round(probs[n.predicted_size] * 100)}%` : '';
-    return `<span class="fc-item"><span class="mono">#${n.draw_number}</span>` +
-      `<span class="fc-sz ${esc(n.predicted_size)}">${SZ_VI[n.predicted_size] || ''}${pct}</span>` +
-      `<span>${label}</span></span>`;
-  };
-  strip.innerHTML =
-    `<span style="letter-spacing:.1em;text-transform:uppercase;font-size:10.5px">Dự báo</span>` +
-    item(d.n2, 'Markov¹') + item(d.n3, 'Markov²');
-  strip.hidden = false;
+// ── Dự báo cầu: cầu đang hoạt động + bảng điểm forward-test ──
+let _lastDraw = null;          // {draw_number, combo} — set bởi loadRecent
+async function loadWatchPairs() {
+  const d = await J('/api/watch-scoreboard');
+  const pairs = d.pairs || [];
+  if (!pairs.length) return;
+  const dash = c => String(c).split('').join('-');
+
+  // Cầu đang hoạt động: kỳ vừa xổ có phải bộ dẫn trước không?
+  const act = $('wp-active');
+  if (_lastDraw) {
+    const hits = pairs.filter(p => p.trigger === _lastDraw.combo);
+    if (hits.length) {
+      const list = hits.sort((a, b) => b.historical_count - a.historical_count)
+        .map(p => `<b>${dash(p.target)}</b> (${p.historical_count} lần)`).join(' · ');
+      act.className = 'wp-active';
+      act.innerHTML =
+        `<span class="wp-ic">👀</span><div>` +
+        `<div class="wp-t">Kỳ #${_lastDraw.draw_number} vừa ra ${dash(_lastDraw.combo)} — ` +
+        `theo dõi kỳ #${_lastDraw.draw_number + 1}</div>` +
+        `<div class="wp-d">Cầu chờ về: ${list}</div></div>`;
+    } else {
+      act.className = 'wp-idle';
+      act.innerHTML = `Kỳ #${_lastDraw.draw_number} ra ${dash(_lastDraw.combo)} — ` +
+        `không phải bộ dẫn trước nào. Chưa có cầu nào đang chờ.`;
+    }
+  }
+
+  // Bảng điểm — cầu có lượt theo dõi lên đầu, còn lại theo lịch sử
+  const sorted = [...pairs].sort((a, b) =>
+    (b.watches - a.watches) || (b.historical_count - a.historical_count));
+  $('wp-body').innerHTML = sorted.map(p => {
+    const active = _lastDraw && p.trigger === _lastDraw.combo;
+    let vs = '<span class="wp-vs none">—</span>';
+    if (p.watches > 0) {
+      const over = p.hits > p.expected_hits;
+      vs = `<span class="wp-vs ${over ? 'over' : 'under'}">` +
+           `${over ? '▲' : '='} ${p.hits} / ${p.expected_hits.toFixed(2)}</span>`;
+    }
+    return `<tr${active ? ' style="background:var(--accent-soft)"' : ''}>
+      <td class="wp-pair mono">${dash(p.trigger)} → ${dash(p.target)}</td>
+      <td class="num">${p.historical_count}</td>
+      <td class="num">${p.watches}</td>
+      <td class="num">${p.hits}</td>
+      <td class="num">${p.expected_hits.toFixed(2)}</td>
+      <td>${vs}</td>
+    </tr>`;
+  }).join('');
+
+  $('wp-sub').textContent =
+    `${pairs.length} cầu [bộ dẫn trước → trip] · forward-test từ khi bật alert`;
+  const rate = d.total_watches ? (d.total_hits / d.total_watches * 100).toFixed(2) : null;
+  $('wp-foot').innerHTML =
+    `Tổng: <b>${d.total_watches}</b> lượt theo dõi · <b>${d.total_hits}</b> trúng · ` +
+    `kỳ vọng ngẫu nhiên <b>${d.total_expected}</b>` +
+    (rate !== null ? ` · tỷ lệ trúng <b>${rate}%</b> vs base rate ${(d.base_rate * 100).toFixed(2)}%` : '') +
+    `<br>Cần vài trăm lượt mới đủ ý nghĩa thống kê — 1 vài lần trúng sớm là bình thường.`;
 }
 
 // ── Ticker + Log (recent outcomes) ────────────────────────────
@@ -127,6 +166,10 @@ async function loadRecent() {
 
   // topbar: kỳ mới nhất + sync lag
   const latest = rows[0];
+  _lastDraw = {
+    draw_number: latest.draw_number,
+    combo: [...(latest.numbers || [])].sort().join(''),
+  };
   $('last-draw').textContent = '#' + latest.draw_number;
   if (latest.draw_time) {
     const drawMs = new Date(latest.draw_time.replace(' ', 'T')).getTime();
@@ -486,8 +529,7 @@ async function loadBetSignal() {
 function safe(fn) { return fn().catch(err => console.warn(fn.name, err)); }
 function refreshAll() {
   safe(loadHero);
-  safe(loadForecast);
-  safe(loadRecent);
+  safe(loadRecent).then(() => safe(loadWatchPairs));
   safe(loadTiles);
   safe(loadSizeDist);
   safe(loadTodayCombos);

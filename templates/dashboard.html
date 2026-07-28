@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p168">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p170">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -65,10 +65,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
         <span class="size-pill" id="pred-size">--</span>
         <span class="meta-chip" id="pred-probs" hidden></span>
         <span class="meta-chip" id="last-result" hidden></span>
-      </div>
-
-      <div class="forecast-strip" id="forecast-strip" hidden>
-        <span style="letter-spacing:.1em;text-transform:uppercase;font-size:10.5px">Dự báo</span>
       </div>
     </div>
 
@@ -156,6 +152,22 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     </div>
   </div>
 
+  <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Cầu đang theo dõi</h2>
+    <p class="sub" id="wp-sub">46 cầu [bộ dẫn trước → trip] · forward-test từ khi bật alert</p>
+    <div id="wp-active"></div>
+    <div class="tbl-scroll wp-scroll">
+      <table class="log-table" id="wp-table">
+        <thead><tr>
+          <th>Cầu</th><th>Lịch sử</th><th>Lượt theo dõi</th><th>Trúng</th><th>Kỳ vọng</th><th>So với kỳ vọng</th>
+        </tr></thead>
+        <tbody id="wp-body"><tr><td colspan="6" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="wp-foot" id="wp-foot"></div>
+  </div>
+
   <!-- ═══ COLD COMBOS + ALERTS ═══ -->
   <div class="grid2 even">
     <div class="card">
@@ -190,6 +202,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p168"></script>
+<script src="/static/js/dashboard.js?v=p170"></script>
 </body>
 </html>
