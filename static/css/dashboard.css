@@ -162,7 +162,7 @@ button{font:inherit;cursor:pointer}
 
 /* hero side */
 .hero-side{display:flex;flex-direction:column;gap:16px}
-.conf-card,.next-card{
+.conf-card{
   background:var(--card);border:1px solid var(--line);border-radius:20px;
   box-shadow:var(--shadow);padding:18px 22px;
 }
@@ -173,10 +173,6 @@ button{font:inherit;cursor:pointer}
 .meter-fill{position:absolute;inset:0 auto 0 0;width:0%;border-radius:6px;background:linear-gradient(90deg,var(--jade),var(--amber));transition:width .5s}
 .meter-base{position:absolute;top:-4px;bottom:-4px;left:35%;width:2px;background:var(--muted);border-radius:2px}
 .meter-note{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:7px}
-.next-card .cd{font-size:28px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
-.next-bar{height:6px;border-radius:4px;background:var(--card2);margin-top:10px;overflow:hidden}
-.next-bar i{display:block;height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width 1s linear}
-.next-sub{font-size:11.5px;color:var(--muted);margin-top:8px}
 .bet-card{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:18px 22px}
 .bet-badge{font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 8px;border-radius:999px;margin-left:6px;vertical-align:middle}
 .bet-badge.green{background:var(--jade-soft);color:var(--jade)}

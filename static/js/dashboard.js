@@ -48,15 +48,10 @@ $('theme-btn').addEventListener('click', () => {
   localStorage.setItem('bingo18-theme', next);
 });
 
-// ── clock + countdown (chu kỳ 6 phút, giờ VN) ────────────────
+// ── clock (giờ VN) ────────────────────────────────────────────
 function tick() {
-  const now = new Date();
-  $('clock').textContent = now.toLocaleTimeString('vi-VN',
+  $('clock').textContent = new Date().toLocaleTimeString('vi-VN',
     { hour12: false, timeZone: 'Asia/Ho_Chi_Minh' });
-  const s = 360 - ((now.getMinutes() % 6) * 60 + now.getSeconds());
-  $('cd').textContent =
-    String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-  $('cd-bar').style.width = ((360 - s) / 360 * 100) + '%';
 }
 tick();
 setInterval(tick, 1000);
