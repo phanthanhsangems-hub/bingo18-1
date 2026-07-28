@@ -373,9 +373,22 @@ _TRIPLE_CLUSTER_WINDOW = 10         # draws of elevated triple probability after
 _last_pair_alert_draw: int = 0    # cooldown for pair drought alert
 _PAIR_DROUGHT_THRESH = 10         # alert when ≥10 draws without any pair (~1.1× expected 9.3)
 _PAIR_ALERT_COOLDOWN = 5          # draws between repeated pair drought alerts
-# P163: forward out-of-sample watch for the 466→555 "cầu". Logs each 466 so the
-# test accumulates cleanly going forward (no look-elsewhere bias vs mining history).
-_last_466_watch_draw: int = 0
+# P163/P165: forward out-of-sample watch for combo→triple "cầu" patterns. Each
+# trigger combo is logged so hit rates accumulate on future data only (no
+# look-elsewhere bias). Registering every triple's strongest historical
+# predecessor turns this into a controlled experiment: if 466→555 were real it
+# should outrun the others; if all six land near the 0.46% base rate, the whole
+# family is noise. Counts below are historical occurrences over 74,106 draws.
+_WATCH_PAIRS: dict = {
+    # trigger: [(target_triple, historical_count), ...]
+    '123': [('111', 20)],
+    '134': [('222', 19)],
+    '345': [('333', 16)],
+    '245': [('444', 17)],
+    '234': [('555', 16), ('666', 14)],   # 234 dẫn trước cả 555 lẫn 666
+    '466': [('555', 11)],                # cầu gốc người dùng hỏi
+}
+_last_watch_draw: int = 0
 _VOTER_WEIGHT_MIN_SAMPLES = 20   # per-voter minimum before applying multiplier
 _VOTER_WEIGHT_REFRESH_EVERY = 15  # draws between refreshes (low while building data)
 _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
@@ -1530,8 +1543,8 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
         return numbers, None
 
 
-# ── 466→555 forward-test watch helper (P163) ───────────────────
-def _query_466_watch(db) -> tuple:
+# ── combo→triple forward-test watch helper (P163/P165) ─────────
+def _query_combo_watch(db) -> tuple:
     """Return (latest_draw, latest_combo, prev_combo) from draw_history.
     combo = sorted-digit string, e.g. [6,4,6] → '466'. (None,None,None) on error.
     """
@@ -2767,41 +2780,54 @@ def run_prediction_cycle() -> dict:
     except Exception as _bae:
         logger.debug("bocpd alert error: %s", _bae)
 
-    # 466→555 forward out-of-sample watch (P163). Each 466 is logged so the test
-    # accumulates cleanly going forward — the only look-elsewhere-free way to
-    # confirm/reject the pattern (history: ~2.3× base rate but not significant).
+    # Combo→triple forward out-of-sample watch (P163/P165). Every registered
+    # trigger combo is logged so hit rates accumulate on future data only — the
+    # only look-elsewhere-free way to confirm/reject these patterns.
     try:
-        global _last_466_watch_draw
-        _ld, _lcombo, _pcombo = _query_466_watch(db)
-        if _ld is not None and _ld != _last_466_watch_draw:
-            if _pcombo == '466' and _lcombo == '555':
-                _msg = (
-                    f"🎯 <b>CẦU 466→555 TRÚNG · kỳ #{_ld}</b>\n"
-                    f"Kỳ trước ra 4-6-6, kỳ này ra 5-5-5!\n"
-                    f"📌 Ghi nhận 1 HIT cho forward-test đang kiểm chứng cầu."
+        global _last_watch_draw
+        _ld, _lcombo, _pcombo = _query_combo_watch(db)
+        if _ld is not None and _ld != _last_watch_draw:
+            _dash = lambda c: '-'.join(c)
+
+            # HIT: kỳ trước là trigger và kỳ này đúng target đã đăng ký
+            _hits = [(t, n) for t, n in _WATCH_PAIRS.get(_pcombo or '', [])
+                     if t == _lcombo]
+            if _hits:
+                _tgt, _hist = _hits[0]
+                telegram.send_message(
+                    f"🎯 <b>CẦU {_pcombo}→{_tgt} TRÚNG · kỳ #{_ld}</b>\n"
+                    f"Kỳ trước ra {_dash(_pcombo)}, kỳ này ra {_dash(_tgt)}!\n"
+                    f"📌 Ghi nhận 1 HIT cho forward-test (lịch sử {_hist} lần)."
                 )
-                telegram.send_message(_msg)
-                _alert_mgr.log(db, 'watch_466_hit',
-                               f"Kỳ #{_ld} ra 555 ngay sau 466 (#{_ld - 1}) — HIT forward-test 466→555",
-                               {'draw': _ld, 'trigger': _ld - 1})
-                _last_466_watch_draw = _ld
-                logger.info("466->555 HIT at draw #%d", _ld)
-            elif _lcombo == '466':
-                _msg = (
-                    f"👀 <b>WATCH 466 · kỳ #{_ld}</b>\n"
-                    f"Vừa ra bộ 4-6-6. Theo dõi kỳ kế #{_ld + 1} xem có 5-5-5 không.\n"
-                    f"📊 Đang kiểm chứng out-of-sample cầu 466→555 "
-                    f"(lịch sử ~2.3× base rate, chưa đủ ý nghĩa thống kê)."
+                _alert_mgr.log(db, f'watch_{_pcombo}_{_tgt}_hit',
+                               f"Kỳ #{_ld} ra {_tgt} ngay sau {_pcombo} (#{_ld - 1}) — "
+                               f"HIT forward-test cầu {_pcombo}→{_tgt}",
+                               {'draw': _ld, 'trigger': _ld - 1,
+                                'pair': f'{_pcombo}->{_tgt}', 'hist': _hist})
+                _last_watch_draw = _ld
+                logger.info("%s->%s HIT at draw #%d", _pcombo, _tgt, _ld)
+
+            # WATCH: kỳ này là trigger → theo dõi kỳ kế
+            elif _lcombo in _WATCH_PAIRS:
+                _targets = _WATCH_PAIRS[_lcombo]
+                _tlist = ' hoặc '.join(f"{_dash(t)} (lịch sử {n} lần)" for t, n in _targets)
+                telegram.send_message(
+                    f"👀 <b>WATCH {_lcombo} · kỳ #{_ld}</b>\n"
+                    f"Vừa ra bộ {_dash(_lcombo)}. Theo dõi kỳ kế #{_ld + 1} "
+                    f"xem có {_tlist} không.\n"
+                    f"📊 Forward-test đối chứng — chưa cầu nào đủ ý nghĩa thống kê."
                 )
-                telegram.send_message(_msg)
-                _alert_mgr.log(db, 'watch_466',
-                               f"Kỳ #{_ld} ra 466 — theo dõi kỳ kế #{_ld + 1} có 555 không "
-                               f"(forward-test cầu 466→555)",
-                               {'draw': _ld, 'next': _ld + 1})
-                _last_466_watch_draw = _ld
-                logger.info("466 watch alert at draw #%d", _ld)
+                for _t, _n in _targets:
+                    _alert_mgr.log(db, f'watch_{_lcombo}_{_t}',
+                                   f"Kỳ #{_ld} ra {_lcombo} — theo dõi kỳ kế #{_ld + 1} "
+                                   f"có {_t} không (forward-test cầu {_lcombo}→{_t})",
+                                   {'draw': _ld, 'next': _ld + 1,
+                                    'pair': f'{_lcombo}->{_t}', 'hist': _n})
+                _last_watch_draw = _ld
+                logger.info("watch alert %s -> %s at draw #%d",
+                            _lcombo, [t for t, _ in _targets], _ld)
     except Exception as _we:
-        logger.debug("466 watch alert error: %s", _we)
+        logger.debug("combo watch alert error: %s", _we)
 
     # Triple alerts — cluster window after a fresh triple + drought watch
     try:
