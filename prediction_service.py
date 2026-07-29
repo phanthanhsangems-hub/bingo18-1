@@ -1595,8 +1595,12 @@ def _query_combo_watch(db) -> tuple:
 
 # ── Triple drought helper ──────────────────────────────────────
 def _query_triple_drought(db) -> tuple:
-    """Return (draws_since_last_triple, last_triple_draw) by scanning prediction_results.
-    A triple is any draw where all 3 actual numbers are equal (e.g. [2,2,2]).
+    """Return (draws_since_last_triple, last_triple_draw) by scanning draw_history.
+    A triple is any draw where all 3 numbers are equal (e.g. [2,2,2]).
+
+    P172: dùng draw_history — nguồn duy nhất ghi kỳ ĐÃ XỔ. Trước đây quét
+    prediction_results nên bỏ sót triple chưa được chấm điểm, khiến alert
+    vẫn đếm từ triple cũ dù triple mới đã ra.
     Returns (None, None) on error or if no triple found in history.
     """
     try:
@@ -1604,18 +1608,18 @@ def _query_triple_drought(db) -> tuple:
         cur = conn.cursor()
         if config.DATABASE_URL:
             cur.execute("""
-                SELECT draw_number FROM prediction_results
-                WHERE actual_numbers IS NOT NULL
-                  AND (actual_numbers::json->>0) = (actual_numbers::json->>1)
-                  AND (actual_numbers::json->>1) = (actual_numbers::json->>2)
+                SELECT draw_number FROM draw_history
+                WHERE numbers IS NOT NULL
+                  AND (numbers::json->>0) = (numbers::json->>1)
+                  AND (numbers::json->>1) = (numbers::json->>2)
                 ORDER BY draw_number DESC LIMIT 1
             """)
         else:
             cur.execute("""
-                SELECT draw_number FROM prediction_results
-                WHERE actual_numbers IS NOT NULL
-                  AND json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                  AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
+                SELECT draw_number FROM draw_history
+                WHERE numbers IS NOT NULL
+                  AND json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                  AND json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]')
                 ORDER BY draw_number DESC LIMIT 1
             """)
         row = cur.fetchone()
@@ -1623,7 +1627,7 @@ def _query_triple_drought(db) -> tuple:
             conn.close()
             return None, None
         last_triple_draw = int(row[0])
-        cur.execute(f"SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+        cur.execute(f"SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
         latest_row = cur.fetchone()
         conn.close()
         latest = int(latest_row[0]) if latest_row and latest_row[0] else last_triple_draw
@@ -1638,6 +1642,8 @@ def _query_pair_drought(db) -> tuple:
     """Return (draws_since_last_pair, last_pair_draw, cold_doubles)
     where a pair = exactly 2 of 3 numbers equal (not all 3).
     cold_doubles = [(doubled_digit, drought_draws), ...] sorted by drought desc.
+
+    P172: dùng draw_history thay prediction_results — xem _query_triple_drought.
     """
     try:
         conn = db.get_connection()
@@ -1646,13 +1652,13 @@ def _query_pair_drought(db) -> tuple:
         if config.DATABASE_URL:
             # PostgreSQL: pair condition (not triple)
             cur.execute("""
-                SELECT draw_number FROM prediction_results
-                WHERE actual_numbers IS NOT NULL
-                  AND ((actual_numbers::json->>0) = (actual_numbers::json->>1)
-                       OR (actual_numbers::json->>1) = (actual_numbers::json->>2)
-                       OR (actual_numbers::json->>0) = (actual_numbers::json->>2))
-                  AND NOT ((actual_numbers::json->>0) = (actual_numbers::json->>1)
-                           AND (actual_numbers::json->>1) = (actual_numbers::json->>2))
+                SELECT draw_number FROM draw_history
+                WHERE numbers IS NOT NULL
+                  AND ((numbers::json->>0) = (numbers::json->>1)
+                       OR (numbers::json->>1) = (numbers::json->>2)
+                       OR (numbers::json->>0) = (numbers::json->>2))
+                  AND NOT ((numbers::json->>0) = (numbers::json->>1)
+                           AND (numbers::json->>1) = (numbers::json->>2))
                 ORDER BY draw_number DESC LIMIT 1
             """)
             row = cur.fetchone()
@@ -1660,30 +1666,30 @@ def _query_pair_drought(db) -> tuple:
                 conn.close()
                 return None, None, []
             last_pair_draw = int(row[0])
-            cur.execute("SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+            cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
             latest = int(cur.fetchone()[0] or last_pair_draw)
             # Per-doubled-digit drought
             cur.execute("""
                 WITH latest_draw AS (
                     SELECT MAX(draw_number) AS max_dn
-                    FROM prediction_results WHERE actual_numbers IS NOT NULL
+                    FROM draw_history WHERE numbers IS NOT NULL
                 ),
                 pair_draws AS (
                     SELECT draw_number,
                         CASE
-                            WHEN (actual_numbers::json->>0) = (actual_numbers::json->>1)
-                                THEN (actual_numbers::json->>0)::int
-                            WHEN (actual_numbers::json->>1) = (actual_numbers::json->>2)
-                                THEN (actual_numbers::json->>1)::int
-                            ELSE (actual_numbers::json->>0)::int
+                            WHEN (numbers::json->>0) = (numbers::json->>1)
+                                THEN (numbers::json->>0)::int
+                            WHEN (numbers::json->>1) = (numbers::json->>2)
+                                THEN (numbers::json->>1)::int
+                            ELSE (numbers::json->>0)::int
                         END AS ddigit
-                    FROM prediction_results
-                    WHERE actual_numbers IS NOT NULL
-                      AND ((actual_numbers::json->>0) = (actual_numbers::json->>1)
-                           OR (actual_numbers::json->>1) = (actual_numbers::json->>2)
-                           OR (actual_numbers::json->>0) = (actual_numbers::json->>2))
-                      AND NOT ((actual_numbers::json->>0) = (actual_numbers::json->>1)
-                               AND (actual_numbers::json->>1) = (actual_numbers::json->>2))
+                    FROM draw_history
+                    WHERE numbers IS NOT NULL
+                      AND ((numbers::json->>0) = (numbers::json->>1)
+                           OR (numbers::json->>1) = (numbers::json->>2)
+                           OR (numbers::json->>0) = (numbers::json->>2))
+                      AND NOT ((numbers::json->>0) = (numbers::json->>1)
+                               AND (numbers::json->>1) = (numbers::json->>2))
                 ),
                 last_per AS (
                     SELECT ddigit, MAX(draw_number) AS last_dn FROM pair_draws GROUP BY ddigit
@@ -1696,13 +1702,13 @@ def _query_pair_drought(db) -> tuple:
         else:
             # SQLite
             cur.execute("""
-                SELECT draw_number FROM prediction_results
-                WHERE actual_numbers IS NOT NULL
-                  AND (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                       OR json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
-                       OR json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[2]'))
-                  AND NOT (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                           AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]'))
+                SELECT draw_number FROM draw_history
+                WHERE numbers IS NOT NULL
+                  AND (json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                       OR json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]')
+                       OR json_extract(numbers,'$[0]') = json_extract(numbers,'$[2]'))
+                  AND NOT (json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                           AND json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]'))
                 ORDER BY draw_number DESC LIMIT 1
             """)
             row = cur.fetchone()
@@ -1710,29 +1716,29 @@ def _query_pair_drought(db) -> tuple:
                 conn.close()
                 return None, None, []
             last_pair_draw = int(row[0])
-            cur.execute("SELECT MAX(draw_number) FROM prediction_results WHERE actual_numbers IS NOT NULL")
+            cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
             latest = int(cur.fetchone()[0] or last_pair_draw)
             cur.execute("""
                 WITH latest_draw AS (
                     SELECT MAX(draw_number) AS max_dn
-                    FROM prediction_results WHERE actual_numbers IS NOT NULL
+                    FROM draw_history WHERE numbers IS NOT NULL
                 ),
                 pair_draws AS (
                     SELECT draw_number,
                         CASE
-                            WHEN json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                                THEN CAST(json_extract(actual_numbers,'$[0]') AS INTEGER)
-                            WHEN json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
-                                THEN CAST(json_extract(actual_numbers,'$[1]') AS INTEGER)
-                            ELSE CAST(json_extract(actual_numbers,'$[0]') AS INTEGER)
+                            WHEN json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                                THEN CAST(json_extract(numbers,'$[0]') AS INTEGER)
+                            WHEN json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]')
+                                THEN CAST(json_extract(numbers,'$[1]') AS INTEGER)
+                            ELSE CAST(json_extract(numbers,'$[0]') AS INTEGER)
                         END AS ddigit
-                    FROM prediction_results
-                    WHERE actual_numbers IS NOT NULL
-                      AND (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                           OR json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]')
-                           OR json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[2]'))
-                      AND NOT (json_extract(actual_numbers,'$[0]') = json_extract(actual_numbers,'$[1]')
-                               AND json_extract(actual_numbers,'$[1]') = json_extract(actual_numbers,'$[2]'))
+                    FROM draw_history
+                    WHERE numbers IS NOT NULL
+                      AND (json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                           OR json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]')
+                           OR json_extract(numbers,'$[0]') = json_extract(numbers,'$[2]'))
+                      AND NOT (json_extract(numbers,'$[0]') = json_extract(numbers,'$[1]')
+                               AND json_extract(numbers,'$[1]') = json_extract(numbers,'$[2]'))
                 ),
                 last_per AS (
                     SELECT ddigit, MAX(draw_number) AS last_dn FROM pair_draws GROUP BY ddigit
