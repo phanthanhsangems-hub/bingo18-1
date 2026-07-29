@@ -2271,7 +2271,16 @@ def run_prediction_cycle() -> dict:
                             if hasattr(last_draw_time, 'tzinfo') and last_draw_time.tzinfo is None:
                                 last_draw_time = last_draw_time.replace(tzinfo=timezone.utc)
                             age_min = (datetime.now(timezone.utc) - last_draw_time.astimezone(timezone.utc)).total_seconds() / 60
-                            if age_min > _GAP_THRESHOLD_MIN:
+                            # P171: kỳ cuối trước 06:00 hôm nay → khoảng trống là do
+                            # nghỉ đêm (P159), không phải sync lỗi. Bỏ qua để sáng nào
+                            # cũng không bắn báo động giả lúc 6h.
+                            _vn_now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+                            _window_start = _vn_now.replace(hour=6, minute=0, second=0, microsecond=0)
+                            _overnight = last_draw_time.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")) < _window_start
+                            if _overnight:
+                                _alert_mgr.reset('gap')
+                                logger.info("P94 gap alert bỏ qua: %.0f phút là khoảng nghỉ đêm", age_min)
+                            elif age_min > _GAP_THRESHOLD_MIN:
                                 telegram.send_message(
                                     f"⏰ <b>PREDICTION GAP ALERT · P94</b>\n"
                                     f"━━━━━━━━━━━━━━━━\n"
