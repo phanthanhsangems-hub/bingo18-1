@@ -435,6 +435,27 @@ def handle_500(e):
     return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
 
+def _trigger_authorized() -> bool:
+    """P174: kiểm tra X-Trigger-Secret (hoặc ?secret=) cho endpoint cron.
+
+    Trước đây 4 endpoint viết `if secret and secret != TRIGGER_SECRET: 401`,
+    tức là gửi SAI secret thì bị chặn nhưng KHÔNG gửi gì cả thì lọt. Ai biết
+    URL đều gọi được /api/retrain, /api/reset-model-config,
+    /api/sync-predictions và /api/daily-summary-evening.
+
+    /api/sync-github vốn đã kiểm tra chặt và Cloud Scheduler gọi nó hằng ngày
+    vẫn chạy, nên scheduler có gửi header — dùng chung chuẩn đó.
+    """
+    if not config.TRIGGER_SECRET:      # chưa cấu hình (local dev) → không chặn
+        return True
+    secret = request.headers.get('X-Trigger-Secret') or request.args.get('secret') or ''
+    if secret == config.TRIGGER_SECRET:
+        return True
+    logger.warning("Tu choi %s: thieu/sai X-Trigger-Secret (UA=%s)",
+                   request.path, request.headers.get('User-Agent', '?')[:60])
+    return False
+
+
 # ── API: Scheduler / Cron ─────────────────────────────────────
 @app.route('/api/fetch-latest', methods=['GET'])
 @limiter.limit("20 per minute")
@@ -4790,8 +4811,7 @@ def sync_predictions_endpoint():
     Backfill predictions cho tất cả kỳ bị thiếu.
     Chạy ngầm (background thread) để không block request.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
 
     # Kiểm tra gap trước
@@ -4984,8 +5004,7 @@ def retrain_models():
     Force retrain toàn bộ Hybrid model (Markov + Cold + ML Ensemble)
     với 500 kỳ gần nhất. Chạy background để không block request.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
 
     def _run_retrain():
@@ -5019,8 +5038,7 @@ def reset_model_config():
     """P71: Reset model_selection_mode to 'auto' in system_config.
     Fixes regression when DB has 'forced' + 'markov_order_2' from a previous debug session.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         conn = db.get_connection()
@@ -11817,8 +11835,7 @@ def daily_summary_evening():
     from datetime import datetime, timedelta, timezone
     from telegram_bot import TelegramBot
 
-    secret = request.args.get('secret') or request.headers.get('X-Trigger-Secret', '')
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({'error': 'unauthorized'}), 403
 
     try:
