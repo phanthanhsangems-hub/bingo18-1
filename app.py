@@ -14,7 +14,8 @@ import requests
 from collections import Counter
 from datetime import datetime, timezone
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory, make_response, render_template, Response
+from flask import (Flask, jsonify, request, send_from_directory, make_response,
+                   render_template, Response, stream_with_context)
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -6845,9 +6846,36 @@ def combo_comeback():
 
 
 # ── SSE: live draw stream ─────────────────────────────────────
+# P173: mỗi client SSE giữ 1 thread gunicorn + 1 connection Postgres suốt
+# 240 giây. gunicorn chạy --workers 1 --threads 8, nên tab dashboard thứ 8
+# sẽ chiếm nốt thread cuối và CHẶN toàn bộ API còn lại — kể cả /api/predict
+# do Cloud Scheduler gọi. Chặn ở 5 client, chừa 3 thread cho request thường.
+# Client bị từ chối vẫn chạy bình thường nhờ vòng refresh 60s có sẵn.
+_SSE_MAX_CLIENTS  = 5
+_SSE_SLOT_TTL     = 300      # > _SSE_MAX_LIFETIME (240s) — slot già hơn thế là rác
+_sse_slots: list  = []       # timestamp lúc nhận mỗi client đang mở
+_sse_lock         = _threading.Lock()
+
+
 @app.route('/api/sse/draws')
 def sse_draws():
     """Server-Sent Events: push new draws to dashboard in real-time (poll DB every 6s)."""
+    _slot = _time.time()
+    with _sse_lock:
+        # Nếu client ngắt trước khi generator kịp chạy thì khối finally không
+        # bao giờ được gọi và slot rò vĩnh viễn. Mỗi stream sống tối đa 240s,
+        # nên bất kỳ slot nào quá 300s chắc chắn là rác — dọn trước khi đếm.
+        _cut = _slot - _SSE_SLOT_TTL
+        _sse_slots[:] = [t for t in _sse_slots if t > _cut]
+        if len(_sse_slots) >= _SSE_MAX_CLIENTS:
+            return Response(
+                'retry: 60000\nevent: busy\ndata: {"error":"too_many_sse_clients"}\n\n',
+                status=503,
+                mimetype='text/event-stream',
+                headers={'Cache-Control': 'no-cache', 'Retry-After': '60'},
+            )
+        _sse_slots.append(_slot)
+
     def generate():
         conn = None
         try:
@@ -6904,6 +6932,12 @@ def sse_draws():
                     conn.close()
             except Exception:
                 pass
+            # P173: nhả slot dù thoát kiểu gì (client đóng tab, hết 240s, lỗi)
+            with _sse_lock:
+                try:
+                    _sse_slots.remove(_slot)
+                except ValueError:
+                    pass
 
     return Response(
         stream_with_context(generate()),
