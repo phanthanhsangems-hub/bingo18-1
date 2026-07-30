@@ -224,8 +224,48 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_presult_win_draw ON prediction_results(draw_number DESC) WHERE is_win_size IS NOT NULL",
                     # GIN index for draw_search containment queries on numbers JSONB
                     "CREATE INDEX IF NOT EXISTS idx_draw_numbers_gin ON draw_history USING GIN ((numbers::jsonb))",
+                    # P173: /api/alert-log sorts by fired_at; watch-scoreboard filters by alert_key
+                    "CREATE INDEX IF NOT EXISTS idx_alertlog_time ON alert_log(fired_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_alertlog_key  ON alert_log(alert_key)",
                 ]:
                     cur.execute(ddl)
+
+                # ── P173: predictions_vn view ────────────────────────
+                # /api/health, /api/next_prediction và /api/predictions đều
+                # SELECT từ view này. Trước đây view chỉ tồn tại thủ công trong
+                # Supabase, không có ở đâu trong code → nếu dựng lại DB thì 3
+                # endpoint (kể cả health check) chết mà không ai biết vì sao.
+                # Chỉ TẠO KHI THIẾU — không CREATE OR REPLACE, để không bao giờ
+                # ghi đè định nghĩa view đang chạy trong production.
+                # SAVEPOINT: nếu câu này lỗi thì chỉ rollback riêng nó, không
+                # làm hỏng transaction chứa các DDL phía trên/dưới.
+                cur.execute("SAVEPOINT sp_predictions_vn")
+                try:
+                    cur.execute("""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_views WHERE viewname = 'predictions_vn'
+                            ) THEN
+                                EXECUTE $v$
+                                    CREATE VIEW predictions_vn AS
+                                    SELECT p.*,
+                                           (p.prediction_time AT TIME ZONE 'UTC'
+                                              AT TIME ZONE 'Asia/Ho_Chi_Minh')
+                                               AS full_time_vietnam,
+                                           TO_CHAR(p.prediction_time AT TIME ZONE 'UTC'
+                                              AT TIME ZONE 'Asia/Ho_Chi_Minh',
+                                              'HH24:MI DD/MM')
+                                               AS display_time_vietnam
+                                    FROM predictions p
+                                $v$;
+                            END IF;
+                        END $$;
+                    """)
+                    cur.execute("RELEASE SAVEPOINT sp_predictions_vn")
+                except Exception as _ve:
+                    cur.execute("ROLLBACK TO SAVEPOINT sp_predictions_vn")
+                    logger.warning("predictions_vn view init bo qua: %s", _ve)
 
                 # ── Migrations (idempotent) ──────────────────────────
                 for ddl in [
@@ -342,6 +382,9 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_markov_from ON markov_transitions(from_state)",
                     # required by update_prediction_result()'s ON CONFLICT (prediction_id)
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_presult_pid_uniq ON prediction_results(prediction_id)",
+                    # P173: khớp với index bên Postgres
+                    "CREATE INDEX IF NOT EXISTS idx_alertlog_time ON alert_log(fired_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_alertlog_key  ON alert_log(alert_key)",
                 ]:
                     cur.execute(ddl)
 

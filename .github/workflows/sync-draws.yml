@@ -2,7 +2,13 @@ name: Sync Bingo18 Draws
 
 on:
   schedule:
-    - cron: '*/6 * * * *'   # mỗi 6 phút (game ra kỳ mới mỗi 6 phút)
+    # Yêu cầu 6 phút/lần, NHƯNG GitHub bóp lịch chạy dày: đo thực tế
+    # 07/2026 chỉ được ~12-15 run/ngày (cách nhau 60-160 phút), tức ~5%
+    # tần suất mong muốn. Đây CHỈ là lưới an toàn — nguồn sync chính là
+    # sync_to_supabase.py --mode watch chạy trên PC (Vietlott chặn IP
+    # Cloud Run). Nếu PC tắt, dữ liệu sẽ trễ tới ~1.5 tiếng chứ không
+    # phải 6 phút.
+    - cron: '*/6 * * * *'
   workflow_dispatch:          # cho phép chạy tay từ GitHub UI
 
 jobs:

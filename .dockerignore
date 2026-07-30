@@ -18,3 +18,11 @@ __pycache__/
 .gitignore
 *.bat
 *.md
+
+# Dashboard cũ ở thư mục gốc — app.py chỉ serve templates/dashboard.html
+dashboard.html
+# Test + script chỉ chạy local/CI, không cần trong image
+test_*.py
+scripts/
+train.py
+train_lstm_full.py

@@ -5127,7 +5127,10 @@ def weekly_summary():
                        SUM(CASE WHEN is_win THEN 1 ELSE 0 END) AS w
                 FROM prediction_results
                 WHERE created_at >= datetime('now','-7 days')
-                GROUP BY d ORDER BY CAST(w AS FLOAT)/MAX(t) DESC LIMIT 1
+                GROUP BY d
+                ORDER BY CAST(SUM(CASE WHEN is_win THEN 1 ELSE 0 END) AS FLOAT)
+                         / COUNT(*) DESC
+                LIMIT 1
             """)
         best_row = cur.fetchone()
         best_day = f"{best_row[0]} ({best_row[2]}/{best_row[1]} = {best_row[2]/best_row[1]*100:.0f}%)" if best_row and best_row[1] else "N/A"
@@ -5221,11 +5224,11 @@ def daily_summary():
         _TODAY_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours')"
         _YEST_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '1 day'"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours', '-1 day')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours', '-1 day')"
 
         # ── Tổng kết hôm nay (dùng is_win_size cho SIZE win) ──────
         cur.execute(f"""
@@ -11796,7 +11799,7 @@ def daily_summary_evening():
         _TODAY_PRED = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours')"
 
         # ── 1. Tổng predictions hôm nay ──────────────────────────
         cur.execute(f"""
