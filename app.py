@@ -14,7 +14,8 @@ import requests
 from collections import Counter
 from datetime import datetime, timezone
 from functools import wraps
-from flask import Flask, jsonify, request, send_from_directory, make_response, render_template, Response
+from flask import (Flask, jsonify, request, send_from_directory, make_response,
+                   render_template, Response, stream_with_context)
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -432,6 +433,27 @@ def handle_500(e):
     import traceback as _tb
     logger.error("Unhandled 500: %s\n%s", e, _tb.format_exc())
     return jsonify({"error": str(e), "type": type(e).__name__}), 500
+
+
+def _trigger_authorized() -> bool:
+    """P174: kiểm tra X-Trigger-Secret (hoặc ?secret=) cho endpoint cron.
+
+    Trước đây 4 endpoint viết `if secret and secret != TRIGGER_SECRET: 401`,
+    tức là gửi SAI secret thì bị chặn nhưng KHÔNG gửi gì cả thì lọt. Ai biết
+    URL đều gọi được /api/retrain, /api/reset-model-config,
+    /api/sync-predictions và /api/daily-summary-evening.
+
+    /api/sync-github vốn đã kiểm tra chặt và Cloud Scheduler gọi nó hằng ngày
+    vẫn chạy, nên scheduler có gửi header — dùng chung chuẩn đó.
+    """
+    if not config.TRIGGER_SECRET:      # chưa cấu hình (local dev) → không chặn
+        return True
+    secret = request.headers.get('X-Trigger-Secret') or request.args.get('secret') or ''
+    if secret == config.TRIGGER_SECRET:
+        return True
+    logger.warning("Tu choi %s: thieu/sai X-Trigger-Secret (UA=%s)",
+                   request.path, request.headers.get('User-Agent', '?')[:60])
+    return False
 
 
 # ── API: Scheduler / Cron ─────────────────────────────────────
@@ -4789,8 +4811,7 @@ def sync_predictions_endpoint():
     Backfill predictions cho tất cả kỳ bị thiếu.
     Chạy ngầm (background thread) để không block request.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
 
     # Kiểm tra gap trước
@@ -4983,8 +5004,7 @@ def retrain_models():
     Force retrain toàn bộ Hybrid model (Markov + Cold + ML Ensemble)
     với 500 kỳ gần nhất. Chạy background để không block request.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
 
     def _run_retrain():
@@ -5018,8 +5038,7 @@ def reset_model_config():
     """P71: Reset model_selection_mode to 'auto' in system_config.
     Fixes regression when DB has 'forced' + 'markov_order_2' from a previous debug session.
     """
-    secret = request.headers.get("X-Trigger-Secret", "")
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         conn = db.get_connection()
@@ -5127,7 +5146,10 @@ def weekly_summary():
                        SUM(CASE WHEN is_win THEN 1 ELSE 0 END) AS w
                 FROM prediction_results
                 WHERE created_at >= datetime('now','-7 days')
-                GROUP BY d ORDER BY CAST(w AS FLOAT)/MAX(t) DESC LIMIT 1
+                GROUP BY d
+                ORDER BY CAST(SUM(CASE WHEN is_win THEN 1 ELSE 0 END) AS FLOAT)
+                         / COUNT(*) DESC
+                LIMIT 1
             """)
         best_row = cur.fetchone()
         best_day = f"{best_row[0]} ({best_row[2]}/{best_row[1]} = {best_row[2]/best_row[1]*100:.0f}%)" if best_row and best_row[1] else "N/A"
@@ -5221,11 +5243,11 @@ def daily_summary():
         _TODAY_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours')"
         _YEST_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '1 day'"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours', '-1 day')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours', '-1 day')"
 
         # ── Tổng kết hôm nay (dùng is_win_size cho SIZE win) ──────
         cur.execute(f"""
@@ -6842,9 +6864,36 @@ def combo_comeback():
 
 
 # ── SSE: live draw stream ─────────────────────────────────────
+# P173: mỗi client SSE giữ 1 thread gunicorn + 1 connection Postgres suốt
+# 240 giây. gunicorn chạy --workers 1 --threads 8, nên tab dashboard thứ 8
+# sẽ chiếm nốt thread cuối và CHẶN toàn bộ API còn lại — kể cả /api/predict
+# do Cloud Scheduler gọi. Chặn ở 5 client, chừa 3 thread cho request thường.
+# Client bị từ chối vẫn chạy bình thường nhờ vòng refresh 60s có sẵn.
+_SSE_MAX_CLIENTS  = 5
+_SSE_SLOT_TTL     = 300      # > _SSE_MAX_LIFETIME (240s) — slot già hơn thế là rác
+_sse_slots: list  = []       # timestamp lúc nhận mỗi client đang mở
+_sse_lock         = _threading.Lock()
+
+
 @app.route('/api/sse/draws')
 def sse_draws():
     """Server-Sent Events: push new draws to dashboard in real-time (poll DB every 6s)."""
+    _slot = _time.time()
+    with _sse_lock:
+        # Nếu client ngắt trước khi generator kịp chạy thì khối finally không
+        # bao giờ được gọi và slot rò vĩnh viễn. Mỗi stream sống tối đa 240s,
+        # nên bất kỳ slot nào quá 300s chắc chắn là rác — dọn trước khi đếm.
+        _cut = _slot - _SSE_SLOT_TTL
+        _sse_slots[:] = [t for t in _sse_slots if t > _cut]
+        if len(_sse_slots) >= _SSE_MAX_CLIENTS:
+            return Response(
+                'retry: 60000\nevent: busy\ndata: {"error":"too_many_sse_clients"}\n\n',
+                status=503,
+                mimetype='text/event-stream',
+                headers={'Cache-Control': 'no-cache', 'Retry-After': '60'},
+            )
+        _sse_slots.append(_slot)
+
     def generate():
         conn = None
         try:
@@ -6901,6 +6950,12 @@ def sse_draws():
                     conn.close()
             except Exception:
                 pass
+            # P173: nhả slot dù thoát kiểu gì (client đóng tab, hết 240s, lỗi)
+            with _sse_lock:
+                try:
+                    _sse_slots.remove(_slot)
+                except ValueError:
+                    pass
 
     return Response(
         stream_with_context(generate()),
@@ -11780,8 +11835,7 @@ def daily_summary_evening():
     from datetime import datetime, timedelta, timezone
     from telegram_bot import TelegramBot
 
-    secret = request.args.get('secret') or request.headers.get('X-Trigger-Secret', '')
-    if secret and secret != config.TRIGGER_SECRET:
+    if not _trigger_authorized():
         return jsonify({'error': 'unauthorized'}), 403
 
     try:
@@ -11796,7 +11850,7 @@ def daily_summary_evening():
         _TODAY_PRED = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
             "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
-        ) if _USE_PG else "date(created_at, '+7 hours') = date('now', '+7 hours')"
+        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours')"
 
         # ── 1. Tổng predictions hôm nay ──────────────────────────
         cur.execute(f"""

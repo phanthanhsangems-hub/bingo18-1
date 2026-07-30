@@ -431,26 +431,39 @@ import time as _time_module
 class AlertManager:
     """Unified per-key cooldown tracker for all automatic alerts."""
 
+    # P173: alert_log chỉ ghi thêm, chưa bao giờ xoá. ~40 tin/ngày → ~15k
+    # dòng/năm. Dọn nhẹ theo xác suất (1/200 lần ghi) để khỏi phải thêm
+    # cron riêng, giữ 90 ngày.
+    _RETENTION_DAYS = 90
+    _PRUNE_ODDS     = 200
+
     def __init__(self):
         self._last: dict = {}  # {key: last_fired_ts}
+        # gunicorn chạy --threads 8 nên fire() bị nhiều thread gọi song song;
+        # không có lock thì check-rồi-set có thể lọt 2 alert trùng nhau.
+        self._lock = threading.Lock()
 
     def fire(self, key: str, cooldown_sec: float) -> bool:
         """Return True and stamp the key if cooldown has elapsed; False otherwise."""
         now = _time_module.time()
-        if (now - self._last.get(key, 0.0)) >= cooldown_sec:
-            self._last[key] = now
-            return True
-        return False
+        with self._lock:
+            if (now - self._last.get(key, 0.0)) >= cooldown_sec:
+                self._last[key] = now
+                return True
+            return False
 
     def last_fired(self, key: str) -> float:
-        return self._last.get(key, 0.0)
+        with self._lock:
+            return self._last.get(key, 0.0)
 
     def reset(self, key: str) -> None:
-        self._last.pop(key, None)
+        with self._lock:
+            self._last.pop(key, None)
 
     def log(self, db, key: str, message: str = '', metadata: dict = None) -> None:
         """Persist a fired alert to alert_log table (best-effort, never raises)."""
         import json as _json
+        import random as _random
         try:
             conn = db.get_connection()
             try:
@@ -460,6 +473,14 @@ class AlertManager:
                     f"INSERT INTO alert_log (alert_key, message, metadata) VALUES ({ph}, {ph}, {ph})",
                     (key, message or '', _json.dumps(metadata) if metadata else None)
                 )
+                if _random.randrange(self._PRUNE_ODDS) == 0:
+                    cur.execute(
+                        "DELETE FROM alert_log WHERE fired_at < NOW() - INTERVAL '%s days'"
+                        % self._RETENTION_DAYS
+                        if USE_POSTGRES else
+                        "DELETE FROM alert_log WHERE fired_at < datetime('now', '-%d days')"
+                        % self._RETENTION_DAYS
+                    )
                 conn.commit()
             finally:
                 conn.close()

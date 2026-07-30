@@ -481,10 +481,13 @@ function bindTips() {
 
 // ── SSE live updates ──────────────────────────────────────────
 let sse = null;
+let sseBackoff = 5000;             // P173: lùi dần khi server từ chối
+const SSE_BACKOFF_MAX = 120000;
 function connectSSE() {
   try {
     if (sse) sse.close();
     sse = new EventSource('/api/sse/draws');
+    sse.onopen = () => { sseBackoff = 5000; };   // nối được thì reset
     sse.onmessage = e => {
       try {
         const d = JSON.parse(e.data);
@@ -494,9 +497,14 @@ function connectSSE() {
         }
       } catch { /* heartbeat */ }
     };
-    sse.onerror = () => {          // server closes after ~4 min — reconnect
+    // Server đóng sau ~4 phút (bình thường) HOẶC trả 503 khi đủ 5 client.
+    // Trường hợp 503 mà cứ thử lại mỗi 5s thì thành tự DDoS chính mình,
+    // nên nhân đôi thời gian chờ tới tối đa 2 phút. Dashboard vẫn cập nhật
+    // nhờ vòng refresh 60s, chỉ mất tin đẩy tức thì.
+    sse.onerror = () => {
       sse.close();
-      setTimeout(connectSSE, 5000);
+      setTimeout(connectSSE, sseBackoff);
+      sseBackoff = Math.min(sseBackoff * 2, SSE_BACKOFF_MAX);
     };
   } catch { /* SSE unsupported */ }
 }
