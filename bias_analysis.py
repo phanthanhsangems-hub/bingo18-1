@@ -225,7 +225,10 @@ def main():
     for i in range(1, len(sizes)):
         trans[sizes[i-1]][sizes[i]] += 1
 
-    print(f"\n  {'From \\ To':>10}", end='')
+    # P176: f-string không cho phép backslash trong biểu thức ở Python 3.11
+    # (chỉ 3.12 trở lên mới cho). Tách chuỗi ra ngoài.
+    _hdr = 'From \\ To'
+    print(f"\n  {_hdr:>10}", end='')
     for to in SIZES:
         print(f"  {to:>10}", end='')
     print("   row_n")
