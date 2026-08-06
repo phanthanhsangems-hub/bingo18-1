@@ -217,6 +217,37 @@ def get_conn():
     return psycopg2.connect(**DB_CONFIG)
 
 
+_VN_TZ         = ZoneInfo("Asia/Ho_Chi_Minh")
+_DRAW_INTERVAL = 6      # phút giữa 2 kỳ
+_WINDOW_OPEN   = 6      # giờ VN game bắt đầu
+_WINDOW_CLOSE  = 22     # giờ VN game đóng
+
+
+def backdate_batch(newest: datetime, count: int) -> list:
+    """P175: sinh `count` mốc thời gian UTC cho một lô kỳ, cũ nhất trước.
+
+    Kỳ mới nhất trong lô vừa xổ nên lấy thời điểm hiện tại; các kỳ cũ hơn
+    lùi dần 6 phút. Khi lùi qua 06:00 giờ VN thì nhảy về 21:54 hôm trước,
+    vì game nghỉ từ 22:00 tới 06:00.
+
+    Trước đây watcher đóng dấu CẢ LÔ bằng một mốc `now` duy nhất, nên mỗi
+    lần watcher chết rồi sống lại là hàng chục kỳ bị dồn vào cùng một phút.
+    """
+    out = [newest]
+    t = newest
+    for _ in range(count - 1):
+        t = t - timedelta(minutes=_DRAW_INTERVAL)
+        v = t.astimezone(_VN_TZ)
+        if v.hour < _WINDOW_OPEN:
+            v = (v - timedelta(days=1)).replace(
+                hour=_WINDOW_CLOSE - 1, minute=60 - _DRAW_INTERVAL,
+                second=0, microsecond=0)
+            t = v.astimezone(timezone.utc)
+        out.append(t)
+    out.reverse()
+    return out
+
+
 def get_last_draw_id(conn) -> int:
     cur = conn.cursor()
     cur.execute(f"SELECT MAX(draw_number) FROM {TABLE};")
@@ -1348,9 +1379,15 @@ def mode_watch():
             if new:
                 inserted = 0
                 last_inserted_id = None
-                now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-                for draw in new:
-                    draw['draw_date'] = now_utc  # real-time stamp, accurate to ±60s
+                # P175: lô nhiều kỳ = watcher vừa hồi phục sau gián đoạn.
+                # Giãn ngược 6 phút/kỳ thay vì dồn hết vào một mốc.
+                _stamps = backdate_batch(datetime.now(timezone.utc), len(new))
+                now_utc = _stamps[-1].strftime('%Y-%m-%d %H:%M:%S')
+                if len(new) > 1:
+                    logger.warning("Bat kip %d ky — gian nguoc %d phut/ky tu %s",
+                                   len(new), _DRAW_INTERVAL, now_utc)
+                for draw, _ts in zip(new, _stamps):
+                    draw['draw_date'] = _ts.strftime('%Y-%m-%d %H:%M:%S')
                     ok = insert_draw(conn, draw)
                     if ok:
                         inserted += 1
@@ -1524,11 +1561,17 @@ def mode_gha():
     now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     try:
         new_draws = get_new_since(last_id)
-        for draw in new_draws:
+        # P175: scraper chỉ đọc được NGÀY (chuỗi 'YYYY-MM-DD'), không có giờ.
+        # Dùng thẳng nó thì Postgres hiểu là 00:00 UTC = 07:00 giờ VN, dồn
+        # toàn bộ kỳ backfill vào khung 7h. Đã đo: 3.683 kỳ bị đóng dấu sai
+        # kiểu này, làm giờ 7-10h phình lên gấp đôi các giờ khác.
+        # Giãn ngược 6 phút/kỳ như nhánh watch.
+        _stamps = backdate_batch(datetime.now(timezone.utc), len(new_draws))
+        for draw, _ts in zip(new_draws, _stamps):
             to_send.append({
                 'draw_id':   draw['draw_id'],
                 'numbers':   draw['numbers'],
-                'draw_date': draw.get('draw_date') or now_utc,
+                'draw_date': _ts.strftime('%Y-%m-%d %H:%M:%S'),
             })
         if to_send:
             logger.info("Vietlott: %d kỳ mới", len(to_send))
@@ -1539,14 +1582,16 @@ def mode_gha():
     if not to_send:
         logger.info("Fallback: GitHub JSONL...")
         try:
-            gh_draws = fetch_from_github(limit=30)
-            for d in gh_draws:
-                if d.get('draw_number', 0) > last_id:
-                    to_send.append({
-                        'draw_id':   d['draw_number'],
-                        'numbers':   d['numbers'],
-                        'draw_date': d.get('draw_time', now_utc),
-                    })
+            gh_draws  = fetch_from_github(limit=30)
+            _gh_new   = [d for d in gh_draws if d.get('draw_number', 0) > last_id]
+            # P175: draw_time từ GitHub JSONL cũng chỉ có ngày — giãn ngược
+            _gh_stamps = backdate_batch(datetime.now(timezone.utc), len(_gh_new))
+            for d, _ts in zip(_gh_new, _gh_stamps):
+                to_send.append({
+                    'draw_id':   d['draw_number'],
+                    'numbers':   d['numbers'],
+                    'draw_date': _ts.strftime('%Y-%m-%d %H:%M:%S'),
+                })
             if to_send:
                 logger.info("GitHub fallback: %d kỳ mới", len(to_send))
         except Exception as e:
