@@ -574,6 +574,35 @@ def _save_sw_ema(db) -> None:
 # ── Time-of-day SIZE distribution (static, 10,000 kỳ gần nhất) ──────────────
 # Dùng trực tiếp thay vì live DB query → nhanh hơn, ổn định hơn.
 # Cập nhật: 2026-07-15 (bias_analysis.py, n≈600-640/giờ). Blend weight = 0.50 cho giờ lệch >2pp, 0.30 cho giờ bình thường.
+#
+# ┌─ P177: BẢNG NÀY KHÔNG ẢNH HƯỞNG WIN RATE — đừng tốn công tinh chỉnh ─┐
+#
+# Vì HÒA bị chặn vô điều kiện (P142, dòng ~2099) nên p_hoa = 0, mà:
+#     WR = p_nho·0.375 + p_hoa·0.25 + p_lon·0.375
+#        = 0.375 − 0.125·p_hoa
+#        = 0.375  (hằng số)
+# Bảng này chỉ xê dịch cán cân NHỎ↔LỚN — không đổi được thắng thua.
+#
+# Backtest 1.500 kỳ × 3 seed, ép prior_conf ra hai cực mà bảng sinh ra:
+#     mặc định            WR 38.467%   (NHỎ 54.4% / LỚN 45.6%)
+#     đẩy LỚN tối đa      WR 38.111%   (NHỎ 42.5% / LỚN 57.5%)  z=−0.35
+#     đẩy NHỎ tối đa      WR 37.489%   (NHỎ 74.6% / LỚN 25.4%)  z=−0.96
+#     bias dampen cả hai  WR 38.756%   (NHỎ 59.7% / LỚN 40.3%)  z=+0.28
+# Tỷ lệ dự đoán xê dịch 32 điểm mà WR đứng yên trong khoảng nhiễu.
+#
+# Bản thân số liệu trong bảng cũng không có giá trị dự báo:
+#   · Bảng dựng từ 10.000 kỳ; đo lại trên 74.293 kỳ cho r = +0.362 sau khi
+#     khử trung bình từng loại. Nhưng 10k kỳ NẰM TRONG 74k kỳ, nên nếu
+#     hiệu ứng bằng 0 thì r kỳ vọng = sqrt(10000/74293) = 0.367. Khớp.
+#   · Chi-square SIZE × 16 giờ trên 74.293 kỳ: p = 0.785. Không có hiệu ứng giờ.
+#   · Khi refresh từ DB (6000 kỳ / 16 giờ = 375 kỳ/giờ) sai số chuẩn là
+#     2.50 điểm, trong khi ngưỡng bật weight 0.50 chỉ là 2.0 điểm — tức
+#     ~42% số giờ vượt ngưỡng thuần do ngẫu nhiên.
+#
+# GIỮ LẠI vì vô hại và gỡ ra thì phải sửa nhiều nhánh. NHƯNG nếu có ngày
+# bỏ chặn HÒA (P142) thì phải xoá bảng này trước — lúc đó nó sẽ đẩy dự
+# đoán về HÒA dựa trên nhiễu, và mỗi 1% HÒA lấy đi 0.125 điểm win rate.
+# └──────────────────────────────────────────────────────────────────────┘
 _TOD_SIZE_STATS: dict = {
     #  h:  {NHO,  HOA,  LON}
     6:  {'NHO': 0.375, 'HOA': 0.293, 'LON': 0.332},  # LON thấp (giữ nguyên, chưa có data mới)
@@ -597,6 +626,10 @@ _TOD_SIZE_STATS: dict = {
 
 # ── K: Per-voter WR by hour multiplier (3000-kỳ vote_breakdown analysis) ─────
 # factor = voter_wr_at_hour / voter_overall_wr. Only entries with |delta| >= 5pp.
+# P177: cỡ mẫu quá nhỏ để tin — 13 hệ số, trung vị n=62, nhỏ nhất n=29.
+# Với n=29 sai số chuẩn của WR là ±8.9 điểm, trong khi ngưỡng lọc chỉ 5 điểm,
+# nên phần lớn hệ số ở đây là nhiễu được chọn lọc. Vô hại vì cũng chỉ
+# xê dịch NHỎ↔LỚN (xem chứng minh ở _TOD_SIZE_STATS).
 # Applied as additional eff multiplier in majority vote alongside existing wr_mult.
 _VOTER_HOUR_MULT: dict = {
     'prior_lon': {
@@ -644,6 +677,11 @@ _SIZE_MARKOV2: dict = {
 # factor < 1.0 = dampen (giảm confidence); > 1.0 = boost.
 # Chỉ áp dụng khi lệch >= 10pp (pred - actual SIZE).
 # Cập nhật: 2026-06-05.
+# P177: cùng lý do với _TOD_SIZE_STATS — chỉ xê dịch NHỎ↔LỚN nên không
+# đổi win rate. Ngoài ra các mốc "actual" dùng để tính hệ số đo trên mẫu
+# nhỏ và đã lệch: ghi 7h actual=33.7% nhưng đo trên 74k kỳ là LỚN 38.17%
+# (lệch 4.5 điểm) — tức hệ số 0.70 đang sửa một sai lệch không tồn tại.
+# Bảng hardcode, KHÔNG bao giờ được refresh.
 _TOD_BIAS_CORRECTION: dict = {
     # h: {'lon': factor, 'nho': factor}
     6:  {'lon': 0.75, 'nho': 1.00},  # pred_lon=54.5% vs actual=30.1% → dampen LON mạnh
