@@ -93,6 +93,30 @@ class DatabaseManager:
             logger.error("DB init failed (will retry on first request): %s", e)
 
     # ── Connection ────────────────────────────────────────────
+    @staticmethod
+    def _register_for_teardown(conn):
+        """P178: ghi connection vào app context để Flask tự đóng khi hết request.
+
+        114/122 endpoint gọi conn.close() ở nhánh thành công nhưng KHÔNG đặt
+        trong finally, nên exception giữa chừng là bỏ rơi connection. Thay vì
+        sửa 114 chỗ (rủi ro cao), đăng ký ở đây và để teardown_appcontext
+        trong app.py dọn — một chỗ duy nhất, không đụng vào endpoint nào.
+
+        Đóng hai lần là vô hại với cả psycopg2 lẫn sqlite3, nên các endpoint
+        đang tự đóng đúng vẫn chạy y nguyên.
+        """
+        try:
+            from flask import g, has_app_context
+            if not has_app_context():
+                return                      # gọi từ scheduler/CLI, không có request
+            conns = getattr(g, '_db_conns', None)
+            if conns is None:
+                conns = []
+                g._db_conns = conns
+            conns.append(conn)
+        except Exception:
+            pass                            # không bao giờ để việc dọn dẹp làm hỏng request
+
     def get_connection(self):
         if USE_POSTGRES:
             # Direct connect per request — correct for Supabase pgbouncer
@@ -100,12 +124,12 @@ class DatabaseManager:
             # because many endpoints still have connection leaks.
             conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
             conn.autocommit = False
-            return conn
         else:
             conn = sqlite3.connect(config.DB_PATH)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
-            return conn
+        self._register_for_teardown(conn)
+        return conn
 
     # ── SQL helpers (cross-db) ────────────────────────────────
     @staticmethod
