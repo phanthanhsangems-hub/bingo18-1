@@ -78,7 +78,12 @@ def cache_resp(ttl: int = 120):
     return decorator
 
 # ── Telegram dedup ────────────────────────────────────────────
-_PROCESSED_UPDATES: set = set()
+# P179: trước dùng set + set.pop(). set.pop() lấy phần tử BẤT KỲ chứ không
+# phải cũ nhất, nên khi đầy 1000 thì mỗi update mới có thể vô tình xoá đúng
+# update_id vừa ghi, để Telegram retry lọt qua và chạy lệnh hai lần.
+# OrderedDict + popitem(last=False) cho đúng thứ tự FIFO.
+from collections import OrderedDict as _OrderedDict
+_PROCESSED_UPDATES: "_OrderedDict[int, None]" = _OrderedDict()
 _PROCESSED_MAX = 1000
 
 # ── Telegram per-user command throttle ────────────────────────
@@ -9543,6 +9548,17 @@ def telegram_webhook():
     import logging as _log
     _wlog = _log.getLogger("telegram_webhook")
     try:
+        # P179: xác thực webhook bằng secret token của Telegram nếu đã cấu hình.
+        # Trước đây chỉ lọc theo chat_id lấy từ chính payload — mà payload thì
+        # ai gửi cũng được, nên biết URL và chat_id là gọi lệnh bot được.
+        # Chỉ bật khi TELEGRAM_WEBHOOK_SECRET có giá trị, để không làm hỏng
+        # webhook đang chạy. Cách bật: gọi Telegram setWebhook với tham số
+        # secret_token=<giá trị>, rồi đặt env var cùng giá trị đó.
+        _wh_secret = getattr(config, 'TELEGRAM_WEBHOOK_SECRET', '') or ''
+        if _wh_secret and request.headers.get('X-Telegram-Bot-Api-Secret-Token') != _wh_secret:
+            _wlog.warning("Webhook bi tu choi: sai secret token")
+            return jsonify({"ok": False}), 403
+
         update = request.get_json(force=True, silent=True) or {}
 
         # Dedup: bỏ qua nếu update_id đã xử lý (Telegram có thể retry)
@@ -9550,9 +9566,9 @@ def telegram_webhook():
         if uid:
             if uid in _PROCESSED_UPDATES:
                 return jsonify({"ok": True})
-            _PROCESSED_UPDATES.add(uid)
-            if len(_PROCESSED_UPDATES) > _PROCESSED_MAX:
-                _PROCESSED_UPDATES.pop()
+            _PROCESSED_UPDATES[uid] = None
+            while len(_PROCESSED_UPDATES) > _PROCESSED_MAX:
+                _PROCESSED_UPDATES.popitem(last=False)   # xoá cũ nhất
 
         # Hỗ trợ cả message và callback_query (inline keyboard)
         cb = update.get("callback_query")

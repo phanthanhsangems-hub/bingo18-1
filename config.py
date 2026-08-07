@@ -7,6 +7,10 @@ import os
 # ── Telegram ─────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")   # REQUIRED: set in env
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID",   "")   # REQUIRED: set in env
+# P179: TÙY CHỌN — xác thực /telegram/webhook. Để trống thì bỏ qua kiểm tra
+# (giữ nguyên hành vi cũ). Bật bằng cách gọi Telegram setWebhook với
+# secret_token=<giá trị> rồi đặt env var này cùng giá trị.
+TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
 # ── Admin ────────────────────────────────────────────────────
 ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "")  # REQUIRED: set in env
