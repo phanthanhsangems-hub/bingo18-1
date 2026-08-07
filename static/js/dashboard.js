@@ -353,8 +353,8 @@ async function loadSizeDist() {
 let _numGaps = {};   // {"1": kỳ chưa ra, ...} — từ /api/cold-streaks
 // P180: 100 kỳ (300 lượt) quá ít — sai số chuẩn ±6.5 trên kỳ vọng 50, tức
 // chênh lệch nóng/lạnh 18 lần chỉ là ±1.4 sai số chuẩn (nhiễu thuần).
-// 333 kỳ ≈ 1000 lượt số kéo sai số tương đối từ 12.9% xuống 7.1%.
-const HC_WINDOW = 333;
+// 1000 kỳ = 3000 lượt số: kỳ vọng 500 ± 20, sai số tương đối 12.9% → 4.1%.
+const HC_WINDOW = 1000;
 async function loadHotCold() {
   const freq = await J(`/api/number_frequency?window=${HC_WINDOW}`);
   const items = Object.entries(freq)
