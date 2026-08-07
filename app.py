@@ -428,6 +428,26 @@ limiter = Limiter(
 )
 
 
+@app.teardown_appcontext
+def _close_db_conns(exc):
+    """P178: đóng mọi connection đã mở trong request, kể cả khi có exception.
+
+    114/122 endpoint gọi conn.close() ở nhánh thành công nhưng không đặt trong
+    finally. database.py:get_connection() đăng ký connection vào g._db_conns,
+    còn đây là chỗ dọn. Đóng hai lần vô hại nên endpoint tự đóng đúng vẫn OK.
+    """
+    from flask import g
+    conns = getattr(g, '_db_conns', None)
+    if not conns:
+        return
+    for c in conns:
+        try:
+            c.close()
+        except Exception:
+            pass
+    g._db_conns = []
+
+
 @app.errorhandler(500)
 def handle_500(e):
     import traceback as _tb
