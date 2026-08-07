@@ -1988,7 +1988,8 @@ def get_hot_cold_numbers():
 @app.route('/api/number_frequency')
 def get_number_frequency():
     try:
-        window = int(request.args.get('window', 100))
+        # P180: chặn trên để không ai quét cả bảng bằng window=99999999
+        window = max(1, min(int(request.args.get('window', 100)), 20000))
         return jsonify(db.get_number_frequency(window))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
