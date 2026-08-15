@@ -2114,6 +2114,36 @@ def get_hot_cold_numbers():
 @app.route('/api/number_frequency')
 def get_number_frequency():
     try:
+        # P188: today=1 → chỉ đếm các kỳ TRONG NGÀY HÔM NAY (giờ VN),
+        # thay vì N kỳ gần nhất. Trả thêm draws/slots để phía giao diện
+        # ghi nhãn và tính ngưỡng nhiễu cho đúng cửa sổ thật.
+        if request.args.get('today') in ('1', 'true', 'yes'):
+            import ast as _ast
+            conn = db.get_connection()
+            cur  = conn.cursor()
+            if USE_POSTGRES:
+                cur.execute(
+                    "SELECT numbers FROM draw_history WHERE numbers IS NOT NULL "
+                    "AND (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
+                    "  = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date")
+            else:
+                cur.execute(
+                    "SELECT numbers FROM draw_history WHERE numbers IS NOT NULL "
+                    "AND date(draw_time, '+7 hours') = date('now', '+7 hours')")
+            rows = cur.fetchall()
+            conn.close()
+            freq = {i: 0 for i in range(1, 7)}
+            for (raw,) in rows:
+                try:
+                    ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
+                except Exception:
+                    continue
+                for n in ns:
+                    if 1 <= int(n) <= 6:
+                        freq[int(n)] += 1
+            return jsonify({'freq': freq, 'draws': len(rows),
+                            'slots': sum(freq.values()), 'scope': 'today'})
+
         # P180: chặn trên để không ai quét cả bảng bằng window=99999999
         window = max(1, min(int(request.args.get('window', 100)), 20000))
         return jsonify(db.get_number_frequency(window))
