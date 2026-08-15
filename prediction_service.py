@@ -212,7 +212,15 @@ def _get_models(db):
         return _model_cache
 
 # ── Ban-list diversity ────────────────────────────────────────
-BAN_WINDOW = 8    # số kỳ gần nhất không được lặp combo
+# P184: 8 → 6. Sau _STRUCTURAL_BANS mỗi SIZE chỉ còn NHỎ 7 bộ, HÒA 6, LỚN 7.
+# Mà HÒA bị chặn vô điều kiện (P142) nên majority_size luôn là NHỎ hoặc LỚN
+# — tức luôn có đúng 7 bộ để chọn. Đặt cửa sổ ≤ 6 thì danh sách KHÔNG THỂ
+# cạn, vì 6 bộ bị cấm gần nhất vẫn chừa lại ít nhất 1.
+#
+# Với 8 thì cạn được: đo mô phỏng 200.000 kỳ cho 0,491% số kỳ rơi vào cảnh
+# danh sách rỗng, lúc đó code bỏ qua kết quả bỏ phiếu mà quay về best_vote.
+#   window=8 → 0,491%    window=7 → 0,103%    window=6 → 0,000%
+BAN_WINDOW = 6    # số kỳ gần nhất không được lặp combo
 
 # P151/P152: Only predict from 20 distinct-number combos (3 different numbers).
 # Analysis of 67k draws: distinct=1.56× expected, pair=0.78×, triple=0.26×.
