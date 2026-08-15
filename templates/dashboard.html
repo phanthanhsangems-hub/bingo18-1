@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p180b">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p185">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -152,6 +152,38 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     </div>
   </div>
 
+  <!-- ═══ THỐNG KÊ BỘ 3 SỐ TRÙNG NHAU ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Bộ 3 số trùng nhau</h2>
+    <p class="sub" id="tr-sub">Toàn bộ lịch sử · trung bình = tổng số kỳ ÷ số lần về</p>
+    <div class="tbl-scroll">
+      <table class="log-table" id="tr-table">
+        <thead><tr>
+          <th>Bộ 3 số</th><th class="ta-r">Số lần về</th>
+          <th class="ta-r">TB số kỳ về</th><th class="ta-r">Số kỳ chưa về</th>
+        </tr></thead>
+        <tbody id="tr-body"><tr><td colspan="4" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <p class="sub" id="tr-note"></p>
+  </div>
+
+  <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Thống kê theo tổng</h2>
+    <p class="sub">Ghép cặp đối xứng — hai tổng cùng hàng có xác suất lý thuyết y hệt nhau</p>
+    <div class="tbl-scroll">
+      <table class="log-table" id="ss-table">
+        <thead><tr>
+          <th>Tổng</th><th class="ta-r">TB kỳ về</th><th class="ta-r">Chưa về</th>
+          <th class="ss-gap"></th>
+          <th>Tổng</th><th class="ta-r">TB kỳ về</th><th class="ta-r">Chưa về</th>
+        </tr></thead>
+        <tbody id="ss-body"><tr><td colspan="7" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Cầu đang theo dõi</h2>
@@ -202,6 +234,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p180b"></script>
+<script src="/static/js/dashboard.js?v=p185"></script>
 </body>
 </html>

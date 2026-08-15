@@ -2121,6 +2121,117 @@ def get_number_frequency():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/triple-stats')
+@cache_resp(300)
+@limiter.limit("30 per minute")
+def triple_stats():
+    """P185: thống kê 6 bộ ba số trùng nhau (111..666) + gộp chung.
+
+    Mỗi bộ trả về: số lần về, trung bình bao nhiêu kỳ mới về một lần,
+    và hiện đã bao nhiêu kỳ chưa về.
+
+    Trung bình = tổng số kỳ / số lần về (cùng cách tính với các trang
+    thống kê Bingo18 khác, để đối chiếu được).
+
+    Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
+    trong Python — khoảng 2,8% số dòng, nên nhanh và chạy được trên cả
+    Postgres lẫn SQLite.
+    """
+    import ast as _ast
+    try:
+        conn = db.get_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT COUNT(*), MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+        total_draws, max_dn = cur.fetchone()
+        total_draws = total_draws or 0
+        max_dn      = max_dn or 0
+
+        cur.execute(
+            "SELECT draw_number, numbers FROM draw_history "
+            "WHERE numbers IS NOT NULL AND sum_value IN (3,6,9,12,15,18) "
+            "ORDER BY draw_number"
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        cnt  = {n: 0 for n in range(1, 7)}
+        last = {n: None for n in range(1, 7)}
+        any_cnt, any_last = 0, None
+        for dn, raw in rows:
+            try:
+                ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
+                a, b, c = int(ns[0]), int(ns[1]), int(ns[2])
+            except Exception:
+                continue
+            if a == b == c and 1 <= a <= 6:
+                cnt[a]  += 1
+                last[a]  = dn
+                any_cnt += 1
+                any_last = dn
+
+        def _row(label, k, lastdn):
+            return {
+                'combo':       label,
+                'count':       k,
+                'avg_gap':     round(total_draws / k) if k else None,
+                'current_gap': (max_dn - lastdn) if lastdn else None,
+                'last_draw':   lastdn,
+            }
+
+        return jsonify({
+            'total_draws': total_draws,
+            'triples':     [_row(str(n) * 3, cnt[n], last[n]) for n in range(1, 7)],
+            'any':         _row('***', any_cnt, any_last),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sum-stats')
+@cache_resp(300)
+@limiter.limit("30 per minute")
+def sum_stats():
+    """P185: thống kê theo TỔNG 3..18 — trung bình bao nhiêu kỳ về một lần
+    và hiện đã bao nhiêu kỳ chưa về.
+
+    Dùng thẳng cột sum_value nên chạy được trên cả hai backend.
+    """
+    try:
+        conn = db.get_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT COUNT(*), MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+        total_draws, max_dn = cur.fetchone()
+        total_draws = total_draws or 0
+        max_dn      = max_dn or 0
+
+        cur.execute(
+            "SELECT sum_value, COUNT(*), MAX(draw_number) FROM draw_history "
+            "WHERE numbers IS NOT NULL AND sum_value BETWEEN 3 AND 18 "
+            "GROUP BY sum_value"
+        )
+        agg = {int(s): (int(k), int(dn)) for s, k, dn in cur.fetchall()}
+        conn.close()
+
+        # số cách tạo ra mỗi tổng trong 216 khả năng — để đối chiếu lý thuyết
+        WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
+                11:27, 12:25, 13:21, 14:15, 15:10, 16:6, 17:3, 18:1}
+
+        out = []
+        for s in range(3, 19):
+            k, lastdn = agg.get(s, (0, None))
+            out.append({
+                'sum':          s,
+                'count':        k,
+                'avg_gap':      round(total_draws / k) if k else None,
+                'avg_gap_ly_thuyet': round(216 / WAYS[s]),
+                'current_gap':  (max_dn - lastdn) if lastdn else None,
+                'size':         'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON'),
+            })
+        return jsonify({'total_draws': total_draws, 'sums': out})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/cold-streaks')
 def cold_streaks():
     """Kỳ chưa ra cho số 1-6 và tất cả bộ 3 số (sorted combo)."""

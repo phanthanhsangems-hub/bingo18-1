@@ -550,6 +550,63 @@ async function loadBetSignal() {
 
 // ── refresh orchestration ─────────────────────────────────────
 function safe(fn) { return fn().catch(err => console.warn(fn.name, err)); }
+// ── P185: Thống kê bộ 3 số trùng nhau ────────────────────────
+async function loadTripleStats() {
+  const d = await J('/api/triple-stats');
+  const rows = d.triples || [];
+  if (!rows.length) return;
+  const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
+
+  // Ô "chưa về" tô đậm dần theo mức vượt trung bình
+  const cell = r => {
+    if (r.current_gap == null || !r.avg_gap) return '<td class="num ta-r">—</td>';
+    const ratio = r.current_gap / r.avg_gap;
+    const cls = ratio >= 1.5 ? ' overdue-hi' : ratio >= 1 ? ' overdue' : '';
+    return `<td class="num ta-r${cls}">${fmt(r.current_gap)}</td>`;
+  };
+
+  const line = (r, isAny) => `<tr${isAny ? ' class="tr-any"' : ''}>
+      <td>${isAny ? '<span class="tr-any-lbl">Bất kỳ trip nào</span>'
+                  : miniDice(r.combo.split('').map(Number))}</td>
+      <td class="num ta-r">${fmt(r.count)}</td>
+      <td class="num ta-r">${fmt(r.avg_gap)}</td>
+      ${cell(r)}
+    </tr>`;
+
+  $('tr-body').innerHTML = rows.map(r => line(r, false)).join('')
+                         + (d.any ? line(d.any, true) : '');
+  $('tr-sub').textContent =
+    `${fmt(d.total_draws)} kỳ · trung bình = tổng số kỳ ÷ số lần về`;
+  $('tr-note').textContent =
+    'Lý thuyết: mỗi trip cụ thể 1 lần/216 kỳ, bất kỳ trip nào 1 lần/36 kỳ. '
+    + 'Ô "chưa về" đậm khi đã vượt mức trung bình.';
+}
+
+// ── P185: Thống kê theo tổng ─────────────────────────────────
+async function loadSumStats() {
+  const d = await J('/api/sum-stats');
+  const by = {};
+  (d.sums || []).forEach(s => { by[s.sum] = s; });
+  if (!Object.keys(by).length) return;
+  const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
+
+  const half = s => {
+    if (!s) return '<td></td><td></td><td></td>';
+    const ratio = (s.current_gap != null && s.avg_gap) ? s.current_gap / s.avg_gap : 0;
+    const cls = ratio >= 1.5 ? ' overdue-hi' : ratio >= 1 ? ' overdue' : '';
+    return `<td><span class="ss-sum ${s.size}">${s.sum}</span></td>`
+         + `<td class="num ta-r">${fmt(s.avg_gap)}</td>`
+         + `<td class="num ta-r${cls}">${fmt(s.current_gap)}</td>`;
+  };
+
+  // 3↔18, 4↔17, … — mỗi hàng là một cặp có xác suất lý thuyết bằng nhau
+  let html = '';
+  for (let lo = 3; lo <= 10; lo++) {
+    html += `<tr>${half(by[lo])}<td class="ss-gap"></td>${half(by[21 - lo])}</tr>`;
+  }
+  $('ss-body').innerHTML = html;
+}
+
 function refreshAll() {
   safe(loadHero);
   safe(loadRecent).then(() => safe(loadWatchPairs));
@@ -563,6 +620,11 @@ function refreshAll() {
 }
 refreshAll();
 safe(loadTrend);                       // trend đổi chậm — tải 1 lần + mỗi 10 phút
+// P185: thống kê toàn lịch sử, đổi rất chậm — 5 phút một lần là thừa đủ
+// (server cũng cache 300s nên gọi dày hơn cũng không có dữ liệu mới)
+safe(loadTripleStats);
+safe(loadSumStats);
 setInterval(refreshAll, 60000);
 setInterval(() => safe(loadTrend), 600000);
+setInterval(() => { safe(loadTripleStats); safe(loadSumStats); }, 300000);
 connectSSE();
