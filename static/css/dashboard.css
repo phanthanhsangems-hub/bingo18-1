@@ -340,3 +340,30 @@ svg text{font-family:inherit}
 /* footer */
 .foot{margin-top:32px;text-align:center;font-size:12px;color:var(--muted)}
 .foot b{color:var(--ink)}
+
+/* ── P185: thống kê trip + tổng ─────────────────────────────── */
+.ta-r{text-align:right}
+.log-table th.ta-r{text-align:right}
+
+/* "chưa về" đã vượt mức trung bình → nổi dần lên */
+.overdue{color:var(--amber);font-weight:600}
+.overdue-hi{color:var(--loss);font-weight:700}
+
+/* hàng gộp "bất kỳ trip nào" */
+.tr-any td{border-top:1px solid var(--line);background:var(--card2)}
+.tr-any-lbl{
+  font-size:12px;font-weight:600;color:var(--muted);
+  letter-spacing:.02em;
+}
+
+/* bảng tổng: hai cột ghép cặp đối xứng */
+.ss-gap{width:22px;border-bottom:none !important}
+.ss-sum{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:26px;height:24px;padding:0 6px;border-radius:5px;
+  font-weight:700;font-size:12.5px;
+  font-variant-numeric:tabular-nums;
+}
+.ss-sum.NHO{background:var(--jade-soft);color:var(--jade)}
+.ss-sum.HOA{background:var(--amber-soft);color:var(--amber)}
+.ss-sum.LON{background:var(--plum-soft);color:var(--plum)}
