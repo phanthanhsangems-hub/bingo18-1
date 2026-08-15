@@ -416,22 +416,13 @@ async function loadTodayCombos() {
     miniDice(c.combo) + `</span>`).join('');
 }
 
-// ── Cold combos (đồng thời cấp gap từng số cho card nóng/lạnh) ─
-async function loadColdCombos() {
+// ── P186: nạp số kỳ vắng mặt của từng số 1-6 cho card nóng/lạnh.
+// Thẻ "Bộ 3 lạnh nhất" đã bỏ, nhưng cùng endpoint này vẫn cấp _numGaps
+// nên giữ lại phần nạp, chỉ bỏ phần vẽ.
+async function loadNumberGaps() {
   const d = await J('/api/cold-streaks');
   _numGaps = d.numbers || {};
   loadHotCold().catch(() => {});   // vẽ lại card số nóng/lạnh kèm gap
-  const combos = (d.combos || []).slice(0, 6);
-  if (!combos.length) return;
-  const maxGap = combos[0].streak || 1;
-  $('cold-list').innerHTML = combos.map(r => {
-    const nums = String(r.combo).split('').map(Number);
-    return `<div class="cold-row">
-      ${miniDice(nums)}
-      <div class="cold-track"><i style="width:${Math.max(4, r.streak / maxGap * 100)}%"></i></div>
-      <span class="cold-n num">${r.streak.toLocaleString('vi-VN')} <small>kỳ</small></span>
-    </div>`;
-  }).join('');
 }
 
 // ── Alerts ────────────────────────────────────────────────────
@@ -614,7 +605,7 @@ function refreshAll() {
   safe(loadSizeDist);
   safe(loadTodayCombos);
   safe(loadHotCold);
-  safe(loadColdCombos);
+  safe(loadNumberGaps);
   safe(loadAlerts);
   safe(loadBetSignal);
 }
