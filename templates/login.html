@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Đăng nhập · Bingo18</title>
+<meta name="theme-color" content="#C8322B">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<style>
+:root{
+  --bg:#F0EDE9; --card:#FFFFFF; --edge:#DFD8D0;
+  --ink:#17191C; --ink-2:#6E665F;
+  --accent:#C8322B; --accent-ink:#FFFFFF;
+  --err-bg:#F7DEDC; --err-ink:#9B2C25;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#141619; --card:#1D2024; --edge:#2E3238;
+    --ink:#E9E6E2; --ink-2:#A29A93;
+    --accent:#E2665C; --accent-ink:#141619;
+    --err-bg:#3A2320; --err-ink:#F0A49D;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141619; --card:#1D2024; --edge:#2E3238;
+  --ink:#E9E6E2; --ink-2:#A29A93;
+  --accent:#E2665C; --accent-ink:#141619;
+  --err-bg:#3A2320; --err-ink:#F0A49D;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; min-height:100vh;
+  background:var(--bg); color:var(--ink);
+  font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:flex; align-items:center; justify-content:center;
+  padding:1.25rem;
+  -webkit-text-size-adjust:100%;
+}
+.box{
+  width:100%; max-width:22rem;
+  background:var(--card);
+  border:1px solid var(--edge);
+  border-radius:4px;
+  padding:1.9rem 1.5rem 1.6rem;
+  display:flex; flex-direction:column; gap:1.15rem;
+}
+.brand{display:flex; align-items:center; gap:.65rem}
+.die{
+  width:34px; height:34px; border-radius:7px;
+  background:var(--accent); position:relative; flex-shrink:0;
+}
+.die::before,.die::after{
+  content:""; position:absolute; width:6px; height:6px; border-radius:50%;
+  background:var(--accent-ink);
+}
+.die::before{top:8px; left:8px}
+.die::after{bottom:8px; right:8px}
+.name{font-size:1.12rem; font-weight:700; letter-spacing:-.01em}
+.name em{font-style:normal; color:var(--accent)}
+.sub{margin:0; color:var(--ink-2); font-size:.88rem}
+form{display:flex; flex-direction:column; gap:.85rem}
+label{display:flex; flex-direction:column; gap:.35rem; font-size:.8rem; color:var(--ink-2)}
+input{
+  font:inherit; font-size:1rem;
+  padding:.68rem .75rem;
+  border:1px solid var(--edge); border-radius:3px;
+  background:var(--bg); color:var(--ink);
+  width:100%;
+}
+input:focus{outline:2px solid var(--accent); outline-offset:1px; border-color:transparent}
+button{
+  font:inherit; font-size:.98rem; font-weight:600;
+  padding:.72rem; margin-top:.2rem;
+  border:none; border-radius:3px; cursor:pointer;
+  background:var(--accent); color:var(--accent-ink);
+}
+button:hover{filter:brightness(1.07)}
+button:focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+.err{
+  background:var(--err-bg); color:var(--err-ink);
+  padding:.6rem .75rem; border-radius:3px;
+  font-size:.88rem; margin:0;
+}
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="brand">
+      <div class="die"></div>
+      <div>
+        <div class="name">BINGO<em>18</em></div>
+        <p class="sub">Sạp số · AI dự đoán</p>
+      </div>
+    </div>
+
+    {% if err %}<p class="err">{{ err }}</p>{% endif %}
+
+    <form method="post" autocomplete="on">
+      <label>Tên đăng nhập
+        <input name="user" type="text" autocomplete="username"
+               autocapitalize="none" autocorrect="off" required autofocus>
+      </label>
+      <label>Mật khẩu
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Đăng nhập</button>
+    </form>
+  </div>
+</body>
+</html>

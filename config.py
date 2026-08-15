@@ -15,6 +15,24 @@ TELEGRAM_WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 # ── Admin ────────────────────────────────────────────────────
 ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "")  # REQUIRED: set in env
 
+# ── P183: Đăng nhập dashboard (TÙY CHỌN) ─────────────────────
+# Để trống CẢ HAI thì không có đăng nhập — giữ nguyên hành vi cũ, không
+# ai bị khoá ngoài. Chỉ khi đặt đủ APP_USER + (APP_PASSWORD hoặc
+# APP_PASSWORD_HASH) thì cổng mới bật.
+#
+# Cách đơn giản  : đặt APP_PASSWORD = mật khẩu thật
+# Cách an toàn hơn: đặt APP_PASSWORD_HASH = chuỗi sinh bởi
+#                   scripts/tao_mat_khau.py (mật khẩu không nằm trong env)
+APP_USER          = os.environ.get("APP_USER", "")
+APP_PASSWORD      = os.environ.get("APP_PASSWORD", "")
+APP_PASSWORD_HASH = os.environ.get("APP_PASSWORD_HASH", "")
+
+# Khoá ký cookie phiên. Phải ỔN ĐỊNH giữa các lần deploy, nếu không thì
+# mỗi lần deploy là mọi người bị đăng xuất. Không đặt thì suy ra từ các
+# secret sẵn có (cũng ổn định), cuối cùng mới random cho môi trường dev.
+FLASK_SECRET_KEY  = os.environ.get("FLASK_SECRET_KEY", "")
+SESSION_DAYS      = int(os.environ.get("SESSION_DAYS", "30"))
+
 # ── PostgreSQL (Supabase) ─────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
