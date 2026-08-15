@@ -359,3 +359,32 @@ svg text{font-family:inherit}
 .ss-sum.NHO{background:var(--jade-soft);color:var(--jade)}
 .ss-sum.HOA{background:var(--amber-soft);color:var(--amber)}
 .ss-sum.LON{background:var(--plum-soft);color:var(--plum)}
+
+/* ── P187: lưới chi tiết ───────────────────────────────────── */
+.dg-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-height:520px;overflow-y:auto}
+.dg{width:100%;border-collapse:collapse;font-size:13px}
+.dg th,.dg td{border:1px solid var(--line);padding:0;text-align:center;height:34px}
+.dg thead th{
+  position:sticky;top:0;z-index:2;background:var(--card);
+  padding:6px 4px;font-weight:600;color:var(--muted);font-size:11.5px;
+}
+.dg-h{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:50%;color:#fff;font-weight:700;font-size:12.5px;
+}
+.dg td.dg-ky{
+  padding:0 8px;text-align:left;white-space:nowrap;
+  font-size:11.5px;color:var(--muted);
+}
+.dg td.dg-t{
+  padding:0 8px;font-weight:700;font-size:13.5px;
+  font-variant-numeric:tabular-nums;min-width:44px;
+}
+.dg td.dg-t.NHO{color:var(--muted)}
+.dg td.dg-t.HOA{color:var(--amber)}
+.dg td.dg-t.LON{color:var(--ink)}
+.dg-c{
+  display:flex;align-items:center;justify-content:center;gap:3px;
+  width:100%;height:100%;min-height:32px;
+}
+.dg-c i{width:7px;height:7px;border-radius:50%;background:#fff;display:block}

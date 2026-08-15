@@ -541,6 +541,37 @@ async function loadBetSignal() {
 
 // ── refresh orchestration ─────────────────────────────────────
 function safe(fn) { return fn().catch(err => console.warn(fn.name, err)); }
+// ── P187: Lưới chi tiết — hàng = kỳ, cột = số 1..6 ───────────
+async function loadDrawGrid() {
+  const d = await J('/api/draw-grid?n=24');
+  const rows = d.draws || [];
+  if (!rows.length) return;
+
+  $('dg-body').innerHTML = rows.map(r => {
+    const cells = r.counts.map((c, i) => {
+      if (!c) return '<td></td>';
+      const dots = '<i></i>'.repeat(c);
+      return `<td><span class="dg-c" style="background:var(--n${i + 1})">${dots}</span></td>`;
+    }).join('');
+    return `<tr>
+      <td class="dg-ky mono">#${r.draw_number}</td>
+      ${cells}
+      <td class="dg-t num ${r.size}">${r.sum}</td>
+    </tr>`;
+  }).join('');
+
+  // Tần suất từng số trong đúng cửa sổ đang hiển thị + ngưỡng nhiễu
+  const tot = rows.length * 3;
+  const cnt = [0, 0, 0, 0, 0, 0];
+  rows.forEach(r => r.counts.forEach((c, i) => { cnt[i] += c; }));
+  const exp = tot / 6;
+  const sd  = Math.sqrt(tot * (1 / 6) * (5 / 6));
+  const freq = cnt.map((c, i) => `<b style="color:var(--n${i + 1})">${i + 1}</b>:${c}`).join(' · ');
+  $('dg-foot').innerHTML =
+    `${rows.length} kỳ gần nhất · ${freq} — kỳ vọng ${exp.toFixed(1)} ± ${sd.toFixed(1)} mỗi số. `
+    + `Chênh lệch dưới ${(2 * sd).toFixed(0)} lần là dao động bình thường.`;
+}
+
 // ── P185: Thống kê bộ 3 số trùng nhau ────────────────────────
 async function loadTripleStats() {
   const d = await J('/api/triple-stats');
@@ -601,6 +632,7 @@ async function loadSumStats() {
 function refreshAll() {
   safe(loadHero);
   safe(loadRecent).then(() => safe(loadWatchPairs));
+  safe(loadDrawGrid);
   safe(loadTiles);
   safe(loadSizeDist);
   safe(loadTodayCombos);
