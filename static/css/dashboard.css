@@ -210,8 +210,7 @@ button{font:inherit;cursor:pointer}
 
 /* ═══ CARDS / GRID ═══ */
 .grid2{display:grid;grid-template-columns:3fr 2fr;gap:16px;margin-top:16px}
-.grid2.even{grid-template-columns:1fr 1fr}
-@media (max-width:820px){.grid2,.grid2.even{grid-template-columns:1fr}}
+@media (max-width:820px){.grid2{grid-template-columns:1fr}}
 .card{background:var(--card);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:20px 22px}
 .card h2{margin:0 0 3px;font-size:16px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
 .card .sub{font-size:12px;color:var(--muted);margin:0 0 14px}
@@ -277,13 +276,6 @@ svg text{font-family:inherit}
 .combo-chip.not-yet{opacity:.62;background:transparent}
 .combo-chip.not-yet .mini-die{filter:grayscale(.35)}
 
-/* cold combos */
-.cold-list{display:flex;flex-direction:column;gap:10px}
-.cold-row{display:flex;align-items:center;gap:12px}
-.cold-track{flex:1;height:8px;border-radius:5px;background:var(--card2);overflow:hidden}
-.cold-track i{display:block;height:100%;border-radius:5px;background:var(--plum)}
-.cold-n{font-size:12.5px;font-weight:700;width:80px;text-align:right;flex:none}
-.cold-n small{color:var(--muted);font-weight:500}
 
 /* alerts */
 .alerts{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto}
