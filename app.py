@@ -2121,6 +2121,47 @@ def get_number_frequency():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/draw-grid')
+@limiter.limit("30 per minute")
+def draw_grid():
+    """P187: lưới chi tiết — mỗi hàng một kỳ, mỗi cột một số 1-6.
+
+    Ô cho biết số đó xuất hiện MẤY LẦN trong kỳ (0, 1 hoặc 2, 3 nếu trip).
+    Kèm tổng và SIZE để tô màu.
+    """
+    import ast as _ast
+    try:
+        n = max(5, min(int(request.args.get('n', 24)), 100))
+        conn = db.get_connection()
+        cur  = conn.cursor()
+        ph   = '%s' if USE_POSTGRES else '?'
+        cur.execute(
+            "SELECT draw_number, numbers, draw_time FROM draw_history "
+            f"WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT {ph}", (n,))
+        rows = cur.fetchall()
+        conn.close()
+
+        out = []
+        for dn, raw, dt in rows:
+            try:
+                ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
+                ns = [int(x) for x in ns]
+            except Exception:
+                continue
+            s = sum(ns)
+            out.append({
+                'draw_number': dn,
+                'numbers':     sorted(ns),
+                'counts':      [ns.count(k) for k in range(1, 7)],
+                'sum':         s,
+                'size':        'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON'),
+                'time':        str(dt)[11:16] if dt else '',
+            })
+        return jsonify({'draws': out, 'n': len(out)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/triple-stats')
 @cache_resp(300)
 @limiter.limit("30 per minute")
