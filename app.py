@@ -506,8 +506,28 @@ _PUBLIC_PATHS = {
 }
 
 
+# P189: các endpoint Cloud Scheduler gọi theo lịch mà TRƯỚC P183 vốn không
+# hề có xác thực nào. Bật đăng nhập đã vô tình chặn luôn chúng — vòng dự
+# đoán 6 phút và báo cáo cuối ngày 23:55 chết im lặng (401), không có log
+# lỗi nào ở phía người dùng vì Cloud Scheduler không báo về đâu cả.
+#
+# Ba path này giữ nguyên trạng thái công khai như trước P183 — không phải
+# nới lỏng bảo mật, mà là khôi phục đúng hành vi cũ. Mục tiêu của P183 là
+# che dashboard khỏi người lạ, không phải khoá tự động hoá.
+#
+# Muốn siết chặt về sau: thêm header X-Trigger-Secret vào job Cloud
+# Scheduler tương ứng (gcloud scheduler jobs update http ...
+# --update-headers "X-Trigger-Secret=...") rồi bỏ path khỏi đây —
+# _machine_caller() sẽ cho qua. Job /api/sync-github đã làm đúng như vậy.
+_CRON_PATHS = {
+    '/api/predict',          # mỗi 6 phút — vòng dự đoán chính
+    '/api/fetch-latest',     # mỗi 6 phút — lấy kết quả Vietlott
+    '/api/daily-summary',    # 23:55 giờ VN — báo cáo cuối ngày
+}
+
+
 def _is_public_path(path: str) -> bool:
-    if path in _PUBLIC_PATHS:
+    if path in _PUBLIC_PATHS or path in _CRON_PATHS:
         return True
     if path.startswith('/static/'):
         return True
@@ -545,6 +565,16 @@ def _require_login():
     if _machine_caller():
         return None
     if request.path.startswith('/api/') or request.path.startswith('/telegram/'):
+        # P189: chặn một request KHÔNG phải trình duyệt thì gần như chắc là
+        # tự động hoá bị khoá nhầm — phải để lại vết trong log Cloud Run,
+        # vì Cloud Scheduler nuốt lỗi và không báo về đâu cả.
+        _ua = request.headers.get('User-Agent', '')
+        if not request.cookies and 'Mozilla' not in _ua:
+            logger.warning(
+                "Cong dang nhap chan request may-goi-may: %s (UA=%s) "
+                "-- neu day la cron job thi them X-Trigger-Secret hoac "
+                "them path vao _CRON_PATHS",
+                request.path, _ua[:80] or '?')
         return jsonify({'error': 'unauthorized', 'login': '/login'}), 401
     # full_path thêm '?' thừa khi không có query string
     return redirect(url_for('login_page', next=request.full_path.rstrip('?')))

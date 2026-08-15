@@ -14,7 +14,12 @@ Hệ thống ML dự đoán kết quả xổ số Bingo18 với real-time learni
 
 - Database: Supabase PostgreSQL (~64k draws, 30k+ predictions)
 - Backend: Flask Python 3.11 on Google Cloud Run (region asia-southeast1)
-- Scheduler: 3 Cloud Scheduler jobs (predict every 6min, sync-github daily, daily-summary 23:55)
+- Scheduler: Cloud Scheduler jobs (predict every 6min, sync-github daily, daily-summary 23:55, daily-summary-evening 22:05)
+- Login gate: `_require_login` in `app.py` runs on **every** request when `APP_USER` is set.
+  Machine callers get through only via `X-Trigger-Secret`/`X-Admin-Key` (`_machine_caller`)
+  or by being listed in `_PUBLIC_PATHS`/`_CRON_PATHS`. **Adding a new cron endpoint means
+  adding it to `_CRON_PATHS` or sending the secret** — otherwise it 401s silently and
+  Cloud Scheduler reports nothing.
 - Real-time sync: Local script `sync_to_supabase.py --mode watch` (Vietlott blocks Cloud Run IPs, so must run on user PC)
 - Notifications: Telegram bot
 - Dashboard: `templates/dashboard.html` served at `/`
