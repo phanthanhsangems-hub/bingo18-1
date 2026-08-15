@@ -12,10 +12,11 @@ if not os.environ.get('DATABASE_URL'):
         pass
 import requests
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from flask import (Flask, jsonify, request, send_from_directory, make_response,
-                   render_template, Response, stream_with_context)
+                   render_template, Response, stream_with_context,
+                   session, redirect, url_for)
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -30,6 +31,26 @@ app = Flask(__name__)
 # Restrict CORS: chỉ cho phép domain của bạn. Thay "*" bằng domain thật khi deploy.
 _CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 CORS(app, origins=_CORS_ORIGINS)
+
+# P183: khoá ký cookie phiên. Ưu tiên FLASK_SECRET_KEY; không có thì suy ra
+# từ các secret sẵn có — cũng ổn định giữa các lần deploy nên không ai bị
+# đăng xuất. Chỉ khi không có gì mới random (môi trường dev).
+import hmac as _hmac_mod, hashlib as _hashlib_mod, secrets as _secrets_mod
+hmac = _hmac_mod
+if config.FLASK_SECRET_KEY:
+    app.secret_key = config.FLASK_SECRET_KEY
+elif config.ADMIN_SECRET_KEY or config.TRIGGER_SECRET:
+    app.secret_key = _hashlib_mod.sha256(
+        ('bingo18-session|' + config.ADMIN_SECRET_KEY + '|' + config.TRIGGER_SECRET
+         ).encode()).hexdigest()
+else:
+    app.secret_key = _secrets_mod.token_hex(32)
+app.permanent_session_lifetime = timedelta(days=config.SESSION_DAYS)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=bool(config.DATABASE_URL),   # Cloud Run luôn HTTPS
+)
 db  = DatabaseManager()
 logger = logging.getLogger(__name__)
 
@@ -458,6 +479,111 @@ def handle_500(e):
     import traceback as _tb
     logger.error("Unhandled 500: %s\n%s", e, _tb.format_exc())
     return jsonify({"error": str(e), "type": type(e).__name__}), 500
+
+
+# ══════════════════════════════════════════════════════════════
+#  P183: Đăng nhập dashboard
+# ══════════════════════════════════════════════════════════════
+# Nguyên tắc: FAIL-OPEN. Chưa cấu hình đủ APP_USER + mật khẩu thì cổng
+# tắt hoàn toàn, không ai bị khoá ngoài. Chỉ bật khi người dùng chủ động
+# đặt env var.
+
+def _login_enabled() -> bool:
+    return bool(config.APP_USER and (config.APP_PASSWORD or config.APP_PASSWORD_HASH))
+
+
+# Đường dẫn LUÔN mở, kể cả khi đã bật đăng nhập:
+#   - trang/API đăng nhập
+#   - tài nguyên tĩnh (nếu chặn thì trang login mất CSS)
+#   - /api/health và /healthz: GitHub Actions ping warmup KHÔNG kèm secret
+#     (xem .github/workflows/sync-draws.yml, bước "Warmup Cloud Run")
+#   - /telegram/webhook: đã có kiểm tra secret riêng của Telegram
+_PUBLIC_PATHS = {
+    '/login', '/logout',
+    '/manifest.json', '/sw.js',
+    '/api/health', '/healthz',
+    '/telegram/webhook',
+}
+
+
+def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_PATHS:
+        return True
+    if path.startswith('/static/'):
+        return True
+    if path.startswith('/icon-') and path.endswith('.png'):
+        return True
+    return False
+
+
+def _machine_caller() -> bool:
+    """Máy gọi máy: Cloud Scheduler, GitHub Actions, script trên PC.
+
+    Chúng gửi secret qua header/query chứ không có cookie phiên, nên phải
+    cho qua — nếu không thì bật đăng nhập là chết toàn bộ tự động hoá.
+    """
+    ts = config.TRIGGER_SECRET
+    if ts and (request.headers.get('X-Trigger-Secret') == ts
+               or request.args.get('secret') == ts):
+        return True
+    ak = config.ADMIN_SECRET_KEY
+    if ak and request.headers.get('X-Admin-Key') == ak:
+        return True
+    return False
+
+
+@app.before_request
+def _require_login():
+    if not _login_enabled():
+        return None                       # chưa cấu hình → không chặn gì
+    if request.method == 'OPTIONS':
+        return None                       # CORS preflight
+    if _is_public_path(request.path):
+        return None
+    if session.get('uid') == config.APP_USER:
+        return None
+    if _machine_caller():
+        return None
+    if request.path.startswith('/api/') or request.path.startswith('/telegram/'):
+        return jsonify({'error': 'unauthorized', 'login': '/login'}), 401
+    # full_path thêm '?' thừa khi không có query string
+    return redirect(url_for('login_page', next=request.full_path.rstrip('?')))
+
+
+def _check_password(pw: str) -> bool:
+    if config.APP_PASSWORD_HASH:
+        from werkzeug.security import check_password_hash
+        return check_password_hash(config.APP_PASSWORD_HASH, pw)
+    return hmac.compare_digest(pw, config.APP_PASSWORD)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")           # chặn dò mật khẩu
+def login_page():
+    if not _login_enabled():
+        return redirect('/')
+    err = ''
+    if request.method == 'POST':
+        u = (request.form.get('user') or '').strip()
+        p = request.form.get('password') or ''
+        if hmac.compare_digest(u, config.APP_USER) and _check_password(p):
+            session.permanent = True
+            session['uid'] = config.APP_USER
+            nxt = request.args.get('next') or '/'
+            if not nxt.startswith('/') or nxt.startswith('//'):
+                nxt = '/'                 # chặn open-redirect
+            return redirect(nxt)
+        err = 'Sai tên đăng nhập hoặc mật khẩu.'
+        logger.warning("Dang nhap that bai tu %s", request.headers.get('X-Forwarded-For', '?'))
+    resp = make_response(render_template('login.html', err=err))
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+@app.route('/logout')
+def logout_page():
+    session.clear()
+    return redirect('/login')
 
 
 def _trigger_authorized() -> bool:
