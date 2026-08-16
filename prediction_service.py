@@ -445,6 +445,14 @@ class AlertManager:
     _RETENTION_DAYS = 90
     _PRUNE_ODDS     = 200
 
+    # P190: vài alert_key KHÔNG phải log xoay vòng mà là cờ một-lần-duy-nhất
+    # — app.py dùng chính sự tồn tại của dòng đó để biết "đã gửi rồi, đừng
+    # gửi nữa". Dọn 90 ngày xoá mất cờ thì alert bắn lại, rồi ghi cờ mới,
+    # rồi 90 ngày sau lại bắn — lặp vô hạn. Giữ vĩnh viễn các key này.
+    # Đồng bộ với app.py:_CHECKPOINT_ALERT_KEY (chỗ duy nhất dedup kiểu
+    # "SELECT 1 FROM alert_log WHERE alert_key = ...").
+    _PERMANENT_KEYS = ('checkpoint_200_reached',)
+
     def __init__(self):
         self._last: dict = {}  # {key: last_fired_ts}
         # gunicorn chạy --threads 8 nên fire() bị nhiều thread gọi song song;
@@ -482,12 +490,15 @@ class AlertManager:
                     (key, message or '', _json.dumps(metadata) if metadata else None)
                 )
                 if _random.randrange(self._PRUNE_ODDS) == 0:
+                    keep = ','.join([ph] * len(self._PERMANENT_KEYS))
                     cur.execute(
-                        "DELETE FROM alert_log WHERE fired_at < NOW() - INTERVAL '%s days'"
-                        % self._RETENTION_DAYS
-                        if USE_POSTGRES else
-                        "DELETE FROM alert_log WHERE fired_at < datetime('now', '-%d days')"
-                        % self._RETENTION_DAYS
+                        ("DELETE FROM alert_log WHERE fired_at < NOW() - INTERVAL '%s days'"
+                         % self._RETENTION_DAYS
+                         if USE_POSTGRES else
+                         "DELETE FROM alert_log WHERE fired_at < datetime('now', '-%d days')"
+                         % self._RETENTION_DAYS)
+                        + f" AND alert_key NOT IN ({keep})",
+                        tuple(self._PERMANENT_KEYS)
                     )
                 conn.commit()
             finally:
