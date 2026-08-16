@@ -147,6 +147,9 @@ _triple_drought_notified_gap: int = 0  # gap lúc gửi alert gần nhất (rese
 _CHECKPOINT_TS = '2026-05-15 16:15:00'
 _CHECKPOINT_N  = 200
 _CHECKPOINT_ALERT_KEY = 'checkpoint_200_reached'
+# Cờ một-lần-duy-nhất: dòng alert_log mang key này CHÍNH LÀ dấu "đã gửi rồi".
+# Nó phải nằm trong AlertManager._PERMANENT_KEYS (prediction_service.py), nếu
+# không thì dọn 90 ngày sẽ xoá cờ và alert bắn lại mỗi 90 ngày — xem P190.
 _checkpoint_last_draw: int = -1   # skip duplicate queries for same draw
 
 
