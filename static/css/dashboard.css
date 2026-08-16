@@ -348,6 +348,14 @@ svg text{font-family:inherit}
   letter-spacing:.02em;
 }
 
+/* P191: hàng "trip gần nhất" — chỉ đích danh bộ vừa ra */
+.tr-last td{background:var(--card2);border-bottom:none}
+.tr-last-txt{
+  font-size:12px;color:var(--muted);letter-spacing:.02em;
+  text-align:left;
+}
+.tr-last-txt b{color:var(--ink)}
+
 /* bảng tổng: hai cột ghép cặp đối xứng */
 .ss-gap{width:22px;border-bottom:none !important}
 .ss-sum{
