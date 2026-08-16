@@ -2261,6 +2261,7 @@ def triple_stats():
         cnt  = {n: 0 for n in range(1, 7)}
         last = {n: None for n in range(1, 7)}
         any_cnt, any_last = 0, None
+        any_last_n = None          # P191: trip gần nhất là bộ nào
         for dn, raw in rows:
             try:
                 ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
@@ -2272,6 +2273,8 @@ def triple_stats():
                 last[a]  = dn
                 any_cnt += 1
                 any_last = dn
+                any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
+                                   # lặp là trip mới nhất
 
         def _row(label, k, lastdn):
             return {
@@ -2282,10 +2285,15 @@ def triple_stats():
                 'last_draw':   lastdn,
             }
 
+        any_row = _row('***', any_cnt, any_last)
+        # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không
+        # nói bộ nào vừa ra — trả thêm để giao diện hiện được.
+        any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
+
         return jsonify({
             'total_draws': total_draws,
             'triples':     [_row(str(n) * 3, cnt[n], last[n]) for n in range(1, 7)],
-            'any':         _row('***', any_cnt, any_last),
+            'any':         any_row,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

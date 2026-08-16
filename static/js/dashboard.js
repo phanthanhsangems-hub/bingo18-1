@@ -603,8 +603,23 @@ async function loadTripleStats() {
       ${cell(r)}
     </tr>`;
 
+  // P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
+  // bộ nào vừa ra — thêm một hàng chỉ đích danh trip gần nhất.
+  const lastLine = () => {
+    const a = d.any;
+    if (!a || !a.last_combo || a.last_draw == null) return '';
+    const gap = a.current_gap;
+    const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
+    return `<tr class="tr-last">
+      <td>${miniDice(a.last_combo.split('').map(Number))}</td>
+      <td colspan="3" class="tr-last-txt">Trip gần nhất
+        · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
+    </tr>`;
+  };
+
   $('tr-body').innerHTML = rows.map(r => line(r, false)).join('')
-                         + (d.any ? line(d.any, true) : '');
+                         + (d.any ? line(d.any, true) : '')
+                         + lastLine();
   $('tr-sub').textContent =
     `${fmt(d.total_draws)} kỳ · trung bình = tổng số kỳ ÷ số lần về`;
   $('tr-note').textContent =
