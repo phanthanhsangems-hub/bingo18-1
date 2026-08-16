@@ -18,6 +18,17 @@ import os
 import sys
 import time
 
+# P192: script này KHÔNG tự nạp .env như app.py vẫn làm. Chạy trên PC mà
+# thiếu DATABASE_URL thì database.py rơi về SQLite cục bộ — script vẫn báo
+# "thành công" nhưng ghi vào data/bingo18.db chứ không phải Supabase, tức
+# im lặng làm sai. Nạp .env giống hệt app.py:6-12.
+if not os.environ.get('DATABASE_URL'):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -206,7 +217,29 @@ def main():
                         help="Log tiến độ mỗi N kỳ (mặc định: 50)")
     parser.add_argument("--min-draw", type=int, default=0,
                         help="Chỉ xử lý draw_number >= giá trị này (mặc định: 0 = tất cả)")
+    parser.add_argument("--local", action="store_true",
+                        help="Cho phép ghi vào SQLite cục bộ (mặc định chỉ chạy với Postgres)")
     args = parser.parse_args()
+
+    # P192: nói rõ sắp ghi vào ĐÂU trước khi ghi. Trước đây thiếu .env là
+    # rơi về SQLite mà không báo gì — chạy xong tưởng đã bù cho Supabase.
+    from database import USE_POSTGRES
+    if USE_POSTGRES:
+        import config
+        host = config.DATABASE_URL.split('@')[-1].split('/')[0] if '@' in config.DATABASE_URL else '?'
+        logger.info("Đích ghi: PostgreSQL @ %s", host)
+    else:
+        logger.warning("Đích ghi: SQLite cục bộ (KHÔNG có DATABASE_URL)")
+        if not args.local:
+            logger.error(
+                "Dừng lại. Không thấy DATABASE_URL nên script sẽ ghi vào "
+                "data/bingo18.db chứ không phải Supabase.\n"
+                "  - Muốn bù cho Supabase: kiểm tra file .env có DATABASE_URL, "
+                "chạy đúng thư mục dự án.\n"
+                "  - Thật sự muốn ghi vào SQLite cục bộ: thêm cờ --local."
+            )
+            sys.exit(2)
+
     run(limit=args.limit, dry_run=args.dry_run, batch_size=args.batch, min_draw=args.min_draw)
 
 
