@@ -1,0 +1,55 @@
+name: Diagnose Cloud Run
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Service description
+        run: |
+          echo "===== SERVICE ====="
+          gcloud run services describe bingo18 \
+            --region asia-southeast1 --project bingo18-predictor \
+            --format="yaml(status.url, status.address, status.traffic, spec.template.spec.containers[0].image, metadata.annotations)" || true
+          echo
+          echo "===== INGRESS / IAM ====="
+          gcloud run services describe bingo18 \
+            --region asia-southeast1 --project bingo18-predictor \
+            --format="value(metadata.annotations['run.googleapis.com/ingress'])" || true
+          gcloud run services get-iam-policy bingo18 \
+            --region asia-southeast1 --project bingo18-predictor --format=yaml || true
+
+      - name: Revisions
+        run: |
+          echo "===== REVISIONS ====="
+          gcloud run revisions list --service bingo18 \
+            --region asia-southeast1 --project bingo18-predictor \
+            --format="table(metadata.name, status.conditions[0].type, status.conditions[0].status, status.conditions[0].message)" \
+            --limit 5 || true
+
+      - name: Container logs
+        run: |
+          echo "===== LOG CONTAINER 30 PHUT QUA ====="
+          gcloud logging read \
+            'resource.type="cloud_run_revision" AND resource.labels.service_name="bingo18" AND severity>=DEFAULT' \
+            --project bingo18-predictor --limit 60 --freshness 30m \
+            --format="value(timestamp, severity, textPayload)" || true
+
+      - name: Probe from inside GitHub runner
+        run: |
+          for p in /healthz /api/health / ; do
+            echo "--- $p ---"
+            curl -s -i --max-time 25 "https://bingo18-633959711537.asia-southeast1.run.app$p" | head -12
+            echo
+          done
