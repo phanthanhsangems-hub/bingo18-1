@@ -66,3 +66,28 @@ jobs:
             --region asia-southeast1 \
             --project bingo18-predictor \
             --quiet
+
+      # P199: gcloud run deploy chỉ kiểm tra có tiến trình lắng nghe cổng.
+      # gunicorn master bind cổng TRƯỚC khi worker import app, nên app hỏng
+      # hoàn toàn vẫn qua được bước deploy — đúng như P195: deploy báo
+      # success ba lần liên tiếp trong khi app trả 503 cho mọi request.
+      #
+      # Bước này gọi thật /healthz và đòi thân phản hồi là JSON có khoá
+      # "status". Container chết thì Cloud Run trả text "Service Unavailable"
+      # (không phải JSON) -> workflow đỏ, không im lặng nữa.
+      - name: Smoke test — app phải thật sự phục vụ được
+        run: |
+          URL="https://bingo18-633959711537.asia-southeast1.run.app/healthz"
+          for i in $(seq 1 10); do
+            BODY=$(curl -s --max-time 30 "$URL" || echo '')
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)
+            if echo "$BODY" | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if "status" in d else 1)' 2>/dev/null; then
+              echo "OK [$i/10] HTTP $CODE — Flask đã chạy, thân phản hồi: $BODY"
+              exit 0
+            fi
+            echo "  [$i/10] HTTP $CODE — chưa phải JSON của app: $(echo "$BODY" | head -c 80)"
+            sleep 15
+          done
+          echo "THẤT BẠI: sau 10 lần thử app vẫn không trả JSON hợp lệ."
+          echo "Container nhiều khả năng không import được — xem log Cloud Run."
+          exit 1
