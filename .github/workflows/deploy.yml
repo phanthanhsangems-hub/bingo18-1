@@ -75,9 +75,14 @@ jobs:
       # Bước này gọi thật /healthz và đòi thân phản hồi là JSON có khoá
       # "status". Container chết thì Cloud Run trả text "Service Unavailable"
       # (không phải JSON) -> workflow đỏ, không im lặng nữa.
+      # P200: dùng /api/health, KHÔNG dùng /healthz. Đo thực tế cho thấy
+      # /healthz bị trả lời ở tầng biên của Google (404, không có header
+      # x-cloud-trace-context lẫn "server: Google Frontend") nên không bao
+      # giờ tới container — smoke test đầu tiên vì thế báo động giả trong
+      # khi app hoàn toàn khoẻ. /api/health đi đúng vào Flask.
       - name: Smoke test — app phải thật sự phục vụ được
         run: |
-          URL="https://bingo18-633959711537.asia-southeast1.run.app/healthz"
+          URL="https://bingo18-633959711537.asia-southeast1.run.app/api/health"
           for i in $(seq 1 10); do
             BODY=$(curl -s --max-time 30 "$URL" || echo '')
             CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)

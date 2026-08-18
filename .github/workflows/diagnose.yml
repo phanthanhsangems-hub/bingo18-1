@@ -38,7 +38,10 @@ jobs:
             --format="table(metadata.name, status.conditions[0].type, status.conditions[0].status, status.conditions[0].message)" \
             --limit 5 || true
 
-      - name: Container logs
+      # Service account github-deploy hiện KHÔNG có roles/logging.viewer nên
+      # bước này báo PERMISSION_DENIED. Giữ lại vì hữu ích nếu sau này cấp
+      # quyền; || true để không làm hỏng cả job chẩn đoán.
+      - name: Container logs (cần roles/logging.viewer)
         run: |
           echo "===== LOG CONTAINER 30 PHUT QUA ====="
           gcloud logging read \
