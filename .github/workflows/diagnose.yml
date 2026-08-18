@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -56,3 +59,38 @@ jobs:
             curl -s -i --max-time 25 "https://bingo18-633959711537.asia-southeast1.run.app$p" | head -12
             echo
           done
+
+      # Quét toàn bộ endpoint CHỈ ĐỌC trên Postgres thật. Đây là thứ không
+      # làm được từ máy dev: local chạy SQLite qua lớp dịch, nên SQL Postgres
+      # gốc chưa bao giờ được kiểm chứng trên đúng backend nó sẽ chạy.
+      #
+      # Danh sách trong scripts/endpoints_readonly.txt đã loại 12 endpoint có
+      # tác dụng phụ (gửi Telegram, ghi DB, chạy prediction cycle).
+      # Giới hạn tổng của app là 200 req/phút; nghỉ 0,7s giữa các lần gọi.
+      - name: Quét endpoint chỉ đọc trên production
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          PASS=0; FAIL=0
+          : > /tmp/fail.txt
+          while read -r p; do
+            [ -z "$p" ] && continue
+            CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
+                   -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p" || echo 000)
+            case "$CODE" in
+              2*|3*|4*) PASS=$((PASS+1)) ;;
+              *) FAIL=$((FAIL+1)); echo "$CODE $p :: $(head -c 160 /tmp/body)" >> /tmp/fail.txt ;;
+            esac
+            sleep 0.7
+          done < scripts/endpoints_readonly.txt
+          echo "================================================"
+          echo "  Khong loi 5xx : $PASS"
+          echo "  Loi 5xx       : $FAIL"
+          echo "================================================"
+          if [ "$FAIL" -gt 0 ]; then
+            echo "--- CHI TIET LOI 5xx ---"
+            cat /tmp/fail.txt
+            exit 1
+          fi
+          echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
