@@ -67,6 +67,10 @@ jobs:
       # Danh sách trong scripts/endpoints_readonly.txt đã loại 12 endpoint có
       # tác dụng phụ (gửi Telegram, ghi DB, chạy prediction cycle).
       # Giới hạn tổng của app là 200 req/phút; nghỉ 0,7s giữa các lần gọi.
+      #
+      # /api/backtest cũng đã bị loại: nó train lại model qua 1000 kỳ nên mất
+      # hơn 30 giây — chậm là đúng bản chất, không phải lỗi. Đây là công cụ
+      # phân tích gọi tay, dashboard không đụng tới.
       - name: Quét endpoint chỉ đọc trên production
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
