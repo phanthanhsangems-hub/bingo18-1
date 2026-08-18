@@ -575,9 +575,22 @@ async function loadDrawGrid() {
   const exp = tot / 6;
   const sd  = Math.sqrt(tot * (1 / 6) * (5 / 6));
   const freq = cnt.map((c, i) => `<b style="color:var(--n${i + 1})">${i + 1}</b>:${c}`).join(' · ');
+  // P196: trước đây ghi "chênh lệch dưới 2·SD là bình thường". SAI — 2·SD là
+  // ngưỡng cho MỘT số lệch khỏi kỳ vọng, không phải cho khoảng cách giữa số
+  // cao nhất và thấp nhất. Mô phỏng 400k cửa sổ: với 24 kỳ, chênh lệch trung
+  // bình đã là 8,7 và vượt 2·SD tới 76,8% số lần — tức nhãn gọi trường hợp
+  // thông thường là bất thường.
+  // Bách phân vị 95 của (max − min) ổn định ở ~4,4·SD với mọi cỡ cửa sổ
+  // (24 kỳ: 14,0 ≈ 4,43·SD; 50 kỳ: 20,0 ≈ 4,39·SD; 100 kỳ: 28,0 ≈ 4,34·SD).
+  const spread    = Math.max(...cnt) - Math.min(...cnt);
+  const nguong    = 4.4 * sd;
+  const batThuong = spread > nguong;
   $('dg-foot').innerHTML =
     `${rows.length} kỳ gần nhất · ${freq} — kỳ vọng ${exp.toFixed(1)} ± ${sd.toFixed(1)} mỗi số. `
-    + `Chênh lệch dưới ${(2 * sd).toFixed(0)} lần là dao động bình thường.`;
+    + `Chênh lệch nhiều nhất − ít nhất hiện là <b>${spread}</b>; `
+    + (batThuong
+        ? `vượt ngưỡng ${nguong.toFixed(0)} (95% cửa sổ nằm dưới mức này).`
+        : `dưới ngưỡng ${nguong.toFixed(0)} nên là dao động bình thường.`);
 }
 
 // ── P185: Thống kê bộ 3 số trùng nhau ────────────────────────
