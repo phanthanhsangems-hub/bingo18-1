@@ -246,6 +246,12 @@ def to_sqlite(sql: str) -> str:
     # 5. ::type còn lại
     sql = _apply_casts(sql)
 
+    # 5b. Hàm JSONB của Postgres → hàm JSON tương ứng của SQLite.
+    # json_each của SQLite trả đúng hai cột key/value nên bí danh dùng được y
+    # nguyên; toán tử -> 'nhãn' cũng hiểu như $.nhãn ở cả hai hệ.
+    sql = re.sub(r"jsonb?_each_text\s*\(", "json_each(", sql, flags=re.I)
+    sql = re.sub(r"jsonb_typeof\s*\(", "json_type(", sql, flags=re.I)
+
     # 6. placeholder %s → ?   (%% là dấu % thật, giữ lại)
     if "%s" in sql:
         sql = sql.replace("%%", "\x00").replace("%s", "?").replace("\x00", "%")

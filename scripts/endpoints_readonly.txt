@@ -10,7 +10,6 @@
 /api/analytics/frequency-heatmap
 /api/analytics/patterns
 /api/autotune-history
-/api/backtest
 /api/bet-signal
 /api/calibration
 /api/calibration-by-size

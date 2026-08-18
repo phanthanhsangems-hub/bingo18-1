@@ -1204,11 +1204,19 @@ def sum_distribution():
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
+        # P201: câu cũ SELECT sum_value + COUNT(*) mà KHÔNG có GROUP BY —
+        # Postgres từ chối thẳng ("must appear in the GROUP BY clause"), nên
+        # endpoint này 500 trên production. Ý định đúng: lấy N kỳ gần nhất rồi
+        # mới đếm theo tổng, nên phải giới hạn trong subquery.
         cur.execute("""
             SELECT sum_value, COUNT(*) AS cnt
-            FROM draw_history
-            WHERE sum_value IS NOT NULL
-            ORDER BY draw_number DESC LIMIT %s
+            FROM (
+                SELECT sum_value FROM draw_history
+                WHERE sum_value IS NOT NULL
+                ORDER BY draw_number DESC LIMIT %s
+            ) t
+            GROUP BY sum_value
+            ORDER BY sum_value
         """, [limit_n])
         rows = cur.fetchall()
         # Use draw_history's sum_value; fallback: compute from numbers
@@ -1504,9 +1512,15 @@ def voter_overrides_get():
                 SUM(CASE WHEN vsize = actual_size THEN 1 ELSE 0 END)::float / NULLIF(COUNT(*),0) AS wr,
                 COUNT(*) AS n
             FROM (
+                -- P201: json_object_keys chỉ nhận kiểu json, mà vote_breakdown
+                -- là JSONB -> Postgres báo "function json_object_keys(jsonb)
+                -- does not exist", endpoint 500 suốt. Ngoài ra câu cũ gọi hàm
+                -- sinh-tập HAI lần trong SELECT để lấy key rồi lấy value —
+                -- vừa sai kiểu vừa tốn. jsonb_each_text trả cả cặp key/value
+                -- trong một lần.
                 SELECT
-                    json_object_keys(p.vote_breakdown->'all_votes') AS vname,
-                    p.vote_breakdown->'all_votes'->>json_object_keys(p.vote_breakdown->'all_votes') AS vsize,
+                    kv.key   AS vname,
+                    kv.value AS vsize,
                     pr.actual_size
                 FROM predictions p
                 JOIN (
@@ -1516,8 +1530,10 @@ def voter_overrides_get():
                                 ELSE 'LON' END AS actual_size
                     FROM prediction_results pr2
                     WHERE pr2.actual_numbers IS NOT NULL
-                ) pr ON pr.prediction_id = p.id
+                ) pr ON pr.prediction_id = p.id,
+                jsonb_each_text(p.vote_breakdown->'all_votes') kv
                 WHERE p.vote_breakdown IS NOT NULL
+                  AND jsonb_typeof(p.vote_breakdown->'all_votes') = 'object'
                   AND p.draw_number > (SELECT MAX(draw_number) - 500 FROM predictions)
             ) sub
             GROUP BY vname
@@ -3065,18 +3081,25 @@ def conf_hist_by_size():
         n    = min(int(request.args.get('n', 500)), 2000)
         conn = db.get_connection()
         cur  = conn.cursor()
-        if USE_POSTGRES:
-            cur.execute("""
-                SELECT p.confidence,
-                       p.predicted_size,
-                       COALESCE(pr.is_win_size, FALSE) AS won
-                FROM predictions p
-                LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE p.confidence IS NOT NULL AND p.predicted_size IS NOT NULL
-                ORDER BY p.draw_number DESC LIMIT %s
-            """, (n,))
-        else:
-            cur.execute("SELECT 0.5,'NHO',0 WHERE 0=1")
+        # P201: bảng predictions KHÔNG có cột predicted_size (xem schema ở
+        # database.py) — endpoint này 500 trên production suốt. SIZE phải suy
+        # từ tổng của predicted_numbers, đúng cách các endpoint khác vẫn làm.
+        # Nhánh SQLite trước đây là "WHERE 0=1" (trả rỗng) nên chạy local
+        # không bao giờ chạm tới câu này. Nay dùng chung một câu cho cả hai,
+        # lớp pg_compat lo phần dịch.
+        cur.execute("""
+            SELECT p.confidence,
+                   CASE WHEN (SELECT SUM(v::int)
+                                FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
+                        WHEN (SELECT SUM(v::int)
+                                FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
+                        ELSE 'LON' END AS predicted_size,
+                   COALESCE(pr.is_win_size, FALSE) AS won
+            FROM predictions p
+            LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
+            WHERE p.confidence IS NOT NULL AND p.predicted_numbers IS NOT NULL
+            ORDER BY p.draw_number DESC LIMIT %s
+        """, (n,))
         rows = cur.fetchall()
         conn.close()
 
