@@ -27,6 +27,16 @@ APP_USER          = os.environ.get("APP_USER", "")
 APP_PASSWORD      = os.environ.get("APP_PASSWORD", "")
 APP_PASSWORD_HASH = os.environ.get("APP_PASSWORD_HASH", "")
 
+# ── Danh sách IP được vào (P202) ──────────────────────────────
+# Đặt ALLOWED_IPS = "1.2.3.4,5.6.7.8" hoặc dải CIDR "1.2.3.0/24".
+# ĐỂ TRỐNG = không giới hạn IP (mặc định). Giống cổng đăng nhập, cơ chế này
+# fail-open: cấu hình sai hoặc chưa đặt thì không ai bị khoá ngoài.
+#
+# Chỉ áp cho truy cập bằng trình duyệt. Cloud Scheduler, GitHub Actions và
+# webhook Telegram đi đường riêng (X-Trigger-Secret / _CRON_PATHS /
+# _PUBLIC_PATHS) nên KHÔNG bị chặn — nếu chặn thì lặp lại đúng sự cố P189.
+ALLOWED_IPS = os.environ.get("ALLOWED_IPS", "")
+
 # Khoá ký cookie phiên. Phải ỔN ĐỊNH giữa các lần deploy, nếu không thì
 # mỗi lần deploy là mọi người bị đăng xuất. Không đặt thì suy ra từ các
 # secret sẵn có (cũng ổn định), cuối cùng mới random cho môi trường dev.

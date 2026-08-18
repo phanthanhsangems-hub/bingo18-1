@@ -34,3 +34,4 @@ jobs:
           python test_admin_interface.py
           python test_pg_compat.py
           python test_postgres_import.py
+          python test_ip_allowlist.py
