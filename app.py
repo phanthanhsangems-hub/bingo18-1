@@ -147,6 +147,22 @@ _triple_drought_notified_gap: int = 0  # gap lúc gửi alert gần nhất (rese
 _CHECKPOINT_TS = '2026-05-15 16:15:00'
 _CHECKPOINT_N  = 200
 _CHECKPOINT_ALERT_KEY = 'checkpoint_200_reached'
+# P195: phep kiem dinh pre-registered ve ml voter DA KET LUAN.
+#
+# Ket qua tren 20.288 predictions ke tu checkpoint:
+#   ML-LON  36,5% (n=1.460, z=-0,79)
+#   ctrl    38,0% (n=2.797, z=+0,55)
+#   ovrride 38,2% (n=2.857)
+# ctrl vs override lech -0,2 diem (z=-0,15) -> ml voter dong y hay khong
+# dong y KHONG thay doi ket qua. Khong phat hien tac dong nao.
+#
+# Phep kiem dinh nay KHONG THE ket luan them: de dat luc 80% phat hien mot
+# tac dong 1 diem can n ~ 18.925 ca ML-LON; hien co 1.460, tich luy ~15,7
+# ca/ngay -> con ~3,0 nam nua.
+#
+# KHONG ha nguong z <= -2,0. Doi nguong sau khi da nhin du lieu la p-hacking,
+# no che ra ket qua duong gia. Nguong giu nguyen; cai thay doi la he thong
+# thoi bao "san sang!" moi ngay nhu the con viec phai lam.
 # Cờ một-lần-duy-nhất: dòng alert_log mang key này CHÍNH LÀ dấu "đã gửi rồi".
 # Nó phải nằm trong AlertManager._PERMANENT_KEYS (prediction_service.py), nếu
 # không thì dọn 90 ngày sẽ xoá cờ và alert bắn lại mỗi 90 ngày — xem P190.
@@ -256,7 +272,8 @@ def _check_checkpoint_alert(draw_number: int = 0):
             over_str = over_str or "n/a"
         action_line = ("🚨 <b>ĐIỀU KIỆN ĐẠT — SHIP P171: xóa ml voter!</b>"
                        if ship_p171 else
-                       "⏳ Chưa đủ z ≤ −2.0 — chạy /checkpoint kiểm tra chi tiết")
+                       "⏳ Chưa đạt z ≤ −2.0 — phép kiểm định đã đóng, "
+                       "không phát hiện tác động (xem /checkpoint)")
         cur.execute(
             "INSERT INTO alert_log (alert_key, message) VALUES (%s, %s)",
             (_CHECKPOINT_ALERT_KEY, f"Checkpoint reached: {n_fresh}/{n} fresh predictions")
@@ -6099,7 +6116,9 @@ def daily_summary():
                     pct = int(n_fresh / _CHECKPOINT_N * 100)
                     checkpoint_line = f"🔬 Checkpoint: <b>{n_fresh}/{_CHECKPOINT_N}</b> ({pct}%){wr_f_str}{ctrl_str}\n"
                 else:
-                    checkpoint_line = f"✅ Checkpoint {_CHECKPOINT_N}/{_CHECKPOINT_N}{wr_f_str}{ctrl_str} — sẵn sàng!\n"
+                    # P195: da ket luan, khong con "san sang" gi de lam nua
+                    checkpoint_line = (f"🔬 Checkpoint: đã đóng — không phát hiện "
+                                       f"tác động{wr_f_str}{ctrl_str}\n")
             except Exception:
                 pass
 
@@ -7585,7 +7604,8 @@ def _tg_cmd_status(conn, reply):
     game_status = "🟢 Đang quay" if 6 <= vn_hour < 22 else "🔴 Đã đóng"
     lag_str = f"{lag} phút" if lag else "N/A"
     if n_fresh >= _CHECKPOINT_N:
-        cp_line = f"🔬 Checkpoint: <b>✅ {n_fresh}/{_CHECKPOINT_N}</b> — sẵn sàng phân tích\n"
+        cp_line = (f"🔬 Checkpoint: <b>đã đóng</b> — không phát hiện tác động "
+                   f"({n_fresh:,} mẫu; cần ~18.925 ca ML-LON mới đủ lực 80%)\n")
     else:
         pct_cp = round(n_fresh / _CHECKPOINT_N * 100)
         cp_line = f"🔬 Checkpoint: <b>{n_fresh}/{_CHECKPOINT_N}</b> ({pct_cp}%) — đợi thêm\n"

@@ -79,6 +79,40 @@ class _PooledConnection:
             except Exception: pass
 
 
+
+# ── P195: lớp dịch SQL Postgres → SQLite (chỉ dùng khi chạy local) ────────
+# 33/142 endpoint viết SQL riêng của Postgres nên luôn 500 trên SQLite, tức
+# gần 1/4 hệ thống không test được trước khi deploy. Dịch tại chỗ execute()
+# để không phải sửa 33 endpoint (rủi ro cao hơn nhiều).
+#
+# Chỉ gắn vào connection SQLite. Postgres đi thẳng psycopg2, không qua đây.
+class _PgCompatCursor(sqlite3.Cursor):
+    def execute(self, sql, params=()):
+        return super().execute(_pg_to_sqlite(sql), params)
+
+    def executemany(self, sql, seq):
+        return super().executemany(_pg_to_sqlite(sql), seq)
+
+
+class _PgCompatConnection(sqlite3.Connection):
+    def cursor(self, factory=_PgCompatCursor):
+        return super().cursor(factory)
+
+    def execute(self, sql, params=()):
+        return self.cursor().execute(sql, params)
+
+    def executemany(self, sql, seq):
+        return self.cursor().executemany(sql, seq)
+
+
+def _pg_to_sqlite(sql):
+    try:
+        from pg_compat import to_sqlite
+        return to_sqlite(sql)
+    except Exception:
+        return sql          # dịch hỏng thì để SQLite tự báo lỗi, đừng nuốt
+
+
 class DatabaseManager:
 
     def __init__(self):
@@ -125,7 +159,9 @@ class DatabaseManager:
             conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
             conn.autocommit = False
         else:
-            conn = sqlite3.connect(config.DB_PATH)
+            # P195: factory dịch SQL Postgres sang SQLite. Chỉ gắn ở nhánh này —
+            # Postgres không bao giờ đi qua lớp dịch.
+            conn = sqlite3.connect(config.DB_PATH, factory=_PgCompatConnection)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
         self._register_for_teardown(conn)
@@ -409,6 +445,21 @@ class DatabaseManager:
                     # P173: khớp với index bên Postgres
                     "CREATE INDEX IF NOT EXISTS idx_alertlog_time ON alert_log(fired_at DESC)",
                     "CREATE INDEX IF NOT EXISTS idx_alertlog_key  ON alert_log(alert_key)",
+                ]:
+                    cur.execute(ddl)
+                for ddl in [
+                    # P195: bản SQLite của view predictions_vn. Bên Postgres view
+                    # này tạo ở nhánh trên; thiếu nó thì /api/health,
+                    # /api/next_prediction, /api/predictions chết khi chạy local.
+                    "DROP VIEW IF EXISTS predictions_vn",
+                    """CREATE VIEW predictions_vn AS
+                       SELECT p.*,
+                              datetime(p.prediction_time, '+7 hours')
+                                  AS full_time_vietnam,
+                              strftime('%H:%M %d/%m',
+                                       datetime(p.prediction_time, '+7 hours'))
+                                  AS display_time_vietnam
+                       FROM predictions p""",
                 ]:
                     cur.execute(ddl)
 
