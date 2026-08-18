@@ -519,7 +519,7 @@ def _login_enabled() -> bool:
 #     (xem .github/workflows/sync-draws.yml, bước "Warmup Cloud Run")
 #   - /telegram/webhook: đã có kiểm tra secret riêng của Telegram
 _PUBLIC_PATHS = {
-    '/login', '/logout',
+    '/login', '/logout', '/whoami',
     '/manifest.json', '/sw.js',
     '/api/health', '/healthz',
     '/telegram/webhook',
@@ -556,6 +556,51 @@ def _is_public_path(path: str) -> bool:
     return False
 
 
+# ── P202: giới hạn theo IP ────────────────────────────────────────────────
+# Lấy IP thật sau proxy của Cloud Run. Dùng PHẦN TỬ CUỐI của X-Forwarded-For,
+# không phải phần tử đầu:
+#   - client thường, không gửi XFF -> GFE đặt "XFF: <ip-thật>"        -> cuối = thật
+#   - client gian, tự gửi "XFF: 1.2.3.4" -> GFE nối thêm ip thật vào cuối
+#     -> "1.2.3.4, <ip-thật>" -> cuối = thật, KHÔNG giả mạo được
+# Lấy phần tử đầu sẽ để lọt kiểu giả mạo đó.
+def _client_ip() -> str:
+    xff = request.headers.get('X-Forwarded-For', '')
+    parts = [p.strip() for p in xff.split(',') if p.strip()]
+    if parts:
+        return parts[-1]
+    return request.remote_addr or ''
+
+
+def _parse_allowed_ips(raw: str):
+    """Chuỗi cấu hình -> danh sách mạng. Mục nào sai cú pháp thì bỏ qua và ghi log."""
+    import ipaddress
+    nets = []
+    for item in (raw or '').replace(';', ',').split(','):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            logger.warning("ALLOWED_IPS: bo qua muc khong hop le %r", item[:40])
+    return nets
+
+
+_ALLOWED_NETS = _parse_allowed_ips(getattr(config, 'ALLOWED_IPS', ''))
+
+
+def _ip_allowed(ip: str) -> bool:
+    """Chưa cấu hình -> cho qua hết (fail-open, giống cổng đăng nhập)."""
+    if not _ALLOWED_NETS:
+        return True
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in n for n in _ALLOWED_NETS)
+
+
 def _machine_caller() -> bool:
     """Máy gọi máy: Cloud Scheduler, GitHub Actions, script trên PC.
 
@@ -584,6 +629,12 @@ def _require_login():
         return None
     if _machine_caller():
         return None
+    # P202: chặn theo IP chỉ áp cho truy cập trình duyệt. Đặt SAU các lối ra
+    # ở trên nên Cloud Scheduler, GitHub Actions và webhook Telegram vẫn vào
+    # được — nếu đặt trước thì lặp lại đúng sự cố P189.
+    if not _ip_allowed(_client_ip()):
+        logger.warning("Chan IP ngoai danh sach: %s -> %s", _client_ip(), request.path)
+        return jsonify({'error': 'ip_not_allowed', 'your_ip': _client_ip()}), 403
     if request.path.startswith('/api/') or request.path.startswith('/telegram/'):
         # P189: chặn một request KHÔNG phải trình duyệt thì gần như chắc là
         # tự động hoá bị khoá nhầm — phải để lại vết trong log Cloud Run,
@@ -605,6 +656,23 @@ def _check_password(pw: str) -> bool:
         from werkzeug.security import check_password_hash
         return check_password_hash(config.APP_PASSWORD_HASH, pw)
     return hmac.compare_digest(pw, config.APP_PASSWORD)
+
+
+@app.route('/whoami')
+def whoami():
+    """P202: cho biết máy chủ nhìn thấy IP nào — để lấy giá trị điền vào
+    ALLOWED_IPS. Cố ý để CÔNG KHAI: nếu lỡ tự khoá mình ra ngoài thì đây vẫn
+    là đường lấy lại IP. Không lộ gì ngoài chính IP của người gọi."""
+    ip = _client_ip()
+    return jsonify({
+        'ip_may_chu_thay': ip,
+        'dien_vao_ALLOWED_IPS': ip,
+        'x_forwarded_for': request.headers.get('X-Forwarded-For', ''),
+        'remote_addr': request.remote_addr,
+        'dang_gioi_han_ip': bool(_ALLOWED_NETS),
+        'ip_nay_duoc_vao': _ip_allowed(ip),
+        'so_dai_dang_cho_phep': len(_ALLOWED_NETS),
+    })
 
 
 @app.route('/login', methods=['GET', 'POST'])
