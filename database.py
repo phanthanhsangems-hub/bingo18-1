@@ -21,13 +21,20 @@ logger = logging.getLogger(__name__)
 # ── Detect backend ────────────────────────────────────────────
 USE_POSTGRES = bool(config.DATABASE_URL)
 
+# P198: sqlite3 phải import VÔ ĐIỀU KIỆN. Trước đây nó nằm trong nhánh else
+# nên trên Cloud Run (USE_POSTGRES=True) không bao giờ được import — mà
+# _PgCompatCursor/_PgCompatConnection ở cấp module lại kế thừa sqlite3.Cursor
+# và sqlite3.Connection. Kết quả: NameError ngay lúc import database.py,
+# app không khởi động nổi. sqlite3 là thư viện chuẩn, luôn có sẵn, import
+# vô điều kiện không tốn gì.
+import sqlite3
+
 if USE_POSTGRES:
     import psycopg2
     import psycopg2.extras
     from psycopg2 import pool as pg_pool
     logger.info("Database backend: PostgreSQL (connection pool)")
 else:
-    import sqlite3
     logger.info("Database backend: SQLite (%s)", config.DB_PATH)
 
 
