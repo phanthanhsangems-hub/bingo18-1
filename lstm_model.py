@@ -10,6 +10,15 @@ Model lưu vào multiset_markov/ (không bị dockerignore) → Cloud Run thấy
 import os
 import sys
 import json
+
+# P194: cung ly do nhu train.py — chay truc tiep ma thieu .env thi doc nham
+# SQLite cuc bo. Nap .env giong app.py.
+if not os.environ.get('DATABASE_URL'):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 import logging
 import sqlite3
 
