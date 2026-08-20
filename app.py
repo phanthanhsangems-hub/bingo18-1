@@ -2423,6 +2423,23 @@ def sum_stats():
             "GROUP BY sum_value"
         )
         agg = {int(s): (int(k), int(dn)) for s, k, dn in cur.fetchall()}
+
+        # P203: khoảng cách của CHU KỲ VỪA XONG = kỳ về gần nhất trừ kỳ về
+        # trước đó. Có nó mới so được "đang chưa về 84 kỳ" với "đợt trước về
+        # sau bao nhiêu kỳ". Hàm cửa sổ chạy được trên cả Postgres lẫn
+        # SQLite (>= 3.25).
+        cur.execute(
+            "SELECT sum_value, draw_number FROM ("
+            "  SELECT sum_value, draw_number,"
+            "         ROW_NUMBER() OVER (PARTITION BY sum_value"
+            "                            ORDER BY draw_number DESC) AS rn"
+            "  FROM draw_history"
+            "  WHERE numbers IS NOT NULL AND sum_value BETWEEN 3 AND 18"
+            ") t WHERE rn <= 2 ORDER BY sum_value, draw_number DESC"
+        )
+        hai_ky_cuoi: dict = {}
+        for sv, dn in cur.fetchall():
+            hai_ky_cuoi.setdefault(int(sv), []).append(int(dn))
         conn.close()
 
         # số cách tạo ra mỗi tổng trong 216 khả năng — để đối chiếu lý thuyết
@@ -2438,6 +2455,9 @@ def sum_stats():
                 'avg_gap':      round(total_draws / k) if k else None,
                 'avg_gap_ly_thuyet': round(216 / WAYS[s]),
                 'current_gap':  (max_dn - lastdn) if lastdn else None,
+                # None khi tổng đó mới về đúng 1 lần trong toàn bộ lịch sử
+                'prev_gap':     (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
+                                    hai_ky_cuoi.get(s, [])),
                 'size':         'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON'),
             })
         return jsonify({'total_draws': total_draws, 'sums': out})
