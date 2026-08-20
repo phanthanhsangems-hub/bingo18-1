@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p203">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p204">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -39,6 +39,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <span class="chip"><span class="dot" id="sys-dot"></span> <b id="sys-status">LIVE</b></span>
     <span class="chip">Kỳ <b class="mono" id="last-draw">---</b></span>
     <span class="chip hide-sm">Sync <b id="sync-lag">--</b></span>
+    <span class="chip hide-sm" id="last-refresh">cập nhật --:--</span>
     <span class="chip mono hide-sm" id="clock">--:--:--</span>
     <button class="icon-btn" id="theme-btn" title="Đổi giao diện Sứ / Sơn mài" aria-label="Đổi giao diện">◐</button>
   </div>
@@ -249,6 +250,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p203"></script>
+<script src="/static/js/dashboard.js?v=p204"></script>
 </body>
 </html>
