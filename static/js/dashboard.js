@@ -680,13 +680,51 @@ function refreshAll() {
   safe(loadAlerts);
   safe(loadBetSignal);
 }
+// P204: bảng lịch sử — gọi qua hàm riêng để vừa dùng cho setInterval vừa
+// dùng khi mở lại tab, và có ghi lại mốc thời gian cập nhật.
+let _lanCuoiTaiBangTong = 0;
+function loadBangLichSu() {
+  _lanCuoiTaiBangTong = Date.now();
+  safe(loadTripleStats);
+  safe(loadSumStats);
+}
+
+// P204: hiện mốc cập nhật để người dùng THẤY dữ liệu cũ hay mới, thay vì
+// phải đoán. Trước đây bảng cũ 18 phút mà trông y hệt bảng vừa tải.
+function ghiMocCapNhat() {
+  const el = $('last-refresh');
+  if (!el) return;
+  el.textContent = 'cập nhật ' + new Date().toLocaleTimeString('vi-VN',
+    { hour12: false, timeZone: 'Asia/Ho_Chi_Minh' }).slice(0, 5);
+}
+
+function refreshAllVaGhiMoc() {
+  refreshAll();
+  ghiMocCapNhat();
+}
+
 refreshAll();
+ghiMocCapNhat();
 safe(loadTrend);                       // trend đổi chậm — tải 1 lần + mỗi 10 phút
 // P185: thống kê toàn lịch sử, đổi rất chậm — 5 phút một lần là thừa đủ
 // (server cũng cache 300s nên gọi dày hơn cũng không có dữ liệu mới)
-safe(loadTripleStats);
-safe(loadSumStats);
-setInterval(refreshAll, 60000);
+loadBangLichSu();
+setInterval(refreshAllVaGhiMoc, 60000);
 setInterval(() => safe(loadTrend), 600000);
-setInterval(() => { safe(loadTripleStats); safe(loadSumStats); }, 300000);
+setInterval(loadBangLichSu, 300000);
+
+// P204: trình duyệt điện thoại ĐÓNG BĂNG setInterval khi tab chạy nền hoặc
+// khoá máy. Mở lại app là thấy dữ liệu của lúc rời đi — có thể cũ hàng chục
+// phút — cho tới lần tick kế tiếp. Người dùng thấy "tổng 14 chưa về 3" ngay
+// sau khi kỳ tổng 14 vừa ra, tưởng hệ thống cập nhật sai, trong khi dữ liệu
+// trong DB vẫn đúng.
+// Nạp lại ngay khi tab hiện trở lại.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  refreshAllVaGhiMoc();
+  // Bảng lịch sử nặng hơn và server cache 300s — chỉ nạp lại khi đã quá cũ
+  if (Date.now() - _lanCuoiTaiBangTong > 120000) loadBangLichSu();
+  if (typeof connectSSE === 'function') connectSSE();   // SSE cũng bị ngắt khi nền
+});
+
 connectSSE();
