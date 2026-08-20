@@ -98,3 +98,49 @@ jobs:
             exit 1
           fi
           echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
+
+      # Đối chiếu hai nguồn tổng: /api/draw-grid TÍNH tổng từ numbers, còn
+      # /api/sum-stats dùng cột sum_value lưu sẵn. Lệch nhau nghĩa là cột
+      # sum_value ghi sai (watcher lấy 'total' cào từ web thay vì tự cộng).
+      # Thêm tham số cachebust vì cache của app khoá theo full_path.
+      - name: Đối chiếu tổng — numbers vs cột sum_value
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          TS=$(date +%s)
+          curl -s --max-time 30 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/draw-grid?n=12&cb=$TS" > /tmp/grid.json
+          curl -s --max-time 30 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/sum-stats?cb=$TS" > /tmp/sums.json
+          python3 - <<'PYEOF'
+          import json
+          g = json.load(open('/tmp/grid.json'))['draws']
+          s = {x['sum']: x for x in json.load(open('/tmp/sums.json'))['sums']}
+          print("=== 12 KY GAN NHAT (tong TINH TU numbers) ===")
+          for d in g:
+              print(f"  #{d['draw_number']}  {d['numbers']}  tong={d['sum']:2d}  {d['size']}")
+          maxdn = max(d['draw_number'] for d in g)
+          print()
+          print("=== DOI CHIEU: current_gap cua sum-stats phai khop ===")
+          bad = 0
+          for d in sorted(g, key=lambda x: -x['draw_number'])[:6]:
+              tong = d['sum']
+              row  = s.get(tong)
+              gap  = row['current_gap'] if row else None
+              # ky nay cach ky moi nhat bao nhieu
+              cach = maxdn - d['draw_number']
+              # current_gap cua tong nay phai <= cach (vi no la lan ve GAN NHAT)
+              ok = gap is not None and gap <= cach
+              if not ok: bad += 1
+              print(f"  #{d['draw_number']} tong {tong:2d}: cach ky moi nhat {cach:2d} "
+                    f"| sum-stats bao chua ve {gap} -> {'OK' if ok else 'LECH!'}")
+          print()
+          moi = [d for d in g if d['draw_number'] == maxdn][0]
+          print(f"KY MOI NHAT #{maxdn} = {moi['numbers']} tong {moi['sum']}")
+          print(f"  sum-stats: chua ve cua tong {moi['sum']} = {s[moi['sum']]['current_gap']} (phai la 0)")
+          if bad:
+              print(f"\n>>> CO {bad} CHO LECH — cot sum_value nghi ghi sai")
+          else:
+              print("\n>>> Khop het — khong lech")
+          PYEOF
