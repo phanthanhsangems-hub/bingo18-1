@@ -649,11 +649,14 @@ async function loadSumStats() {
   const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
 
   const half = s => {
-    if (!s) return '<td></td><td></td><td></td>';
+    if (!s) return '<td></td><td></td><td></td><td></td>';
     const ratio = (s.current_gap != null && s.avg_gap) ? s.current_gap / s.avg_gap : 0;
     const cls = ratio >= 1.5 ? ' overdue-hi' : ratio >= 1 ? ' overdue' : '';
+    // P203: "Đợt trước" = chu kỳ vừa xong dài bao nhiêu kỳ. Để so trực tiếp
+    // với "Chưa về" hiện tại. Rỗng khi tổng đó mới về đúng 1 lần.
     return `<td><span class="ss-sum ${s.size}">${s.sum}</span></td>`
          + `<td class="num ta-r">${fmt(s.avg_gap)}</td>`
+         + `<td class="num ta-r ss-prev">${fmt(s.prev_gap)}</td>`
          + `<td class="num ta-r${cls}">${fmt(s.current_gap)}</td>`;
   };
 

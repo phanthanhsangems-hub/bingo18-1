@@ -372,6 +372,26 @@ svg text{font-family:inherit}
 }
 .tr-last-txt b{color:var(--ink)}
 
+/* P203: cột "Đợt trước" là số tham chiếu, làm mờ hơn để "Chưa về" nổi lên */
+.ss-prev{color:var(--muted)}
+
+/* P203: thêm cột thứ 4 làm bảng thành 9 cột — trên điện thoại phải bóp lại,
+   không thì nửa phải khuất hẳn và người dùng phải cuộn mới thấy. */
+/* Nhãn dài cho màn rộng, nhãn ngắn cho điện thoại — 9 cột không thể để
+   nhãn dài mà vẫn vừa khung 390px. */
+.lbl-sm{display:none}
+@media (max-width:640px){
+  .lbl-lg{display:none}
+  .lbl-sm{display:inline}
+  /* Bề rộng bảng do CHỮ TIÊU ĐỀ quyết định, không phải các con số: đo được
+     cột "TRƯỚC" 60px, "CHƯA" 49px, "TB" chỉ 27px — tỉ lệ thuận độ dài chữ.
+     Nên thu nhỏ kiểu chữ tiêu đề và bỏ giãn chữ mới ăn thua. */
+  #ss-table th{font-size:9.5px;letter-spacing:0;padding:8px 2px}
+  #ss-table td{padding:8px 3px;font-size:12.5px}
+  #ss-table .ss-sum{width:22px;height:22px;font-size:12px}
+  #ss-table .ss-gap{width:6px}
+}
+
 /* bảng tổng: hai cột ghép cặp đối xứng */
 .ss-gap{width:22px;border-bottom:none !important}
 .ss-sum{
