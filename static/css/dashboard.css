@@ -386,8 +386,15 @@ svg text{font-family:inherit}
   /* Bề rộng bảng do CHỮ TIÊU ĐỀ quyết định, không phải các con số: đo được
      cột "TRƯỚC" 60px, "CHƯA" 49px, "TB" chỉ 27px — tỉ lệ thuận độ dài chữ.
      Nên thu nhỏ kiểu chữ tiêu đề và bỏ giãn chữ mới ăn thua. */
-  #ss-table th{font-size:9.5px;letter-spacing:0;padding:8px 2px}
-  #ss-table td{padding:8px 3px;font-size:12.5px}
+  #ss-table th,#tr-table th{font-size:9.5px;letter-spacing:0;padding:8px 2px}
+  #ss-table td,#tr-table td{padding:8px 3px;font-size:12.5px}
+  /* P205: bảng trip cũng thêm cột "Đợt trước" -> 5 cột, cùng cách bóp lại */
+  #tr-table .mini-die{width:17px;height:17px;font-size:10px}
+  /* .log-table td có white-space:nowrap, nên chuỗi dài của hàng "Trip gần
+     nhất" (colspan 4) không xuống dòng được và ÉP CẢ BẢNG rộng ra — đo được
+     nó mới là thứ quyết định bề rộng, không phải các cột số. Cho nó xuống
+     dòng trên điện thoại. */
+  #tr-table .tr-last-txt{white-space:normal;line-height:1.35}
   #ss-table .ss-sum{width:22px;height:22px;font-size:12px}
   #ss-table .ss-gap{width:6px}
 }
