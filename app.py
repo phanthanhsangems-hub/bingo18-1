@@ -2361,7 +2361,12 @@ def triple_stats():
 
         cnt  = {n: 0 for n in range(1, 7)}
         last = {n: None for n in range(1, 7)}
+        # P205: lần về TRƯỚC lần gần nhất — để biết chu kỳ vừa xong dài bao
+        # nhiêu kỳ. Vòng lặp đã duyệt theo draw_number tăng dần nên chỉ cần
+        # nhớ giá trị cũ trước khi ghi đè, không phải truy vấn thêm.
+        prev = {n: None for n in range(1, 7)}
         any_cnt, any_last = 0, None
+        any_prev = None
         any_last_n = None          # P191: trip gần nhất là bộ nào
         for dn, raw in rows:
             try:
@@ -2371,29 +2376,33 @@ def triple_stats():
                 continue
             if a == b == c and 1 <= a <= 6:
                 cnt[a]  += 1
+                prev[a]  = last[a]      # giữ lần về cũ trước khi ghi đè
                 last[a]  = dn
                 any_cnt += 1
+                any_prev = any_last
                 any_last = dn
                 any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
                                    # lặp là trip mới nhất
 
-        def _row(label, k, lastdn):
+        def _row(label, k, lastdn, prevdn=None):
             return {
                 'combo':       label,
                 'count':       k,
                 'avg_gap':     round(total_draws / k) if k else None,
                 'current_gap': (max_dn - lastdn) if lastdn else None,
+                # None khi bộ đó mới về đúng 1 lần trong toàn bộ lịch sử
+                'prev_gap':    (lastdn - prevdn) if (lastdn and prevdn) else None,
                 'last_draw':   lastdn,
             }
 
-        any_row = _row('***', any_cnt, any_last)
+        any_row = _row('***', any_cnt, any_last, any_prev)
         # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không
         # nói bộ nào vừa ra — trả thêm để giao diện hiện được.
         any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
 
         return jsonify({
             'total_draws': total_draws,
-            'triples':     [_row(str(n) * 3, cnt[n], last[n]) for n in range(1, 7)],
+            'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n]) for n in range(1, 7)],
             'any':         any_row,
         })
     except Exception as e:

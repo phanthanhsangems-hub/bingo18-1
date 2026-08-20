@@ -613,6 +613,7 @@ async function loadTripleStats() {
                   : miniDice(r.combo.split('').map(Number))}</td>
       <td class="num ta-r">${fmt(r.count)}</td>
       <td class="num ta-r">${fmt(r.avg_gap)}</td>
+      <td class="num ta-r ss-prev">${fmt(r.prev_gap)}</td>
       ${cell(r)}
     </tr>`;
 
@@ -625,7 +626,7 @@ async function loadTripleStats() {
     const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
     return `<tr class="tr-last">
       <td>${miniDice(a.last_combo.split('').map(Number))}</td>
-      <td colspan="3" class="tr-last-txt">Trip gần nhất
+      <td colspan="4" class="tr-last-txt">Trip gần nhất
         · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
     </tr>`;
   };
