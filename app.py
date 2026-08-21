@@ -801,9 +801,18 @@ def sync_from_github():
         # Câu INSERT vốn đã có ON CONFLICT DO NOTHING nên thử chèn kỳ đã có là
         # vô hại; bộ lọc kia chỉ là tối ưu tốc độ, không cần cho tính đúng.
         #
-        # CHỈ bù lỗ hổng BÊN TRONG khoảng [min, max] đang có. Không nới lịch
-        # sử về quá khứ: file nguồn dài hơn DB, chèn thêm hàng nghìn kỳ cũ sẽ
-        # đổi total_draws và làm lệch toàn bộ cột "TB kỳ về".
+        # CHỈ bù lỗ hổng BÊN TRONG khoảng [min, max] đang có, không nới lịch
+        # sử về quá khứ — giữ nguyên mốc đầu của dữ liệu.
+        #
+        # ĐÍNH CHÍNH so với ghi chú đầu tiên của P206: chèn thêm kỳ KHÔNG làm
+        # lệch cột "TB kỳ về". Nó là avg_gap = total_draws / số lần về (xem
+        # /api/sum-stats, /api/triple-stats) — một TỈ SỐ. Kỳ chèn vào cũng là
+        # kỳ thật nên tử số và mẫu số tăng cùng nhịp, tỉ số gần như không đổi.
+        # Đo trên 86.624 bản ghi của file nguồn: TB kỳ về của mọi tổng khớp lý
+        # thuyết 216/(số cách ra) trong khoảng ±0,4 kỳ với các tổng 7–16.
+        # Cái THỰC SỰ đổi khi bù lỗ hổng là current_gap: nếu kỳ được bù nằm
+        # sau lần về gần nhất đang ghi nhận thì "chưa về" rút ngắn lại — tức
+        # là bảng trở nên ĐÚNG hơn, không phải sai đi.
         fill_gaps = request.args.get('fill_gaps') in ('1', 'true', 'yes')
         thieu: set = set()
         if fill_gaps:

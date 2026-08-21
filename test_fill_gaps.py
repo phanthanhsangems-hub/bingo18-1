@@ -1,7 +1,13 @@
 """P206: kiểm tra ?fill_gaps=1 của /api/sync-github.
 
-Trọng tâm: (1) bù đúng lỗ hổng ở giữa, (2) KHÔNG nới lịch sử về quá khứ —
-nới thì total_draws đổi và mọi cột "TB kỳ về" lệch theo.
+Trọng tâm: (1) bù đúng lỗ hổng ở giữa, (2) KHÔNG nới lịch sử về quá khứ,
+tức mốc đầu của dữ liệu phải giữ nguyên.
+
+Ghi chú đầu tiên của P206 nói nới lịch sử sẽ "làm lệch cột TB kỳ về" — sai.
+avg_gap = total_draws / số lần về là một tỉ số, chèn thêm kỳ thật thì tử và
+mẫu tăng cùng nhịp nên tỉ số không đổi. Lý do thật để giữ ranh giới là để
+mốc đầu ổn định và mỗi lần chạy có phạm vi xác định, chứ không phải vì sợ
+lệch thống kê.
 """
 import json
 import os
