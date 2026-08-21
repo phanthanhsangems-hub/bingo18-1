@@ -108,12 +108,17 @@ jobs:
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           TS=$(date +%s)
-          for f in draw-grid?n=100 sum-stats triple-stats; do
-            n=$(echo "$f" | cut -d? -f1)
-            curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
-                 "$BASE/api/$f&cb=$TS" 2>/dev/null > /tmp/$n.json || \
-            curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
-                 "$BASE/api/$f?cb=$TS" > /tmp/$n.json
+          H="X-Trigger-Secret: $TRIGGER_SECRET"
+          # Ghep URL tuong minh — vong lap cu ghep "sum-stats&cb=" thieu dau ?
+          # nen file JSON rong va script chet o json.load.
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=100&cb=$TS"  > /tmp/draw-grid.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats?cb=$TS"        > /tmp/sum-stats.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/triple-stats?cb=$TS"     > /tmp/triple-stats.json
+          for f in draw-grid sum-stats triple-stats; do
+            if ! python3 -c "import json,sys; json.load(open('/tmp/$f.json'))" 2>/dev/null; then
+              echo "LOI: /tmp/$f.json khong phai JSON. 200 ky tu dau:"
+              head -c 200 /tmp/$f.json; echo; exit 1
+            fi
           done
           python3 - <<'PYEOF'
           import json
