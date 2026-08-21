@@ -36,3 +36,4 @@ jobs:
           python test_postgres_import.py
           python test_ip_allowlist.py
           python test_fill_gaps.py
+          python test_cache_skew.py
