@@ -594,8 +594,8 @@ async function loadDrawGrid() {
 }
 
 // ── P185: Thống kê bộ 3 số trùng nhau ────────────────────────
-async function loadTripleStats() {
-  const d = await J('/api/triple-stats');
+async function loadTripleStats(d) {
+  d = d || await J('/api/triple-stats');
   const rows = d.triples || [];
   if (!rows.length) return;
   const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
@@ -642,8 +642,8 @@ async function loadTripleStats() {
 }
 
 // ── P185: Thống kê theo tổng ─────────────────────────────────
-async function loadSumStats() {
-  const d = await J('/api/sum-stats');
+async function loadSumStats(d) {
+  d = d || await J('/api/sum-stats');
   const by = {};
   (d.sums || []).forEach(s => { by[s.sum] = s; });
   if (!Object.keys(by).length) return;
@@ -686,8 +686,16 @@ function refreshAll() {
 let _lanCuoiTaiBangTong = 0;
 function loadBangLichSu() {
   _lanCuoiTaiBangTong = Date.now();
-  safe(loadTripleStats);
-  safe(loadSumStats);
+  // P207: MỘT lần gọi cho cả hai bảng. Gọi riêng thì hai request có thể rơi
+  // vào hai instance Cloud Run có ảnh chụp lệch nhau, và "chưa về" của tổng 3
+  // lại khác của trip 111 — đúng lỗi người dùng chụp được ở kỳ #182599.
+  // Hỏng thì lùi về hai endpoint cũ để bảng vẫn hiện.
+  safe(async () => {
+    let d = null;
+    try { d = await J('/api/board-stats'); } catch (e) { d = null; }
+    if (d && d.sums && d.triples) { await loadTripleStats(d); await loadSumStats(d); }
+    else { await loadTripleStats(); await loadSumStats(); }
+  });
 }
 
 // P204: hiện mốc cập nhật để người dùng THẤY dữ liệu cũ hay mới, thay vì

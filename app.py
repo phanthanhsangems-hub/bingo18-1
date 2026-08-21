@@ -60,65 +60,14 @@ _resp_cache: dict = {}   # full_path -> (payload_bytes, expiry_ts)
 _resp_cache_lock = _threading.Lock()
 _RESP_CACHE_MAX = 200    # max live entries; evict expired then oldest-expiry when full
 
-# P207: "phiên bản dữ liệu" = số kỳ mới nhất.
-#
-# Bảng trip và bảng tổng đều cache 300s, nhưng hai mục cache HẾT HẠN ĐỘC LẬP
-# nhau. Kỳ mới về lúc t thì bảng nào hết hạn trước sẽ thấy kỳ đó trước, bảng
-# kia còn giữ số cũ tới 5 phút nữa. Trên màn hình thành ra:
-#
-#     tổng  3: chưa về 183   |   trip 111: chưa về 182
-#     tổng 18: chưa về 326   |   trip 666: chưa về 325
-#
-# Tổng 3 CHỈ có thể ra từ 111 và tổng 18 CHỈ có thể ra từ 666, nên hai cặp đó
-# bắt buộc bằng nhau. Lệch 1 là dấu hiệu của cache lệch pha, không phải dữ
-# liệu sai — nhưng người dùng nhìn vào thì thấy bảng "chưa cập nhật".
-#
-# Sửa: gắn số kỳ mới nhất vào khoá cache. Kỳ mới về là MỌI mục cache theo
-# phiên bản đều trượt cùng lúc, hai bảng luôn cùng một mốc.
-#
-# KHÔNG nhớ tạm số kỳ này. Bản đầu của P207 nhớ 15 giây cho đỡ tốn truy vấn
-# — và tái tạo lại đúng con bug: khoá cache đứng yên trong 15s trong khi bên
-# trong endpoint vẫn đọc max_dn mới, nên hai bảng vẫn lệch được 1 kỳ. Test
-# test_cache_skew.py bắt được điều đó. Khoá phải đi cùng nhịp với chính giá
-# trị mà endpoint dùng, nếu không thì nó vô dụng.
-#
-# Giá phải trả rất nhỏ: MAX(draw_number) chạy trên idx_draw_number
-# (draw_number DESC) — quét ngược đúng một hàng rồi dừng.
-_latest_dn: dict = {'dn': 0}
-_latest_dn_lock = _threading.Lock()
-
-
-def _draw_version() -> int:
-    """Số kỳ mới nhất. Lỗi DB thì trả giá trị đọc được lần trước (không ném)."""
-    try:
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
-        dn = int(cur.fetchone()[0] or 0)
-        conn.close()
-    except Exception:
-        with _latest_dn_lock:
-            return _latest_dn['dn']
-    with _latest_dn_lock:
-        _latest_dn['dn'] = dn
-    return dn
-
-
-def cache_resp(ttl: int = 120, vary_on_draw: bool = False):
-    """Cache a GET endpoint's JSON response for `ttl` seconds per unique URL.
-
-    vary_on_draw=True: thêm số kỳ mới nhất vào khoá, để kỳ mới về thì cache
-    trượt ngay thay vì chờ hết TTL. Dùng cho các endpoint mà người dùng đối
-    chiếu chéo với nhau (sum-stats vs triple-stats).
-    """
+def cache_resp(ttl: int = 120):
+    """Cache a GET endpoint's JSON response for `ttl` seconds per unique URL."""
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if request.method != 'GET':
                 return fn(*args, **kwargs)
             key = request.full_path  # includes query string
-            if vary_on_draw:
-                key = f"{key}|dn{_draw_version()}"
             now = _time.time()
             with _resp_cache_lock:
                 hit = _resp_cache.get(key)
@@ -2430,112 +2379,55 @@ def draw_grid():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/triple-stats')
-@cache_resp(300, vary_on_draw=True)
-@limiter.limit("30 per minute")
-def triple_stats():
-    """P185: thống kê 6 bộ ba số trùng nhau (111..666) + gộp chung.
+# ── Ảnh chụp chung cho bảng tổng và bảng trip (P207) ─────────
+#
+# Người dùng chụp màn hình kỳ #182599: tổng 3 "chưa về 183" trong khi trip
+# 111 "chưa về 182"; tổng 18 là 326 còn trip 666 là 325. Tổng 3 CHỈ ra được
+# từ 111 và tổng 18 CHỈ ra được từ 666, nên hai cặp đó bắt buộc bằng nhau.
+#
+# Nguyên nhân: hai endpoint cache 300s RIÊNG, hết hạn độc lập. Kỳ mới về thì
+# bảng nào hết hạn trước sẽ nhảy trước, bảng kia đứng yên tới 5 phút nữa.
+#
+# Cách sửa đầu tiên của tôi là gắn số kỳ mới nhất vào khoá cache — tức thêm
+# MỘT TRUY VẤN MỞ KẾT NỐI RIÊNG cho MỖI request vào hai endpoint mà dashboard
+# gọi liên tục. database.py:161 nói rõ mỗi get_connection() là một kết nối
+# Postgres mới (không pool, vì "many endpoints still have connection leaks"),
+# nên cách đó đổ thêm dầu vào đúng chỗ đang cháy. Bỏ.
+#
+# Cách đúng: hai bảng dùng CHUNG một ảnh chụp. Không thể lệch nhau vì không
+# còn hai bản để mà lệch. Và thay vì hai kết nối + hai lần quét lịch sử cho
+# mỗi vòng làm mới của dashboard, giờ chỉ còn một.
+_stats_snap: dict = {'exp': 0.0, 'data': None}
+_stats_snap_lock = _threading.Lock()
+_STATS_TTL = 60      # kỳ về mỗi 6 phút — 60s là đủ bám sát mà không quét nhiều
 
-    Mỗi bộ trả về: số lần về, trung bình bao nhiêu kỳ mới về một lần,
-    và hiện đã bao nhiêu kỳ chưa về.
+# số cách tạo ra mỗi tổng trong 216 khả năng — để đối chiếu lý thuyết
+_WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
+         11:27, 12:25, 13:21, 14:15, 15:10, 16:6, 17:3, 18:1}
 
-    Trung bình = tổng số kỳ / số lần về (cùng cách tính với các trang
-    thống kê Bingo18 khác, để đối chiếu được).
 
-    Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
-    trong Python — khoảng 2,8% số dòng, nên nhanh và chạy được trên cả
-    Postgres lẫn SQLite.
+def _tinh_thong_ke() -> dict:
+    """Tính CẢ bảng tổng lẫn bảng trip trong một lần mở kết nối.
+
+    total_draws và max_dn đọc đúng một lần rồi dùng chung, nên "chưa về" của
+    tổng 3 và của trip 111 chắc chắn cùng một mốc.
     """
     import ast as _ast
+    conn = db.get_connection()
     try:
-        conn = db.get_connection()
-        cur  = conn.cursor()
+        cur = conn.cursor()
         cur.execute("SELECT COUNT(*), MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
         total_draws, max_dn = cur.fetchone()
         total_draws = total_draws or 0
         max_dn      = max_dn or 0
 
-        cur.execute(
-            "SELECT draw_number, numbers FROM draw_history "
-            "WHERE numbers IS NOT NULL AND sum_value IN (3,6,9,12,15,18) "
-            "ORDER BY draw_number"
-        )
-        rows = cur.fetchall()
-        conn.close()
-
-        cnt  = {n: 0 for n in range(1, 7)}
-        last = {n: None for n in range(1, 7)}
-        # P205: lần về TRƯỚC lần gần nhất — để biết chu kỳ vừa xong dài bao
-        # nhiêu kỳ. Vòng lặp đã duyệt theo draw_number tăng dần nên chỉ cần
-        # nhớ giá trị cũ trước khi ghi đè, không phải truy vấn thêm.
-        prev = {n: None for n in range(1, 7)}
-        any_cnt, any_last = 0, None
-        any_prev = None
-        any_last_n = None          # P191: trip gần nhất là bộ nào
-        for dn, raw in rows:
-            try:
-                ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
-                a, b, c = int(ns[0]), int(ns[1]), int(ns[2])
-            except Exception:
-                continue
-            if a == b == c and 1 <= a <= 6:
-                cnt[a]  += 1
-                prev[a]  = last[a]      # giữ lần về cũ trước khi ghi đè
-                last[a]  = dn
-                any_cnt += 1
-                any_prev = any_last
-                any_last = dn
-                any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
-                                   # lặp là trip mới nhất
-
-        def _row(label, k, lastdn, prevdn=None):
-            return {
-                'combo':       label,
-                'count':       k,
-                'avg_gap':     round(total_draws / k) if k else None,
-                'current_gap': (max_dn - lastdn) if lastdn else None,
-                # None khi bộ đó mới về đúng 1 lần trong toàn bộ lịch sử
-                'prev_gap':    (lastdn - prevdn) if (lastdn and prevdn) else None,
-                'last_draw':   lastdn,
-            }
-
-        any_row = _row('***', any_cnt, any_last, any_prev)
-        # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không
-        # nói bộ nào vừa ra — trả thêm để giao diện hiện được.
-        any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
-
-        return jsonify({
-            'total_draws': total_draws,
-            'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n]) for n in range(1, 7)],
-            'any':         any_row,
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/sum-stats')
-@cache_resp(300, vary_on_draw=True)
-@limiter.limit("30 per minute")
-def sum_stats():
-    """P185: thống kê theo TỔNG 3..18 — trung bình bao nhiêu kỳ về một lần
-    và hiện đã bao nhiêu kỳ chưa về.
-
-    Dùng thẳng cột sum_value nên chạy được trên cả hai backend.
-    """
-    try:
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        cur.execute("SELECT COUNT(*), MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
-        total_draws, max_dn = cur.fetchone()
-        total_draws = total_draws or 0
-        max_dn      = max_dn or 0
-
+        # ── theo tổng ────────────────────────────────────────
         cur.execute(
             "SELECT sum_value, COUNT(*), MAX(draw_number) FROM draw_history "
             "WHERE numbers IS NOT NULL AND sum_value BETWEEN 3 AND 18 "
             "GROUP BY sum_value"
         )
-        agg = {int(s): (int(k), int(dn)) for s, k, dn in cur.fetchall()}
+        agg = {int(sv): (int(k), int(dn)) for sv, k, dn in cur.fetchall()}
 
         # P203: khoảng cách của CHU KỲ VỪA XONG = kỳ về gần nhất trừ kỳ về
         # trước đó. Có nó mới so được "đang chưa về 84 kỳ" với "đợt trước về
@@ -2553,27 +2445,141 @@ def sum_stats():
         hai_ky_cuoi: dict = {}
         for sv, dn in cur.fetchall():
             hai_ky_cuoi.setdefault(int(sv), []).append(int(dn))
+
+        # ── theo trip ────────────────────────────────────────
+        # Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
+        # trong Python — khoảng 2,8% số dòng.
+        cur.execute(
+            "SELECT draw_number, numbers FROM draw_history "
+            "WHERE numbers IS NOT NULL AND sum_value IN (3,6,9,12,15,18) "
+            "ORDER BY draw_number"
+        )
+        rows = cur.fetchall()
+    finally:
         conn.close()
 
-        # số cách tạo ra mỗi tổng trong 216 khả năng — để đối chiếu lý thuyết
-        WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
-                11:27, 12:25, 13:21, 14:15, 15:10, 16:6, 17:3, 18:1}
+    sums = []
+    for sv in range(3, 19):
+        k, lastdn = agg.get(sv, (0, None))
+        sums.append({
+            'sum':          sv,
+            'count':        k,
+            'avg_gap':      round(total_draws / k) if k else None,
+            'avg_gap_ly_thuyet': round(216 / _WAYS[sv]),
+            'current_gap':  (max_dn - lastdn) if lastdn else None,
+            # None khi tổng đó mới về đúng 1 lần trong toàn bộ lịch sử
+            'prev_gap':     (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
+                                hai_ky_cuoi.get(sv, [])),
+            'size':         'NHO' if sv <= 9 else ('HOA' if sv <= 11 else 'LON'),
+        })
 
-        out = []
-        for s in range(3, 19):
-            k, lastdn = agg.get(s, (0, None))
-            out.append({
-                'sum':          s,
-                'count':        k,
-                'avg_gap':      round(total_draws / k) if k else None,
-                'avg_gap_ly_thuyet': round(216 / WAYS[s]),
-                'current_gap':  (max_dn - lastdn) if lastdn else None,
-                # None khi tổng đó mới về đúng 1 lần trong toàn bộ lịch sử
-                'prev_gap':     (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
-                                    hai_ky_cuoi.get(s, [])),
-                'size':         'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON'),
-            })
-        return jsonify({'total_draws': total_draws, 'sums': out})
+    cnt  = {n: 0 for n in range(1, 7)}
+    last = {n: None for n in range(1, 7)}
+    # P205: lần về TRƯỚC lần gần nhất — để biết chu kỳ vừa xong dài bao nhiêu
+    # kỳ. Vòng lặp đã duyệt theo draw_number tăng dần nên chỉ cần nhớ giá trị
+    # cũ trước khi ghi đè, không phải truy vấn thêm.
+    prev = {n: None for n in range(1, 7)}
+    any_cnt, any_last, any_prev, any_last_n = 0, None, None, None
+    for dn, raw in rows:
+        try:
+            ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
+            a, b, c = int(ns[0]), int(ns[1]), int(ns[2])
+        except Exception:
+            continue
+        if a == b == c and 1 <= a <= 6:
+            cnt[a]  += 1
+            prev[a]  = last[a]      # giữ lần về cũ trước khi ghi đè
+            last[a]  = dn
+            any_cnt += 1
+            any_prev = any_last
+            any_last = dn
+            any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
+                               # lặp là trip mới nhất
+
+    def _row(label, k, lastdn, prevdn=None):
+        return {
+            'combo':       label,
+            'count':       k,
+            'avg_gap':     round(total_draws / k) if k else None,
+            'current_gap': (max_dn - lastdn) if lastdn else None,
+            # None khi bộ đó mới về đúng 1 lần trong toàn bộ lịch sử
+            'prev_gap':    (lastdn - prevdn) if (lastdn and prevdn) else None,
+            'last_draw':   lastdn,
+        }
+
+    any_row = _row('***', any_cnt, any_last, any_prev)
+    # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
+    # bộ nào vừa ra — trả thêm để giao diện hiện được.
+    any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
+
+    return {
+        'total_draws': total_draws,
+        'sums':        sums,
+        'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n]) for n in range(1, 7)],
+        'any':         any_row,
+    }
+
+
+def _thong_ke() -> dict:
+    """Ảnh chụp, nhớ tạm _STATS_TTL giây. Hết hạn thì tính lại một lần."""
+    now = _time.time()
+    with _stats_snap_lock:
+        if _stats_snap['data'] is not None and now < _stats_snap['exp']:
+            return _stats_snap['data']
+    data = _tinh_thong_ke()
+    with _stats_snap_lock:
+        _stats_snap['data'], _stats_snap['exp'] = data, _time.time() + _STATS_TTL
+    return data
+
+
+@app.route('/api/board-stats')
+@limiter.limit("30 per minute")
+def board_stats():
+    """Cả bảng tổng lẫn bảng trip trong MỘT lần gọi.
+
+    Ảnh chụp dùng chung đã bảo đảm hai bảng cùng mốc trong phạm vi một
+    instance, nhưng Cloud Run có thể chạy nhiều instance: gọi hai endpoint
+    riêng thì hai request có thể rơi vào hai instance có ảnh chụp lệch nhau,
+    và cặp "tổng 3 vs trip 111" lại lệch như cũ. Một request thì chỉ có một
+    instance trả lời — hết đường lệch.
+
+    /api/sum-stats và /api/triple-stats giữ nguyên cho thứ khác đang gọi.
+    """
+    try:
+        return jsonify(_thong_ke())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/triple-stats')
+@limiter.limit("30 per minute")
+def triple_stats():
+    """P185: thống kê 6 bộ ba số trùng nhau (111..666) + gộp chung.
+
+    Mỗi bộ trả về: số lần về, trung bình bao nhiêu kỳ mới về một lần, và
+    hiện đã bao nhiêu kỳ chưa về. Trung bình = tổng số kỳ / số lần về (cùng
+    cách tính với các trang thống kê Bingo18 khác, để đối chiếu được).
+    """
+    try:
+        d = _thong_ke()
+        return jsonify({'total_draws': d['total_draws'],
+                        'triples':     d['triples'],
+                        'any':         d['any']})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/sum-stats')
+@limiter.limit("30 per minute")
+def sum_stats():
+    """P185: thống kê theo TỔNG 3..18 — trung bình bao nhiêu kỳ về một lần
+    và hiện đã bao nhiêu kỳ chưa về.
+
+    Dùng thẳng cột sum_value nên chạy được trên cả hai backend.
+    """
+    try:
+        d = _thong_ke()
+        return jsonify({'total_draws': d['total_draws'], 'sums': d['sums']})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -4749,14 +4755,29 @@ def algo_impact():
                 conn.close()
                 return jsonify({'error': 'no_algo_data', 'message': 'Chưa có draw nào sau khi deploy thuật toán'}), 200
 
+            # Đếm ngay trong SQL thay vì kéo cả 30k+ hàng về Python.
+            #
+            # Câu cũ SELECT từng hàng rồi mới đếm trong Python — cả một giao
+            # dịch dài mở suốt thời gian đó, và psycopg2 mặc định không
+            # autocommit nên nó GIỮ KHOÁ đọc trên cả hai bảng từ lúc chạy câu
+            # MIN(draw_number) ở trên. Quét production ngay sau khi deploy
+            # P207 bắt được endpoint này trả 500 "deadlock detected": container
+            # mới khởi động chạy CREATE INDEX IF NOT EXISTS (cần khoá mạnh)
+            # đúng lúc giao dịch dài này đang mở.
+            #
+            # Gộp lại còn 2 hàng: giao dịch ngắn đi hàng chục lần nên gần như
+            # không còn cửa sổ để kẹt, và endpoint cũng nhanh hơn hẳn.
             cur.execute("""
                 SELECT
                     p.draw_number < %s AS is_before,
-                    COALESCE(pr.is_win_size, pr.is_win, FALSE) AS win
+                    COUNT(*) AS n,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(pr.is_win_size, pr.is_win, FALSE)
+                    ) AS wins
                 FROM predictions p
                 JOIN prediction_results pr ON pr.prediction_id = p.id
                 WHERE pr.actual_numbers IS NOT NULL
-                ORDER BY p.draw_number
+                GROUP BY 1
             """, (since_draw,))
         else:
             conn.close()
@@ -4765,22 +4786,19 @@ def algo_impact():
         rows = cur.fetchall()
         conn.close()
 
-        before = [w for is_b, w in rows if is_b]
-        after  = [w for is_b, w in rows if not is_b]
+        dem = {bool(is_b): (int(n), int(w)) for is_b, n, w in rows}
 
         import math as _math
 
-        def stats(wins_list):
-            n = len(wins_list)
+        def stats(n, w):
             if n == 0:
                 return {'n': 0, 'wins': 0, 'wr': None, 'ci95': None}
-            w = sum(wins_list)
             wr = w / n
-            se = _math.sqrt(wr * (1 - wr) / n) if n > 0 else 0
+            se = _math.sqrt(wr * (1 - wr) / n)
             return {'n': n, 'wins': w, 'wr': round(wr, 4), 'ci95': round(1.96 * se, 4)}
 
-        sb = stats(before)
-        sa = stats(after)
+        sb = stats(*dem.get(True,  (0, 0)))
+        sa = stats(*dem.get(False, (0, 0)))
         delta = None
         z = None
         if sb['wr'] is not None and sa['wr'] is not None:
