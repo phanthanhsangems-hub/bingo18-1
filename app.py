@@ -60,14 +60,65 @@ _resp_cache: dict = {}   # full_path -> (payload_bytes, expiry_ts)
 _resp_cache_lock = _threading.Lock()
 _RESP_CACHE_MAX = 200    # max live entries; evict expired then oldest-expiry when full
 
-def cache_resp(ttl: int = 120):
-    """Cache a GET endpoint's JSON response for `ttl` seconds per unique URL."""
+# P207: "phiên bản dữ liệu" = số kỳ mới nhất.
+#
+# Bảng trip và bảng tổng đều cache 300s, nhưng hai mục cache HẾT HẠN ĐỘC LẬP
+# nhau. Kỳ mới về lúc t thì bảng nào hết hạn trước sẽ thấy kỳ đó trước, bảng
+# kia còn giữ số cũ tới 5 phút nữa. Trên màn hình thành ra:
+#
+#     tổng  3: chưa về 183   |   trip 111: chưa về 182
+#     tổng 18: chưa về 326   |   trip 666: chưa về 325
+#
+# Tổng 3 CHỈ có thể ra từ 111 và tổng 18 CHỈ có thể ra từ 666, nên hai cặp đó
+# bắt buộc bằng nhau. Lệch 1 là dấu hiệu của cache lệch pha, không phải dữ
+# liệu sai — nhưng người dùng nhìn vào thì thấy bảng "chưa cập nhật".
+#
+# Sửa: gắn số kỳ mới nhất vào khoá cache. Kỳ mới về là MỌI mục cache theo
+# phiên bản đều trượt cùng lúc, hai bảng luôn cùng một mốc.
+#
+# KHÔNG nhớ tạm số kỳ này. Bản đầu của P207 nhớ 15 giây cho đỡ tốn truy vấn
+# — và tái tạo lại đúng con bug: khoá cache đứng yên trong 15s trong khi bên
+# trong endpoint vẫn đọc max_dn mới, nên hai bảng vẫn lệch được 1 kỳ. Test
+# test_cache_skew.py bắt được điều đó. Khoá phải đi cùng nhịp với chính giá
+# trị mà endpoint dùng, nếu không thì nó vô dụng.
+#
+# Giá phải trả rất nhỏ: MAX(draw_number) chạy trên idx_draw_number
+# (draw_number DESC) — quét ngược đúng một hàng rồi dừng.
+_latest_dn: dict = {'dn': 0}
+_latest_dn_lock = _threading.Lock()
+
+
+def _draw_version() -> int:
+    """Số kỳ mới nhất. Lỗi DB thì trả giá trị đọc được lần trước (không ném)."""
+    try:
+        conn = db.get_connection()
+        cur  = conn.cursor()
+        cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+        dn = int(cur.fetchone()[0] or 0)
+        conn.close()
+    except Exception:
+        with _latest_dn_lock:
+            return _latest_dn['dn']
+    with _latest_dn_lock:
+        _latest_dn['dn'] = dn
+    return dn
+
+
+def cache_resp(ttl: int = 120, vary_on_draw: bool = False):
+    """Cache a GET endpoint's JSON response for `ttl` seconds per unique URL.
+
+    vary_on_draw=True: thêm số kỳ mới nhất vào khoá, để kỳ mới về thì cache
+    trượt ngay thay vì chờ hết TTL. Dùng cho các endpoint mà người dùng đối
+    chiếu chéo với nhau (sum-stats vs triple-stats).
+    """
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if request.method != 'GET':
                 return fn(*args, **kwargs)
             key = request.full_path  # includes query string
+            if vary_on_draw:
+                key = f"{key}|dn{_draw_version()}"
             now = _time.time()
             with _resp_cache_lock:
                 hit = _resp_cache.get(key)
@@ -2380,7 +2431,7 @@ def draw_grid():
 
 
 @app.route('/api/triple-stats')
-@cache_resp(300)
+@cache_resp(300, vary_on_draw=True)
 @limiter.limit("30 per minute")
 def triple_stats():
     """P185: thống kê 6 bộ ba số trùng nhau (111..666) + gộp chung.
@@ -2463,7 +2514,7 @@ def triple_stats():
 
 
 @app.route('/api/sum-stats')
-@cache_resp(300)
+@cache_resp(300, vary_on_draw=True)
 @limiter.limit("30 per minute")
 def sum_stats():
     """P185: thống kê theo TỔNG 3..18 — trung bình bao nhiêu kỳ về một lần

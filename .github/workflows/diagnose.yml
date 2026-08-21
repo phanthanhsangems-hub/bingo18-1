@@ -208,3 +208,59 @@ jobs:
           else:
               print("\n>>> Khop het — khong lech")
           PYEOF
+
+      - name: Bảng tổng và bảng trip phải cùng một mốc kỳ (P207)
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"
+          # Goi LIEN TIEP khong cachebust — dung nhu trinh duyet lam. Truoc
+          # P207 hai cache 300s het han doc lap nen day la luc lech lo ra.
+          curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats"     > /tmp/ss.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/triple-stats"  > /tmp/ts.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=100" > /tmp/g.json
+          for f in ss ts g; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json
+          ss = json.load(open('/tmp/ss.json'))
+          ts = json.load(open('/tmp/ts.json'))
+          g  = json.load(open('/tmp/g.json'))['draws']
+          sm = {x['sum']:   x['current_gap'] for x in ss['sums']}
+          tt = {x['combo']: x                for x in ts['triples']}
+
+          have = {d['draw_number'] for d in g}
+          lo, hi = min(have), max(have)
+          thieu = sorted(set(range(lo, hi + 1)) - have)
+          print(f"Khoang #{lo}-#{hi}: thieu {len(thieu)} ky {thieu}\n")
+
+          # tong 3 CHI ra duoc tu 111, tong 18 CHI ra duoc tu 666
+          print("=== TONG 3 vs TRIP 111, TONG 18 vs TRIP 666 (bat buoc bang nhau) ===")
+          lech = []
+          for tong, combo in ((3, '111'), (18, '666')):
+              a, b = sm[tong], tt[combo]['current_gap']
+              if a != b:
+                  lech.append(f"tong {tong}={a} nhung trip {combo}={b} (chenh {a-b})")
+              print(f"  tong {tong:2d}: chua ve {a:4d} | trip {combo}: chua ve {b:4d}"
+                    f" -> {'OK' if a == b else 'LECH'}")
+          a, b = ss['total_draws'], ts['total_draws']
+          if a != b:
+              lech.append(f"total_draws: sum-stats {a} nhung triple-stats {b}")
+          print(f"  total_draws: {a} vs {b} -> {'OK' if a == b else 'LECH'}")
+
+          print()
+          print("=== LAN VE GAN NHAT CUA TUNG TRIP ===")
+          for n in range(1, 7):
+              c = str(n) * 3
+              print(f"  {c}: chua ve {tt[c]['current_gap']:4d} ky -> ky #{tt[c]['last_draw']}")
+
+          print()
+          if lech:
+              print(">>> HAI BANG LECH NHAU:")
+              for x in lech: print("    " + x)
+              raise SystemExit(1)
+          print(">>> Hai bang cung mot moc — dung")
+          PYEOF
