@@ -791,8 +791,41 @@ def sync_from_github():
         df = db.get_recent_draws(1)
         latest_in_db = int(df.iloc[0]['draw_number']) if not df.empty else 0
 
-        # Chỉ insert kỳ mới hơn
+        # P206: ?fill_gaps=1 để bù các kỳ THIẾU Ở GIỮA.
+        #
+        # Trước đây vòng lặp bỏ qua mọi kỳ <= latest_in_db, nên endpoint này
+        # chỉ NỐI THÊM kỳ mới và không bao giờ bù được lỗ hổng. Chạy thật cho
+        # kết quả new_inserted=0 trong khi DB đang thiếu #182582, #182583 và
+        # file nguồn có tới 86.624 bản ghi.
+        #
+        # Câu INSERT vốn đã có ON CONFLICT DO NOTHING nên thử chèn kỳ đã có là
+        # vô hại; bộ lọc kia chỉ là tối ưu tốc độ, không cần cho tính đúng.
+        #
+        # CHỈ bù lỗ hổng BÊN TRONG khoảng [min, max] đang có. Không nới lịch
+        # sử về quá khứ: file nguồn dài hơn DB, chèn thêm hàng nghìn kỳ cũ sẽ
+        # đổi total_draws và làm lệch toàn bộ cột "TB kỳ về".
+        fill_gaps = request.args.get('fill_gaps') in ('1', 'true', 'yes')
+        thieu: set = set()
+        if fill_gaps:
+            _c = db.get_connection()
+            try:
+                _cur = _c.cursor()
+                _cur.execute("SELECT MIN(draw_number), MAX(draw_number) FROM draw_history")
+                _lo, _hi = _cur.fetchone()
+                if _lo and _hi:
+                    _cur.execute(
+                        "SELECT draw_number FROM draw_history "
+                        "WHERE draw_number BETWEEN %s AND %s" % (_lo, _hi)
+                        if USE_POSTGRES else
+                        "SELECT draw_number FROM draw_history "
+                        "WHERE draw_number BETWEEN %d AND %d" % (_lo, _hi))
+                    _co = {int(r[0]) for r in _cur.fetchall()}
+                    thieu = set(range(int(_lo), int(_hi) + 1)) - _co
+            finally:
+                _c.close()
+
         new_count = 0
+        gap_filled = 0
         conn = db.get_connection()
         try:
             cur = conn.cursor()
@@ -802,7 +835,8 @@ def sync_from_github():
                 if not draw_number or not numbers:
                     continue
                 draw_number = int(draw_number)
-                if draw_number <= latest_in_db:
+                la_lo_hong = draw_number in thieu
+                if draw_number <= latest_in_db and not la_lo_hong:
                     continue
                 if isinstance(numbers, list) and len(numbers) == 3:
                     total = sum(numbers)
@@ -821,17 +855,27 @@ def sync_from_github():
                             "VALUES (?, ?, ?, ?, ?)",
                             (draw_number, json.dumps(numbers), draw_time, total, size)
                         )
-                    new_count += cur.rowcount
+                    _them = cur.rowcount
+                    new_count += _them
+                    if la_lo_hong and _them:
+                        gap_filled += 1
             conn.commit()
         finally:
             conn.close()
 
         return jsonify({
             "status": "success",
-            "message": f"Đã sync {new_count} kỳ mới từ GitHub",
+            "message": (f"Đã sync {new_count} kỳ từ GitHub"
+                        + (f" (trong đó {gap_filled} kỳ bù lỗ hổng)" if fill_gaps else "")),
             "total_in_file": len(records),
             "new_inserted": new_count,
             "latest_was": latest_in_db,
+            # P206: chỉ có khi gọi kèm ?fill_gaps=1
+            "fill_gaps": fill_gaps,
+            "gaps_found": len(thieu) if fill_gaps else None,
+            "gaps_filled": gap_filled if fill_gaps else None,
+            "gaps_remaining": (sorted(thieu)[:20] if fill_gaps and gap_filled < len(thieu)
+                               else None),
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500

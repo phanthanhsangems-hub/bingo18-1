@@ -37,11 +37,14 @@ jobs:
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           echo "Dang goi sync-github (lay du lieu tu vietvudanh/vietlott-data)..."
+          # ?fill_gaps=1 (P206): khong co tham so nay thi endpoint CHI noi them
+          # ky moi, khong bao gio bu duoc lo hong o giua — chay that cho ket
+          # qua new_inserted=0 trong khi DB dang thieu #182582, #182583.
           # LUU Y: endpoint nay chi nhan GET (app.py:762). Dung -X POST thi
           # bien Google chan truoc voi loi 411 Length Required vi POST khong
           # co body thieu header Content-Length.
           CODE=$(curl -s -o /tmp/kq.json -w '%{http_code}' --max-time 300 \
-                 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE/api/sync-github")
+                 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE/api/sync-github?fill_gaps=1")
           echo "HTTP $CODE"
           head -c 600 /tmp/kq.json; echo
           [ "$CODE" = "200" ] || { echo "That bai — xem thong bao o tren."; exit 1; }
