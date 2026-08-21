@@ -99,6 +99,65 @@ jobs:
           fi
           echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
 
+      # Kiem tra nhat quan TOAN DIEN: lay 100 ky gan nhat (draw-grid TINH tong
+      # tu numbers), roi doi chieu voi current_gap ma sum-stats/triple-stats
+      # bao. Bat duoc ca hai loai loi: du lieu sai VA man hinh cu.
+      - name: Đối chiếu tổng & trip với 100 kỳ gần nhất
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          TS=$(date +%s)
+          for f in draw-grid?n=100 sum-stats triple-stats; do
+            n=$(echo "$f" | cut -d? -f1)
+            curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+                 "$BASE/api/$f&cb=$TS" 2>/dev/null > /tmp/$n.json || \
+            curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+                 "$BASE/api/$f?cb=$TS" > /tmp/$n.json
+          done
+          python3 - <<'PYEOF'
+          import json
+          g = json.load(open('/tmp/draw-grid.json'))['draws']
+          ss = {x['sum']: x for x in json.load(open('/tmp/sum-stats.json'))['sums']}
+          tr = json.load(open('/tmp/triple-stats.json'))
+          tt = {x['combo']: x for x in tr['triples']}
+          maxdn = max(d['draw_number'] for d in g)
+          print(f"Ky moi nhat #{maxdn} — kiem tra tren {len(g)} ky gan nhat\n")
+
+          print("=== TONG ===")
+          bad = []
+          for s in range(3, 19):
+              hit = [d for d in g if d['sum'] == s]
+              if not hit:
+                  continue                       # khong xuat hien trong 100 ky
+              gap_that = maxdn - max(d['draw_number'] for d in hit)
+              gap_bao  = ss[s]['current_gap']
+              ok = gap_that == gap_bao
+              if not ok: bad.append(f"tong {s}: that {gap_that}, bao {gap_bao}")
+              print(f"  tong {s:2d}: ve gan nhat cach {gap_that:3d} ky | bang bao {gap_bao:3d} -> {'OK' if ok else 'LECH'}")
+
+          print("\n=== TRIP ===")
+          for n in range(1, 7):
+              combo = str(n)*3
+              hit = [d for d in g if d['numbers'] == [n, n, n]]
+              gap_bao = tt[combo]['current_gap']
+              if hit:
+                  gap_that = maxdn - max(d['draw_number'] for d in hit)
+                  ok = gap_that == gap_bao
+                  if not ok: bad.append(f"trip {combo}: that {gap_that}, bao {gap_bao}")
+                  print(f"  {combo}: CO ra, cach {gap_that:3d} ky | bang bao {gap_bao:3d} -> {'OK' if ok else 'LECH'}")
+              else:
+                  ok = gap_bao is None or gap_bao > len(g)
+                  if not ok: bad.append(f"trip {combo}: khong ra trong {len(g)} ky nhung bao {gap_bao}")
+                  print(f"  {combo}: khong ra trong {len(g)} ky | bang bao {gap_bao} -> {'OK' if ok else 'LECH'}")
+
+          print(f"\nTrip gan nhat theo bang: {tr['any'].get('last_combo')} tai ky #{tr['any'].get('last_draw')}")
+          trips = [d for d in g if len(set(d['numbers'])) == 1]
+          print(f"Trip tim thay trong {len(g)} ky: " + (", ".join(f"#{d['draw_number']} {d['numbers'][0]}x3" for d in trips) or "khong co"))
+          print()
+          print(">>> " + (f"CO {len(bad)} CHO LECH:\n  " + "\n  ".join(bad) if bad else "KHOP HET — du lieu dung"))
+          PYEOF
+
       # Đối chiếu hai nguồn tổng: /api/draw-grid TÍNH tổng từ numbers, còn
       # /api/sum-stats dùng cột sum_value lưu sẵn. Lệch nhau nghĩa là cột
       # sum_value ghi sai (watcher lấy 'total' cào từ web thay vì tự cộng).
