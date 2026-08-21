@@ -1,0 +1,73 @@
+name: Bù kỳ thiếu
+
+# Chạy tay từ tab Actions. Không tự kích hoạt.
+#
+# Vì sao cần: /api/sync-github đòi X-Trigger-Secret, mà secret nằm trong
+# Cloud Run — người dùng không tự điền vào lệnh curl được. Workflow thì đã
+# có sẵn secrets.TRIGGER_SECRET, nên bấm nút là chạy, không phải đụng tới
+# secret lần nào.
+on:
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Đếm kỳ thiếu TRƯỚC khi bù
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/draw-grid?n=100&cb=$(date +%s)" > /tmp/truoc.json
+          python3 - <<'PYEOF'
+          import json
+          d = json.load(open('/tmp/truoc.json'))['draws']
+          dns = sorted(x['draw_number'] for x in d)
+          thieu = [n for n in range(dns[0], dns[-1] + 1) if n not in set(dns)]
+          print(f"Khoang kiem tra: #{dns[0]} -> #{dns[-1]}  ({len(dns)} ky co that)")
+          print(f"Ky THIEU: {len(thieu)}" + (f" -> {thieu}" if thieu else " (khong thieu ky nao)"))
+          open('/tmp/thieu_truoc.txt','w').write(str(len(thieu)))
+          PYEOF
+
+      - name: Gọi /api/sync-github để bù kết quả quay
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          echo "Dang goi sync-github (lay du lieu tu vietvudanh/vietlott-data)..."
+          # LUU Y: endpoint nay chi nhan GET (app.py:762). Dung -X POST thi
+          # bien Google chan truoc voi loi 411 Length Required vi POST khong
+          # co body thieu header Content-Length.
+          CODE=$(curl -s -o /tmp/kq.json -w '%{http_code}' --max-time 300 \
+                 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE/api/sync-github")
+          echo "HTTP $CODE"
+          head -c 600 /tmp/kq.json; echo
+          [ "$CODE" = "200" ] || { echo "That bai — xem thong bao o tren."; exit 1; }
+
+      - name: Đếm lại SAU khi bù
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          sleep 10
+          curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/draw-grid?n=100&cb=$(date +%s)" > /tmp/sau.json
+          python3 - <<'PYEOF'
+          import json
+          d = json.load(open('/tmp/sau.json'))['draws']
+          dns = sorted(x['draw_number'] for x in d)
+          thieu = [n for n in range(dns[0], dns[-1] + 1) if n not in set(dns)]
+          truoc = int(open('/tmp/thieu_truoc.txt').read())
+          print(f"Khoang kiem tra: #{dns[0]} -> #{dns[-1]}")
+          print(f"Ky thieu TRUOC: {truoc}")
+          print(f"Ky thieu SAU  : {len(thieu)}" + (f" -> {thieu}" if thieu else ""))
+          if len(thieu) < truoc:
+              print(f"\n>>> Da bu duoc {truoc - len(thieu)} ky.")
+          elif truoc == 0:
+              print("\n>>> Khong co ky nao thieu tu dau.")
+          else:
+              print("\n>>> Khong bu duoc ky nao. Nguon GitHub co the chua co du lieu")
+              print("    cho cac ky do, hoac chung that su khong ton tai.")
+          PYEOF
