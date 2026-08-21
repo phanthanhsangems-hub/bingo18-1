@@ -125,3 +125,4 @@
 /healthz
 /manifest.json
 /sw.js
+/api/board-stats

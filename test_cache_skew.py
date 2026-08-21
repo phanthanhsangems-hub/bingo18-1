@@ -6,6 +6,8 @@ Tổng 3 CHỈ ra được từ 111, tổng 18 CHỈ ra được từ 666. Nên 
 Trước P207 hai endpoint cache 300s riêng, hết hạn độc lập. Kỳ mới về thì
 bảng nào hết hạn trước sẽ nhảy trước, bảng kia đứng yên tới 5 phút. Người
 dùng nhìn thấy 183 vs 182 và kết luận "hệ thống chưa cập nhật".
+
+P207 cho hai bảng dùng CHUNG một ảnh chụp, nên không còn hai bản để lệch.
 """
 import os
 import sqlite3
@@ -61,8 +63,8 @@ def doc(cl):
 def reset_cache():
     with A._resp_cache_lock:
         A._resp_cache.clear()
-    with A._latest_dn_lock:
-        A._latest_dn['dn'] = 0
+    with A._stats_snap_lock:
+        A._stats_snap['data'], A._stats_snap['exp'] = None, 0.0
 
 
 nap()
@@ -131,17 +133,39 @@ if lech:
 else:
     print("  OK   5 ky lien tiep: khong ky nao lam hai bang lech")
 
-# 5) cache van con tac dung (khong pha vo muc dich ban dau)
+# 5b) /api/board-stats: mot request duy nhat -> khong the lech
 reset_cache()
-cl.get('/api/sum-stats')
-r = cl.get('/api/sum-stats')
-if r.headers.get('X-Cache') == 'HIT':
-    print("  OK   Cache van hoat dong khi chua co ky moi (X-Cache: HIT)")
+bs = cl.get('/api/board-stats').get_json()
+bsm = {x['sum']: x['current_gap'] for x in bs['sums']}
+bst = {x['combo']: x['current_gap'] for x in bs['triples']}
+print()
+if bsm[3] == bst['111'] and bsm[18] == bst['666']:
+    print(f"  OK   board-stats trong mot request: tong3={bsm[3]} = trip111={bst['111']}")
 else:
-    fails.append(f"cache mat tac dung: X-Cache={r.headers.get('X-Cache')}")
+    fails.append(f"board-stats lech: tong3={bsm[3]} trip111={bst['111']}, "
+                 f"tong18={bsm[18]} trip666={bst['666']}")
+
+# 6) van con cache — khong duoc bo hoan toan (moi lan goi lai quet lai
+#    lich su thi dashboard tu lam sap chinh no)
+reset_cache()
+goc = A._tinh_thong_ke
+dem = [0]
+def _dem():
+    dem[0] += 1
+    return goc()
+A._tinh_thong_ke = _dem
+try:
+    for _ in range(4):
+        cl.get('/api/sum-stats'); cl.get('/api/triple-stats')
+finally:
+    A._tinh_thong_ke = goc
+if dem[0] == 1:
+    print("  OK   8 lan goi -> chi 1 lan quet DB (dung chung anh chup)")
+else:
+    fails.append(f"8 lan goi ma quet DB {dem[0]} lan, dang ky vong cache")
 
 print("=" * 60)
-print(f"RESULTS: {5 - len(fails)} passed, {len(fails)} failed")
+print(f"RESULTS: {6 - len(fails)} passed, {len(fails)} failed")
 for f in fails:
     print("  FAIL " + f)
 print("=" * 60)
