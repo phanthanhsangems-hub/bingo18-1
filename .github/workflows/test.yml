@@ -35,3 +35,4 @@ jobs:
           python test_pg_compat.py
           python test_postgres_import.py
           python test_ip_allowlist.py
+          python test_fill_gaps.py
