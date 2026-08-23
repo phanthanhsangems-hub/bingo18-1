@@ -551,7 +551,9 @@ async function loadBetSignal() {
 function safe(fn) { return fn().catch(err => console.warn(fn.name, err)); }
 // ── P187: Lưới chi tiết — hàng = kỳ, cột = số 1..6 ───────────
 async function loadDrawGrid() {
-  const d = await J('/api/draw-grid?n=24');
+  // Người dùng muốn xem 160 kỳ. Bảng cuộn trong khung riêng (.dg-wrap,
+  // max-height + thead sticky) nên số hàng lớn không kéo dài cả trang.
+  const d = await J('/api/draw-grid?n=160');
   const rows = d.draws || [];
   if (!rows.length) return;
 

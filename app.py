@@ -2348,7 +2348,10 @@ def draw_grid():
     """
     import ast as _ast
     try:
-        n = max(5, min(int(request.args.get('n', 24)), 100))
+        # Trần 100 cũ chặn đúng con số người dùng muốn xem (160). Mỗi kỳ chỉ
+        # là 3 số nên 200 kỳ vẫn là payload nhỏ, và câu lệnh có LIMIT chạy
+        # thẳng trên idx_draw_number nên chi phí tăng tuyến tính, không đột biến.
+        n = max(5, min(int(request.args.get('n', 24)), 200))
         conn = db.get_connection()
         cur  = conn.cursor()
         ph   = '%s' if USE_POSTGRES else '?'
