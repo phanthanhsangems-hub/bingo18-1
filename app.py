@@ -12138,27 +12138,36 @@ def weight_optimizer():
         import numpy as np
 
         n = min(int(request.args.get('n', 500)), 2000)
+        # Đoạn cũ mở BA kết nối và RÒ MẤT MỘT:
+        #     conn = db.get_connection()
+        #     cur  = db.get_connection().cursor()   # kết nối thứ 2, vô danh
+        #     conn.close()                          # đóng cái thứ 1
+        #     conn = db.get_connection()            # kết nối thứ 3
+        #     cur  = conn.cursor()
+        # Kết nối thứ 2 không ai giữ tham chiếu nên chỉ đóng khi bộ gom rác dọn
+        # tới, mà psycopg2 không autocommit — tức nó nằm đó "idle in transaction"
+        # giữ khoá đọc. Đúng loại rò mà database.py:164 nói là nguyên nhân cạn
+        # kết nối. try/finally để execute lỗi cũng vẫn đóng.
         conn = db.get_connection()
-        cur  = db.get_connection().cursor()
-        conn.close()
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        cur.execute("""
-            SELECT p.vote_breakdown,
-                CASE
-                    WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 9  THEN 'NHO'
-                    WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 11 THEN 'HOA'
-                    ELSE 'LON'
-                END AS actual_size
-            FROM predictions p
-            JOIN prediction_results pr ON pr.prediction_id = p.id
-            WHERE p.model_name = 'majority_vote'
-              AND p.vote_breakdown IS NOT NULL
-              AND pr.actual_numbers IS NOT NULL
-            ORDER BY p.draw_number DESC LIMIT %s
-        """, (n,))
-        rows = cur.fetchall()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT p.vote_breakdown,
+                    CASE
+                        WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 9  THEN 'NHO'
+                        WHEN (SELECT SUM(v::int) FROM json_array_elements_text(pr.actual_numbers::json) v) <= 11 THEN 'HOA'
+                        ELSE 'LON'
+                    END AS actual_size
+                FROM predictions p
+                JOIN prediction_results pr ON pr.prediction_id = p.id
+                WHERE p.model_name = 'majority_vote'
+                  AND p.vote_breakdown IS NOT NULL
+                  AND pr.actual_numbers IS NOT NULL
+                ORDER BY p.draw_number DESC LIMIT %s
+            """, (n,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
 
         if len(rows) < 30:
             return jsonify({'error': 'insufficient data', 'n': len(rows)})

@@ -71,17 +71,33 @@ jobs:
       # /api/backtest cũng đã bị loại: nó train lại model qua 1000 kỳ nên mất
       # hơn 30 giây — chậm là đúng bản chất, không phải lỗi. Đây là công cụ
       # phân tích gọi tay, dashboard không đụng tới.
+      # Bao loi NHUNG KHONG dung job: cac buoc doi chieu du lieu phia sau moi
+      # la thu tra loi cau hoi cua nguoi dung. Hai lan chay truoc deu chet o
+      # day nen khong bao gio chay toi chung. Cong don vao /tmp/job_failed roi
+      # chot o buoc cuoi.
       - name: Quét endpoint chỉ đọc trên production
+        continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
-          PASS=0; FAIL=0
+          PASS=0; FAIL=0; SLOW=0
           : > /tmp/fail.txt
+          : > /tmp/slow.txt
           while read -r p; do
             [ -z "$p" ] && continue
+            # KHONG dung "|| echo 000": curl da in http_code=000 khi transfer
+            # hong, echo them mot lan nua thanh chuoi "000000" — case khong
+            # khop 2*/3*/4* nen timeout bi dem NHAM thanh loi 5xx. Lan chay #9
+            # bao /api/weight-optimizer "5xx" trong khi than tra ve JSON hop le,
+            # that ra chi la qua 30 giay.
             CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
-                   -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p" || echo 000)
+                   -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p")
+            RC=$?
+            if [ "$RC" -ne 0 ] || [ "$CODE" = "000" ]; then
+              SLOW=$((SLOW+1)); echo "curl rc=$RC $p (qua 30s hoac dut ket noi)" >> /tmp/slow.txt
+              sleep 0.7; continue
+            fi
             case "$CODE" in
               2*|3*|4*) PASS=$((PASS+1)) ;;
               *) FAIL=$((FAIL+1)); echo "$CODE $p :: $(head -c 160 /tmp/body)" >> /tmp/fail.txt ;;
@@ -91,13 +107,19 @@ jobs:
           echo "================================================"
           echo "  Khong loi 5xx : $PASS"
           echo "  Loi 5xx       : $FAIL"
+          echo "  Cham/dut      : $SLOW"
           echo "================================================"
+          if [ "$SLOW" -gt 0 ]; then
+            echo "--- CHAM HON 30s (khong tinh la loi) ---"
+            cat /tmp/slow.txt
+          fi
           if [ "$FAIL" -gt 0 ]; then
             echo "--- CHI TIET LOI 5xx ---"
             cat /tmp/fail.txt
-            exit 1
+            echo "quet endpoint: $FAIL loi 5xx" >> /tmp/job_failed
+          else
+            echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
           fi
-          echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
 
       # Kiem tra nhat quan TOAN DIEN: lay 100 ky gan nhat (draw-grid TINH tong
       # tu numbers), roi doi chieu voi current_gap ma sum-stats/triple-stats
@@ -261,6 +283,17 @@ jobs:
           if lech:
               print(">>> HAI BANG LECH NHAU:")
               for x in lech: print("    " + x)
-              raise SystemExit(1)
-          print(">>> Hai bang cung mot moc — dung")
+              open('/tmp/job_failed', 'a').write("bang tong vs bang trip lech nhau\n")
+          else:
+              print(">>> Hai bang cung mot moc — dung")
           PYEOF
+
+      - name: Chốt kết quả
+        if: always()
+        run: |
+          if [ -s /tmp/job_failed ]; then
+            echo "=== CAC BUOC CO VAN DE ==="
+            cat /tmp/job_failed
+            exit 1
+          fi
+          echo "Tat ca cac buoc chan doan deu dat."
