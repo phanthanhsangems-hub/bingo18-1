@@ -270,11 +270,22 @@ def size_to_category(size_text: str) -> str:
     raise ValueError(f"size_to_category: unrecognised text '{size_text}' — compute from sum instead")
 
 
+def tinh_tong(draw: dict) -> int:
+    """Tổng THẬT SỰ được ghi vào DB.
+
+    Vietlott hay trả total=None (kỳ cũ lấy qua fetch_detail chẳng hạn), lúc đó
+    phải tự cộng. Tách ra thành hàm riêng để dòng log in đúng con số đã ghi —
+    trước đây log in thẳng draw.get('total') nên hiện "tổng=None" trong khi DB
+    nhận giá trị đã cộng, nhìn cứ như dữ liệu hỏng.
+    """
+    return draw.get('total') or sum(draw['numbers'])
+
+
 def insert_draw(conn, draw: dict) -> bool:
     try:
         cur      = conn.cursor()
         nums_str = str(draw['numbers'])
-        total    = draw.get('total') or sum(draw['numbers'])
+        total    = tinh_tong(draw)
         cat      = 'NHO' if total <= 9 else ('HOA' if total <= 11 else 'LON')
 
         cur.execute(f"""
@@ -1266,7 +1277,7 @@ def mode_bulk():
             ok = insert_draw(conn, draw)
             if ok:
                 ins += 1
-                logger.info(f"  ✅  #{draw_id}  {draw['numbers']}  tổng={draw.get('total')}")
+                logger.info(f"  ✅  #{draw_id}  {draw['numbers']}  tổng={tinh_tong(draw)}")
             else:
                 skip += 1
         else:
@@ -1336,7 +1347,7 @@ def mode_gaps():
         if draw:
             if insert_draw(conn, draw):
                 ins += 1
-                logger.info("  ✅  #%d  %s  tổng=%s", draw_id, draw['numbers'], draw.get('total'))
+                logger.info("  ✅  #%d  %s  tổng=%d", draw_id, draw['numbers'], tinh_tong(draw))
             else:
                 skip += 1
         else:
