@@ -1126,6 +1126,89 @@ def mode_morning_digest():
 #  FILL GAPS (GitHub source)
 # ══════════════════════════════════════════════════════════════
 
+def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
+                           toi_da: int = 10) -> list:
+    """Bù kỳ thiếu bằng cách hỏi THẲNG Vietlott, sau khi fill_gaps() đã thử GitHub.
+
+    Vì sao cần: fill_gaps() chỉ lấy từ file GitHub, mà file đó có lỗ hổng
+    riêng. Ngày 25/08 nó thiếu #183178-#183217 — nên kỳ #183180 (ra 3-3-3)
+    nằm ngoài DB nhiều ngày, và bảng trip báo "333 chưa về 492 kỳ" trong khi
+    thực tế mới 88 kỳ. Người dùng nhìn thấy sai, hệ thống không hề biết.
+
+    Vietlott có đủ dữ liệu, và watcher chạy trên máy người dùng nên gọi được
+    (Cloud Run bị chặn IP). Đây là nguồn cuối cùng — hết đường này thì kỳ đó
+    thật sự không còn ở đâu.
+
+    khong_co: các số kỳ Vietlott đã xác nhận không có (ví dụ #180152). Nhớ lại
+    để khỏi hỏi lại mỗi 10 phút mãi mãi. Reset khi watcher khởi động lại —
+    chấp nhận được, chỉ tốn vài request một lần.
+
+    toi_da: trần mỗi vòng, để một lỗ hổng lớn không làm treo vòng lặp watch.
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT MAX(draw_number) FROM {TABLE};")
+        row = cur.fetchone()
+        if not row or not row[0]:
+            return []
+        hi = int(row[0])
+        lo = hi - lookback
+
+        cur.execute(
+            f"SELECT draw_number FROM {TABLE} WHERE draw_number BETWEEN %s AND %s;",
+            (lo, hi),
+        )
+        co = {r[0] for r in cur.fetchall()}
+        thieu = [d for d in range(lo, hi + 1) if d not in co and d not in khong_co]
+        if not thieu:
+            return []
+
+        logger.info("vietlott-gaps: thiếu %d kỳ trong #%d-#%d, hỏi tối đa %d kỳ",
+                    len(thieu), lo, hi, toi_da)
+
+        da_bu = []
+        for draw_id in thieu[:toi_da]:
+            draw = fetch_detail(draw_id)
+            if draw and insert_draw(conn, draw):
+                da_bu.append((draw_id, draw['numbers'], tinh_tong(draw)))
+                logger.info("  ✅ vietlott-gaps #%d %s tổng=%d",
+                            draw_id, draw['numbers'], tinh_tong(draw))
+            else:
+                khong_co.add(draw_id)
+                logger.warning("  ❌ vietlott-gaps #%d: nguồn không có, sẽ không hỏi lại",
+                               draw_id)
+            time.sleep(0.35)
+        return da_bu
+    except Exception as e:
+        logger.error("vietlott-gaps lỗi: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return []
+
+
+def bao_da_bu(da_bu: list):
+    """Báo Telegram khi vừa bù được kỳ thiếu.
+
+    Watcher chạy bằng pythonw nên KHÔNG có cửa sổ console — log chỉ ghi vào
+    file mà người dùng không đọc. Bù kỳ làm đổi số liệu trên bảng (trip 333 từ
+    492 xuống 88 chẳng hạn), nên phải nói ra chứ không để im lặng.
+    """
+    if not da_bu:
+        return
+    dong = []
+    for dn, nums, tong in da_bu:
+        nhan = "  🎰 TRIP!" if len(set(nums)) == 1 else ""
+        dong.append(f"#{dn}: {'-'.join(str(n) for n in nums)} (tổng {tong}){nhan}")
+    _tg_send(
+        "🔧 ĐÃ BÙ KỲ THIẾU\n"
+        + f"Bù {len(da_bu)} kỳ mà GitHub không có, lấy thẳng từ Vietlott:\n"
+        + "\n".join(dong)
+        + "\n\nBảng thống kê đã cập nhật lại theo dữ liệu này."
+    )
+
+
 def fill_gaps(conn, lookback: int = 500) -> int:
     """
     Upsert `lookback` kỳ gần nhất từ GitHub vào DB (safety net khi PC offline).
@@ -1435,6 +1518,8 @@ def mode_watch():
     logger.info(f"👀  Watch mode: fetch mỗi {FETCH_INTERVAL}s, fill_gaps mỗi 600s")
 
     FILL_GAPS_INTERVAL    = 600  # 10 phút
+    # Số kỳ Vietlott xác nhận không có — nhớ để khỏi hỏi lại mỗi vòng.
+    vietlott_khong_co: set = set()
     MISSING_PRED_INTERVAL = 300  # 5 phút — #13 auto-retry missing predictions
     REMINDER_DELAY        = 240  # 4 phút sau kỳ mới → nhắc nhở ~2 phút trước kỳ tiếp
     last_fill_time    = 0
@@ -1520,6 +1605,17 @@ def mode_watch():
                     threading.Thread(
                         target=_run_sync_predictions,
                         args=(filled + 10,),
+                        daemon=True,
+                    ).start()
+
+                # GitHub xong vẫn có thể còn lỗ hổng, vì file GitHub có lỗ hổng
+                # của chính nó. Hỏi tiếp Vietlott — nguồn cuối cùng.
+                da_bu = va_lo_hong_tu_vietlott(conn, vietlott_khong_co)
+                if da_bu:
+                    bao_da_bu(da_bu)
+                    threading.Thread(
+                        target=_run_sync_predictions,
+                        args=(len(da_bu) + 10, min(d[0] for d in da_bu)),
                         daemon=True,
                     ).start()
                 last_fill_time = now
