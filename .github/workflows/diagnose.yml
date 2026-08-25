@@ -121,10 +121,10 @@ jobs:
             echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
           fi
 
-      # Kiem tra nhat quan TOAN DIEN: lay 100 ky gan nhat (draw-grid TINH tong
+      # Kiem tra nhat quan TOAN DIEN: lay 200 ky gan nhat (draw-grid TINH tong
       # tu numbers), roi doi chieu voi current_gap ma sum-stats/triple-stats
       # bao. Bat duoc ca hai loai loi: du lieu sai VA man hinh cu.
-      - name: Đối chiếu tổng & trip với 100 kỳ gần nhất
+      - name: Đối chiếu tổng & trip với 200 kỳ gần nhất
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
@@ -133,7 +133,7 @@ jobs:
           H="X-Trigger-Secret: $TRIGGER_SECRET"
           # Ghep URL tuong minh — vong lap cu ghep "sum-stats&cb=" thieu dau ?
           # nen file JSON rong va script chet o json.load.
-          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=100&cb=$TS"  > /tmp/draw-grid.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=200&cb=$TS"  > /tmp/draw-grid.json
           curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats?cb=$TS"        > /tmp/sum-stats.json
           curl -s --max-time 40 -H "$H" "$BASE/api/triple-stats?cb=$TS"     > /tmp/triple-stats.json
           for f in draw-grid sum-stats triple-stats; do
@@ -241,7 +241,7 @@ jobs:
           # P207 hai cache 300s het han doc lap nen day la luc lech lo ra.
           curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats"     > /tmp/ss.json
           curl -s --max-time 40 -H "$H" "$BASE/api/triple-stats"  > /tmp/ts.json
-          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=100" > /tmp/g.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=200" > /tmp/g.json
           for f in ss ts g; do
             python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
               echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
@@ -274,10 +274,32 @@ jobs:
           print(f"  total_draws: {a} vs {b} -> {'OK' if a == b else 'LECH'}")
 
           print()
-          print("=== LAN VE GAN NHAT CUA TUNG TRIP ===")
+          print("=== LAN VE GAN NHAT CUA TUNG TRIP (theo bang) ===")
           for n in range(1, 7):
               c = str(n) * 3
               print(f"  {c}: chua ve {tt[c]['current_gap']:4d} ky -> ky #{tt[c]['last_draw']}")
+
+          # Doi chieu nguoc: moi trip THAT SU co trong luoi phai duoc bang ghi
+          # nhan. Neu luoi co 333 o ky X ma bang van bao lan cuoi la ky cu hon
+          # X thi bang sai; neu ca hai deu khong co thi trip do that su chua ra.
+          print()
+          print(f"=== TRIP THAT SU CO TRONG {len(g)} KY GAN NHAT (#{lo}-#{hi}) ===")
+          co = [d for d in g if len(set(d['numbers'])) == 1]
+          if co:
+              for d in sorted(co, key=lambda x: -x['draw_number']):
+                  t = d['numbers'][0]
+                  c = str(t) * 3
+                  ghi = tt[c]['last_draw']
+                  dau = 'OK' if ghi is not None and ghi >= d['draw_number'] else 'BANG BO SOT!'
+                  if dau != 'OK':
+                      lech.append(f"luoi co {c} o #{d['draw_number']} nhung bang ghi lan cuoi #{ghi}")
+                  print(f"  #{d['draw_number']}  {t}x3   | bang ghi lan cuoi #{ghi} -> {dau}")
+          else:
+              print("  khong co trip nao")
+          for n in range(1, 7):
+              c = str(n) * 3
+              if not any(d['numbers'] == [n, n, n] for d in g):
+                  print(f"  {c}: KHONG ra trong {len(g)} ky nay")
 
           print()
           if lech:
