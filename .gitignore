@@ -1,12 +1,27 @@
 # Secrets
 .env
 *.env
+# Khoa service account cua Google. Máy người dùng đang có gcp-sa-key.json nằm
+# ngay trong thư mục repo và KHÔNG được chặn — chỉ cần một lần "git add ."
+# là khoá toàn quyền vào project GCP bị đẩy lên GitHub.
+gcp-sa-key.json
+*-sa-key.json
+*service-account*.json
+credentials.json
+client_secret*.json
 
 # Database
 data/*.db
 data/*.db-shm
 data/*.db-wal
 data/backups/
+# Chỉ chặn trong data/ là chưa đủ — máy người dùng có bingo18_fraud_data.db
+# và mấy file .xlsx xuất ra nằm thẳng ở thư mục gốc.
+*.db
+*.db-shm
+*.db-wal
+*.xlsx
+*.csv
 
 # Models
 model_store/
@@ -24,6 +39,7 @@ __pycache__/
 # Logs
 logs/
 *.log
+fetch_log*.txt
 
 # Claude Code (local-only settings)
 .claude/settings.local.json
@@ -38,3 +54,7 @@ Thumbs.db
 
 # Build
 *.bat
+
+# File tạm khi dò lỗi — máy người dùng đang có 5 cái temp_*.py chưa commit
+temp_*.py
+screenshots_auto/
