@@ -11,7 +11,8 @@ Bảng: public.draw_history
 
 Cách dùng:
   python sync_to_supabase.py --mode test    # kiểm tra kết nối
-  python sync_to_supabase.py --mode bulk    # sync toàn bộ kỳ còn thiếu
+  python sync_to_supabase.py --mode bulk    # sync các kỳ MỚI hơn kỳ cuối trong DB
+  python sync_to_supabase.py --mode gaps    # bù các kỳ THIẾU Ở GIỮA
   python sync_to_supabase.py --mode watch   # chạy liên tục mỗi 60s
 """
 import argparse, logging, os, sys, time, re, threading, subprocess
@@ -1282,6 +1283,80 @@ def mode_bulk():
         trigger_prediction()
 
 
+def mode_gaps():
+    """Bù các kỳ THIẾU Ở GIỮA bằng cách hỏi thẳng Vietlott.
+
+    mode_bulk chỉ chạy từ MAX(draw_number)+1 trở lên nên không bao giờ chạm
+    tới lỗ hổng ở giữa — cùng đúng lỗi mà P206 đã sửa cho /api/sync-github.
+
+    Còn /api/sync-github?fill_gaps=1 thì lấy từ file GitHub, mà file đó cũng
+    có lỗ hổng riêng của nó: ngày 25/08 nó thiếu #183178-#183217 và dừng ở
+    #183237 trong khi DB đã tới #183262. Những kỳ nằm trong lỗ hổng của CẢ
+    HAI thì chỉ Vietlott mới có — tức chỉ chạy được từ máy người dùng, vì
+    Vietlott chặn IP của Cloud Run.
+    """
+    conn = get_conn()
+    cur  = conn.cursor()
+    cur.execute(f"SELECT MIN(draw_number), MAX(draw_number), COUNT(*) FROM {TABLE};")
+    lo, hi, dem = cur.fetchone()
+    if not lo:
+        logger.error("Bảng rỗng, không có gì để bù.")
+        conn.close()
+        return
+
+    cur.execute(f"SELECT draw_number FROM {TABLE} WHERE draw_number BETWEEN %s AND %s;", (lo, hi))
+    co = {r[0] for r in cur.fetchall()}
+    thieu = sorted(set(range(lo, hi + 1)) - co)
+
+    logger.info("Khoảng #%d-#%d, có %d kỳ, THIẾU %d kỳ", lo, hi, dem, len(thieu))
+    if not thieu:
+        logger.info("✅  Không có lỗ hổng nào.")
+        conn.close()
+        return
+
+    # Lỗ hổng cũ nhiều năm trước là do nguồn không có, hỏi lại cũng vô ích và
+    # mất hàng giờ. Mặc định chỉ bù trong 5000 kỳ gần nhất — đủ phủ mọi thứ
+    # bảng thống kê đang hiển thị.
+    nguong = max(lo, hi - 5000)
+    gan    = [d for d in thieu if d >= nguong]
+    xa     = len(thieu) - len(gan)
+    if xa:
+        logger.info("Bỏ qua %d lỗ hổng cũ hơn #%d (nguồn thường không còn).", xa, nguong)
+    if not gan:
+        logger.info("✅  Không có lỗ hổng nào trong 5000 kỳ gần nhất.")
+        conn.close()
+        return
+
+    logger.info("Sẽ hỏi Vietlott %d kỳ: %s", len(gan),
+                gan if len(gan) <= 20 else f"{gan[:20]} ... (+{len(gan)-20})")
+
+    ins = skip = err = 0
+    for draw_id in gan:
+        draw = fetch_detail(draw_id)
+        if draw:
+            if insert_draw(conn, draw):
+                ins += 1
+                logger.info("  ✅  #%d  %s  tổng=%s", draw_id, draw['numbers'], draw.get('total'))
+            else:
+                skip += 1
+        else:
+            err += 1
+            logger.warning("  ❌  #%d: Vietlott không trả về (kỳ này có thể không tồn tại)", draw_id)
+        time.sleep(0.35)
+
+    logger.info("\n✅  Bù lỗ hổng xong!  inserted=%d  skipped=%d  errors=%d", ins, skip, err)
+
+    cur.execute(f"SELECT draw_number FROM {TABLE} WHERE draw_number BETWEEN %s AND %s;", (nguong, hi))
+    con_lai = sorted(set(range(nguong, hi + 1)) - {r[0] for r in cur.fetchall()})
+    logger.info("Còn thiếu trong #%d-#%d: %d kỳ %s", nguong, hi, len(con_lai),
+                con_lai if len(con_lai) <= 20 else con_lai[:20])
+    conn.close()
+
+    if ins > 0:
+        logger.info("Kỳ mới được bù -> chạy sync_predictions để bù dự đoán...")
+        _run_sync_predictions(limit=max(50, ins * 2), min_draw=min(gan))
+
+
 def _run_sync_predictions(limit: int = 50, min_draw: int = 0):
     """Backfill predictions for draws inserted by fill_gaps (runs in daemon thread)."""
     try:
@@ -1630,7 +1705,7 @@ def mode_gha():
 # ══════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     p = argparse.ArgumentParser(description='Bingo18 Sync → Supabase')
-    p.add_argument('--mode', choices=['test', 'bulk', 'watch', 'backfill', 'gha', 'morning_digest'], default='watch')
+    p.add_argument('--mode', choices=['test', 'bulk', 'gaps', 'watch', 'backfill', 'gha', 'morning_digest'], default='watch')
     args = p.parse_args()
 
     print(f"\n{'='*52}")
@@ -1639,6 +1714,6 @@ if __name__ == '__main__':
     print(f"  Table: {TABLE}")
     print(f"{'='*52}\n")
 
-    {'test': mode_test, 'bulk': mode_bulk, 'watch': mode_watch,
+    {'test': mode_test, 'bulk': mode_bulk, 'gaps': mode_gaps, 'watch': mode_watch,
      'backfill': mode_backfill, 'gha': mode_gha,
      'morning_digest': mode_morning_digest}[args.mode]()
