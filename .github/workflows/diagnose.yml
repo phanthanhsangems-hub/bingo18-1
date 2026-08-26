@@ -273,6 +273,28 @@ jobs:
               lech.append(f"total_draws: sum-stats {a} nhung triple-stats {b}")
           print(f"  total_draws: {a} vs {b} -> {'OK' if a == b else 'LECH'}")
 
+          # P212: TRUNG VI tinh bang HAI DUONG CODE KHAC HAN NHAU — bang tong
+          # bang SQL (LAG + ROW_NUMBER chay trong DB), bang trip bang vong lap
+          # Python. Local chay SQLite nen cau SQL kia CHUA BAO GIO chay tren
+          # Postgres that. Day la cho duy nhat kiem chung duoc.
+          print()
+          print("=== TRUNG VI: SQL (tong) vs Python (trip) ===")
+          smv = {x['sum']: x.get('median_gap') for x in ss['sums']}
+          for tong, combo in ((3, '111'), (18, '666')):
+              m1, m2 = smv.get(tong), tt[combo].get('median_gap')
+              ok = m1 == m2 and m1 is not None
+              if not ok:
+                  lech.append(f"trung vi tong {tong}={m1} nhung trip {combo}={m2}")
+              print(f"  tong {tong:2d}: {m1} | trip {combo}: {m2} -> {'OK' if ok else 'LECH'}")
+          thieu_tv = [x['sum'] for x in ss['sums'] if x.get('median_gap') is None]
+          if thieu_tv:
+              print(f"  (tong khong co trung vi: {thieu_tv})")
+          # trung vi phai THAP HON trung binh — do la ly do them cot nay
+          nguoc = [x['sum'] for x in ss['sums']
+                   if x.get('median_gap') and x.get('avg_gap')
+                   and x['median_gap'] > x['avg_gap']]
+          print(f"  tong co trung vi > TB: {nguoc if nguoc else 'khong co (dung nhu mong doi)'}")
+
           print()
           print("=== LAN VE GAN NHAT CUA TUNG TRIP (theo bang) ===")
           for n in range(1, 7):
