@@ -2402,11 +2402,91 @@ def draw_grid():
 # mỗi vòng làm mới của dashboard, giờ chỉ còn một.
 _stats_snap: dict = {'exp': 0.0, 'data': None}
 _stats_snap_lock = _threading.Lock()
+
+# P212: trung vị đi theo nhịp RIÊNG, chậm hơn nhiều.
+#
+# Truy vấn trung vị mất 332ms — tốn nhất trong cả ảnh chụp. Nhưng nó là thống
+# kê trên hơn 400 khoảng cách; thêm một kỳ mới chỉ thêm được nhiều nhất một
+# khoảng cách, tức trung vị gần như đứng yên. Bắt nó chạy lại mỗi 60 giây
+# cùng "chưa về" là trả giá cho thứ không thay đổi.
+_tv_snap: dict = {'exp': 0.0, 'data': None}
+_tv_lock = _threading.Lock()
+_TV_TTL = 3600
 _STATS_TTL = 60      # kỳ về mỗi 6 phút — 60s là đủ bám sát mà không quét nhiều
 
 # số cách tạo ra mỗi tổng trong 216 khả năng — để đối chiếu lý thuyết
 _WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
          11:27, 12:25, 13:21, 14:15, 15:10, 16:6, 17:3, 18:1}
+
+
+def _trung_vi(xs: list):
+    """Trung vị của một danh sách số. None khi chưa đủ dữ liệu.
+
+    Tự viết thay vì statistics.median() để trả None gọn gàng ở đầu vào rỗng —
+    tổng 3 và tổng 18 có thể mới về đúng một lần, lúc đó không có khoảng cách
+    nào để lấy trung vị.
+    """
+    if not xs:
+        return None
+    ds = sorted(xs)
+    n = len(ds)
+    giua = n // 2
+    return ds[giua] if n % 2 else round((ds[giua - 1] + ds[giua]) / 2)
+
+
+def _tinh_trung_vi_tong(conn) -> dict:
+    """Trung vị khoảng cách của từng tổng 3..18, tính TRONG DB.
+
+    Bản đầu kéo cả 89k dòng về Python cho gọn code — mất 956ms ở local, và
+    trên Cloud Run còn phải đẩy từng ấy dòng qua mạng tới Supabase. Câu này
+    trả về 16 dòng.
+
+    KHÔNG dùng PERCENTILE_CONT: hàm đó chỉ Postgres có, nhánh SQLite sẽ phải
+    viết khác — mà chính chuyện hai nhánh viết khác nhau là nguyên nhân của
+    P201 (3 endpoint hỏng suốt trên production mà local không thấy). LAG +
+    ROW_NUMBER là SQL chuẩn, chạy y hệt trên cả hai backend.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "WITH g AS ("
+        "  SELECT sum_value,"
+        "         draw_number - LAG(draw_number) OVER ("
+        "             PARTITION BY sum_value ORDER BY draw_number) AS gap"
+        "  FROM draw_history"
+        "  WHERE numbers IS NOT NULL AND sum_value BETWEEN 3 AND 18"
+        "), r AS ("
+        "  SELECT sum_value, gap,"
+        "         ROW_NUMBER() OVER (PARTITION BY sum_value ORDER BY gap) AS rn,"
+        "         COUNT(*)    OVER (PARTITION BY sum_value)              AS n"
+        "  FROM g WHERE gap IS NOT NULL"
+        ")"
+        "SELECT sum_value, AVG(gap) FROM r"
+        " WHERE rn IN ((n + 1) / 2, (n + 2) / 2)"
+        " GROUP BY sum_value"
+    )
+    # rn IN ((n+1)/2, (n+2)/2) với phép chia NGUYÊN: n lẻ thì hai vế trùng
+    # nhau -> lấy đúng phần tử giữa; n chẵn thì ra hai phần tử giữa -> AVG.
+    return {int(sv): round(float(m)) for sv, m in cur.fetchall() if m is not None}
+
+
+def _trung_vi_theo_tong() -> dict:
+    """Nhớ tạm _TV_TTL giây. Lỗi DB thì trả bản cũ, không làm hỏng cả ảnh chụp."""
+    now = _time.time()
+    with _tv_lock:
+        if _tv_snap['data'] is not None and now < _tv_snap['exp']:
+            return _tv_snap['data']
+        cu = _tv_snap['data']
+    conn = db.get_connection()
+    try:
+        data = _tinh_trung_vi_tong(conn)
+    except Exception as e:
+        logger.warning("trung vị theo tổng lỗi: %s", e)
+        return cu or {}
+    finally:
+        conn.close()
+    with _tv_lock:
+        _tv_snap['data'], _tv_snap['exp'] = data, _time.time() + _TV_TTL
+    return data
 
 
 def _tinh_thong_ke() -> dict:
@@ -2432,6 +2512,8 @@ def _tinh_thong_ke() -> dict:
         )
         agg = {int(sv): (int(k), int(dn)) for sv, k, dn in cur.fetchall()}
 
+        trung_vi_tong = _trung_vi_theo_tong()
+
         # P203: khoảng cách của CHU KỲ VỪA XONG = kỳ về gần nhất trừ kỳ về
         # trước đó. Có nó mới so được "đang chưa về 84 kỳ" với "đợt trước về
         # sau bao nhiêu kỳ". Hàm cửa sổ chạy được trên cả Postgres lẫn
@@ -2451,7 +2533,10 @@ def _tinh_thong_ke() -> dict:
 
         # ── theo trip ────────────────────────────────────────
         # Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
-        # trong Python — khoảng 2,8% số dòng.
+        # trong Python. Ghi chú cũ nói "khoảng 2,8% số dòng" — SAI. 2,8% là tỉ
+        # lệ của TRIP (6/216); còn tổng chia hết cho 3 chiếm 72/216 = 33%. Bộ
+        # lọc vẫn đáng giá (bỏ được hai phần ba bảng) nhưng đừng tưởng nó rẻ
+        # hơn thực tế.
         cur.execute(
             "SELECT draw_number, numbers FROM draw_history "
             "WHERE numbers IS NOT NULL AND sum_value IN (3,6,9,12,15,18) "
@@ -2468,6 +2553,7 @@ def _tinh_thong_ke() -> dict:
             'sum':          sv,
             'count':        k,
             'avg_gap':      round(total_draws / k) if k else None,
+            'median_gap':   trung_vi_tong.get(sv),
             'avg_gap_ly_thuyet': round(216 / _WAYS[sv]),
             'current_gap':  (max_dn - lastdn) if lastdn else None,
             # None khi tổng đó mới về đúng 1 lần trong toàn bộ lịch sử
@@ -2482,6 +2568,10 @@ def _tinh_thong_ke() -> dict:
     # kỳ. Vòng lặp đã duyệt theo draw_number tăng dần nên chỉ cần nhớ giá trị
     # cũ trước khi ghi đè, không phải truy vấn thêm.
     prev = {n: None for n in range(1, 7)}
+    # P212: mọi khoảng cách giữa hai lần về, để lấy TRUNG VỊ. Vòng lặp này vốn
+    # đã đi qua đúng những kỳ cần, nên không tốn thêm truy vấn nào.
+    kc = {n: [] for n in range(1, 7)}
+    kc_any: list = []
     any_cnt, any_last, any_prev, any_last_n = 0, None, None, None
     for dn, raw in rows:
         try:
@@ -2491,26 +2581,31 @@ def _tinh_thong_ke() -> dict:
             continue
         if a == b == c and 1 <= a <= 6:
             cnt[a]  += 1
+            if last[a] is not None:
+                kc[a].append(dn - last[a])
             prev[a]  = last[a]      # giữ lần về cũ trước khi ghi đè
             last[a]  = dn
             any_cnt += 1
+            if any_last is not None:
+                kc_any.append(dn - any_last)
             any_prev = any_last
             any_last = dn
             any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
                                # lặp là trip mới nhất
 
-    def _row(label, k, lastdn, prevdn=None):
+    def _row(label, k, lastdn, prevdn=None, gaps=None):
         return {
             'combo':       label,
             'count':       k,
             'avg_gap':     round(total_draws / k) if k else None,
+            'median_gap':  _trung_vi(gaps or []),
             'current_gap': (max_dn - lastdn) if lastdn else None,
             # None khi bộ đó mới về đúng 1 lần trong toàn bộ lịch sử
             'prev_gap':    (lastdn - prevdn) if (lastdn and prevdn) else None,
             'last_draw':   lastdn,
         }
 
-    any_row = _row('***', any_cnt, any_last, any_prev)
+    any_row = _row('***', any_cnt, any_last, any_prev, kc_any)
     # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
     # bộ nào vừa ra — trả thêm để giao diện hiện được.
     any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
@@ -2518,7 +2613,7 @@ def _tinh_thong_ke() -> dict:
     return {
         'total_draws': total_draws,
         'sums':        sums,
-        'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n]) for n in range(1, 7)],
+        'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n], kc[n]) for n in range(1, 7)],
         'any':         any_row,
     }
 
