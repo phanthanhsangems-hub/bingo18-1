@@ -178,16 +178,17 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   <!-- ═══ THỐNG KÊ BỘ 3 SỐ TRÙNG NHAU ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Bộ 3 số trùng nhau</h2>
-    <p class="sub" id="tr-sub">Toàn bộ lịch sử · trung bình = tổng số kỳ ÷ số lần về · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
+    <p class="sub" id="tr-sub">Toàn bộ lịch sử · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
     <div class="tbl-scroll">
       <table class="log-table" id="tr-table">
         <thead><tr>
           <th>Bộ 3 số</th><th class="ta-r"><span class="lbl-lg">Số lần về</span><span class="lbl-sm">Lần về</span></th>
           <th class="ta-r"><span class="lbl-lg">TB số kỳ về</span><span class="lbl-sm">TB</span></th>
+          <th class="ta-r"><span class="lbl-lg">Trung vị</span><span class="lbl-sm">TV</span></th>
           <th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th>
           <th class="ta-r"><span class="lbl-lg">Số kỳ chưa về</span><span class="lbl-sm">Chưa</span></th>
         </tr></thead>
-        <tbody id="tr-body"><tr><td colspan="5" class="skeleton">Đang tải...</td></tr></tbody>
+        <tbody id="tr-body"><tr><td colspan="6" class="skeleton">Đang tải...</td></tr></tbody>
       </table>
     </div>
     <p class="sub" id="tr-note"></p>
@@ -197,14 +198,15 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   <div class="card" style="margin-top:16px">
     <h2>Thống kê theo tổng</h2>
     <p class="sub">Ghép cặp đối xứng — hai tổng cùng hàng có xác suất lý thuyết y hệt nhau · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
+    <p class="sub">TB bị vài đợt hạn cực dài kéo lệch lên; <b>trung vị</b> = một nửa số lần về sớm hơn con số đó, sát thực tế hơn.</p>
     <div class="tbl-scroll">
       <table class="log-table" id="ss-table">
         <thead><tr>
-          <th>Tổng</th><th class="ta-r"><span class="lbl-lg">TB kỳ về</span><span class="lbl-sm">TB</span></th><th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th><th class="ta-r"><span class="lbl-lg">Chưa về</span><span class="lbl-sm">Chưa</span></th>
+          <th>Tổng</th><th class="ta-r"><span class="lbl-lg">TB kỳ về</span><span class="lbl-sm">TB</span></th><th class="ta-r"><span class="lbl-lg">Trung vị</span><span class="lbl-sm">TV</span></th><th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th><th class="ta-r"><span class="lbl-lg">Chưa về</span><span class="lbl-sm">Chưa</span></th>
           <th class="ss-gap"></th>
-          <th>Tổng</th><th class="ta-r"><span class="lbl-lg">TB kỳ về</span><span class="lbl-sm">TB</span></th><th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th><th class="ta-r"><span class="lbl-lg">Chưa về</span><span class="lbl-sm">Chưa</span></th>
+          <th>Tổng</th><th class="ta-r"><span class="lbl-lg">TB kỳ về</span><span class="lbl-sm">TB</span></th><th class="ta-r"><span class="lbl-lg">Trung vị</span><span class="lbl-sm">TV</span></th><th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th><th class="ta-r"><span class="lbl-lg">Chưa về</span><span class="lbl-sm">Chưa</span></th>
         </tr></thead>
-        <tbody id="ss-body"><tr><td colspan="9" class="skeleton">Đang tải...</td></tr></tbody>
+        <tbody id="ss-body"><tr><td colspan="11" class="skeleton">Đang tải...</td></tr></tbody>
       </table>
     </div>
   </div>

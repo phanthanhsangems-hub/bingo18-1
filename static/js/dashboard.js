@@ -614,7 +614,8 @@ async function loadTripleStats(d) {
       <td>${isAny ? '<span class="tr-any-lbl">Bất kỳ trip nào</span>'
                   : miniDice(r.combo.split('').map(Number))}</td>
       <td class="num ta-r">${fmt(r.count)}</td>
-      <td class="num ta-r">${fmt(r.avg_gap)}</td>
+      <td class="num ta-r ss-prev">${fmt(r.avg_gap)}</td>
+      <td class="num ta-r">${fmt(r.median_gap)}</td>
       <td class="num ta-r ss-prev">${fmt(r.prev_gap)}</td>
       ${cell(r)}
     </tr>`;
@@ -628,7 +629,7 @@ async function loadTripleStats(d) {
     const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
     return `<tr class="tr-last">
       <td>${miniDice(a.last_combo.split('').map(Number))}</td>
-      <td colspan="4" class="tr-last-txt">Trip gần nhất
+      <td colspan="5" class="tr-last-txt">Trip gần nhất
         · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
     </tr>`;
   };
@@ -636,11 +637,14 @@ async function loadTripleStats(d) {
   $('tr-body').innerHTML = rows.map(r => line(r, false)).join('')
                          + (d.any ? line(d.any, true) : '')
                          + lastLine();
-  $('tr-sub').textContent =
-    `${fmt(d.total_draws)} kỳ · trung bình = tổng số kỳ ÷ số lần về`;
+  $('tr-sub').textContent = `${fmt(d.total_draws)} kỳ`;
+  // P212: TB và TRUNG VỊ nói hai chuyện khác nhau, phải giải thích rõ nếu
+  // không người đọc sẽ tưởng một trong hai bị tính sai.
   $('tr-note').textContent =
     'Lý thuyết: mỗi trip cụ thể 1 lần/216 kỳ, bất kỳ trip nào 1 lần/36 kỳ. '
-    + 'Ô "chưa về" đậm khi đã vượt mức trung bình.';
+    + 'TB = tổng số kỳ ÷ số lần về, bị vài đợt hạn cực dài kéo lệch lên. '
+    + 'TRUNG VỊ = một nửa số lần về sớm hơn con số này — sát thực tế hơn. '
+    + 'Ô "chưa về" đậm khi đã vượt mức TB.';
 }
 
 // ── P185: Thống kê theo tổng ─────────────────────────────────
@@ -652,13 +656,14 @@ async function loadSumStats(d) {
   const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
 
   const half = s => {
-    if (!s) return '<td></td><td></td><td></td><td></td>';
+    if (!s) return '<td></td><td></td><td></td><td></td><td></td>';
     const ratio = (s.current_gap != null && s.avg_gap) ? s.current_gap / s.avg_gap : 0;
     const cls = ratio >= 1.5 ? ' overdue-hi' : ratio >= 1 ? ' overdue' : '';
     // P203: "Đợt trước" = chu kỳ vừa xong dài bao nhiêu kỳ. Để so trực tiếp
     // với "Chưa về" hiện tại. Rỗng khi tổng đó mới về đúng 1 lần.
     return `<td><span class="ss-sum ${s.size}">${s.sum}</span></td>`
-         + `<td class="num ta-r">${fmt(s.avg_gap)}</td>`
+         + `<td class="num ta-r ss-prev">${fmt(s.avg_gap)}</td>`
+         + `<td class="num ta-r">${fmt(s.median_gap)}</td>`
          + `<td class="num ta-r ss-prev">${fmt(s.prev_gap)}</td>`
          + `<td class="num ta-r${cls}">${fmt(s.current_gap)}</td>`;
   };

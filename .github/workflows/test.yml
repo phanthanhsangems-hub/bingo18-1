@@ -38,3 +38,4 @@ jobs:
           python test_fill_gaps.py
           python test_cache_skew.py
           python test_gap_healing.py
+          python test_median.py
