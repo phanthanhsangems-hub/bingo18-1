@@ -260,10 +260,20 @@ svg text{font-family:inherit}
 .hc-gap.long b{color:var(--accent-ink)}
 
 /* today combos */
-.tc-block{margin-top:10px}
-.tc-head{font-size:12px;font-weight:700;letter-spacing:.06em;margin-bottom:8px;color:var(--muted)}
-.tc-head.appeared b{color:var(--win)}
-.tc-head.not-yet b{color:var(--accent-ink)}
+/* Bộ số hôm nay — gom theo tổng, mỗi tổng một hàng */
+.tc-sums{display:flex;flex-direction:column;gap:2px;margin-top:12px}
+.tc-row{
+  display:grid;grid-template-columns:62px 1fr;gap:10px;align-items:start;
+  padding:7px 8px;border-radius:8px;
+}
+.tc-row:nth-child(odd){background:var(--card2)}
+.tc-row.du .tc-tally{color:var(--jade);font-weight:700}
+.tc-key{display:flex;align-items:center;gap:7px;padding-top:2px}
+.tc-tally{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+@media (max-width:520px){
+  .tc-row{grid-template-columns:54px 1fr;gap:8px;padding:6px 5px}
+  .tc-tally{font-size:10px}
+}
 .combo-chips{display:flex;flex-wrap:wrap;gap:7px}
 .combo-chip{
   display:inline-flex;align-items:center;gap:5px;
