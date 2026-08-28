@@ -39,3 +39,4 @@ jobs:
           python test_cache_skew.py
           python test_gap_healing.py
           python test_median.py
+          python test_today_by_sum.py

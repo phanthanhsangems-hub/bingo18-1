@@ -143,14 +143,8 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   <div class="card" style="margin-top:16px">
     <h2>Bộ số hôm nay</h2>
     <p class="sub" id="tc-sub">Trong 56 bộ 3 có thể · giờ VN</p>
-    <div class="tc-block">
-      <div class="tc-head appeared">✅ Đã ra <b id="tc-appeared-n">--</b></div>
-      <div class="combo-chips" id="tc-appeared"><span class="skeleton">Đang tải...</span></div>
-    </div>
-    <div class="tc-block">
-      <div class="tc-head not-yet">⬜ Chưa ra <b id="tc-notyet-n">--</b></div>
-      <div class="combo-chips" id="tc-notyet"></div>
-    </div>
+    <div class="tc-sums" id="tc-by-sum"><span class="skeleton">Đang tải...</span></div>
+    <p class="sub" id="tc-note"></p>
   </div>
 
   <!-- ═══ LƯỚI CHI TIẾT ═══ -->

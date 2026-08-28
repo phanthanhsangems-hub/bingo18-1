@@ -403,25 +403,61 @@ async function loadHotCold() {
   }).join('');
 }
 
-// ── Today combos: bộ nào đã ra / chưa ra hôm nay ─────────────
+// ── Bộ số hôm nay, GOM THEO TỔNG ────────────────────────────
+// Trước đây chỉ có hai đống "đã ra" và "chưa ra", muốn biết tổng 7 còn thiếu
+// bộ nào thì phải tự dò trong 56 chip. Gom theo tổng thì nhìn một cái là thấy.
 async function loadTodayCombos() {
   const d = await J('/api/today-combos');
   const ap = d.appeared || [], ny = d.not_appeared || [];
   if (!ap.length && !ny.length) {
-    $('tc-appeared').innerHTML = '<span class="skeleton">Chưa có kỳ nào hôm nay</span>';
-    $('tc-notyet').innerHTML = '';
+    $('tc-by-sum').innerHTML = '<span class="skeleton">Chưa có kỳ nào hôm nay</span>';
+    $('tc-note').textContent = '';
     return;
   }
   $('tc-sub').textContent =
     `${ap.length}/56 bộ đã xuất hiện hôm nay (giờ VN) · ${ny.length} bộ chưa ra`;
-  $('tc-appeared-n').textContent = ap.length;
-  $('tc-notyet-n').textContent = ny.length;
-  $('tc-appeared').innerHTML = ap.map(c =>
-    `<span class="combo-chip" title="${esc(c.label)} · ${SZ_VI[c.size] || ''} · ra ${c.count} lần">` +
-    miniDice(c.combo) + `<span class="cc-count num">×${c.count}</span></span>`).join('');
-  $('tc-notyet').innerHTML = ny.map(c =>
-    `<span class="combo-chip not-yet" title="${esc(c.label)} · ${SZ_VI[c.size] || ''} · chưa ra hôm nay">` +
-    miniDice(c.combo) + `</span>`).join('');
+
+  // gom vào 16 rổ theo tổng 3..18
+  const theoTong = {};
+  for (let t = 3; t <= 18; t++) theoTong[t] = { ra: [], chua: [] };
+  ap.forEach(c => theoTong[c.sum].ra.push(c));
+  ny.forEach(c => theoTong[c.sum].chua.push(c));
+
+  // trong mỗi tổng: bộ ra nhiều xếp trước, rồi tới bộ chưa ra
+  const sx = (a, b) => (b.count || 0) - (a.count || 0) || a.label.localeCompare(b.label);
+
+  const chip = (c, daRa) => daRa
+    ? `<span class="combo-chip" title="${esc(c.label)} · ra ${c.count} lần hôm nay">`
+      + miniDice(c.combo) + `<span class="cc-count num">×${c.count}</span></span>`
+    : `<span class="combo-chip not-yet" title="${esc(c.label)} · chưa ra hôm nay">`
+      + miniDice(c.combo) + `</span>`;
+
+  let html = '';
+  for (let t = 3; t <= 18; t++) {
+    const g = theoTong[t];
+    const tong = g.ra.length + g.chua.length;      // số bộ tạo ra được tổng này
+    const sz = t <= 9 ? 'NHO' : (t <= 11 ? 'HOA' : 'LON');
+    const het = g.chua.length === 0;
+    html += `<div class="tc-row${het ? ' du' : ''}">
+      <div class="tc-key">
+        <span class="ss-sum ${sz}">${t}</span>
+        <span class="tc-tally num">${g.ra.length}/${tong}</span>
+      </div>
+      <div class="combo-chips">
+        ${g.ra.sort(sx).map(c => chip(c, true)).join('')}
+        ${g.chua.sort(sx).map(c => chip(c, false)).join('')}
+      </div>
+    </div>`;
+  }
+  $('tc-by-sum').innerHTML = html;
+
+  const duTong = [];
+  for (let t = 3; t <= 18; t++) if (theoTong[t].chua.length === 0) duTong.push(t);
+  $('tc-note').innerHTML =
+    'Mỗi hàng là một tổng · chip mờ = bộ chưa ra hôm nay · <b>x/y</b> = đã ra / tổng số bộ tạo được tổng đó. '
+    + (duTong.length
+        ? `Đã đủ mọi bộ ở tổng <b>${duTong.join(', ')}</b>.`
+        : 'Chưa tổng nào ra đủ mọi bộ.');
 }
 
 // ── P186: nạp số kỳ vắng mặt của từng số 1-6 cho card nóng/lạnh.
