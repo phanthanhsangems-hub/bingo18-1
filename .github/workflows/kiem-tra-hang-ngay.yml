@@ -1,0 +1,35 @@
+name: Kiểm tra nhất quán hằng ngày
+
+# Mọi lần dữ liệu sai trong quá khứ đều do NGƯỜI DÙNG nhìn thấy trước: trip
+# 333 báo sai 434 kỳ, bảng tổng lệch bảng trip 1 kỳ, tổng 7/14 hiển thị sai.
+# Bộ kiểm đã có nhưng chỉ chạy khi bấm tay, nên không giúp được gì.
+#
+# Job này chạy mỗi ngày và HỎNG khi phát hiện lệch — GitHub tự gửi email cho
+# chủ repo. Nhẹ (4 request) nên chạy hằng ngày không phiền production.
+on:
+  schedule:
+    # 16:30 UTC = 23:30 giờ VN, sau khi hết kỳ trong ngày
+    - cron: '30 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kiem-tra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Đối chiếu dữ liệu production
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: python scripts/kiem_tra_nhat_quan.py --n 200
+
+      - name: Nhắc khi hỏng
+        if: failure()
+        run: |
+          echo "Bộ đối chiếu phát hiện dữ liệu không nhất quán."
+          echo "Xem log bước trên để biết lệch ở đâu."
+          echo "Lỗ hổng kỳ thường tự hết sau ~10 phút (watcher tự vá từ Vietlott)."
+          echo "Nếu lặp lại nhiều ngày: kiểm tra watcher còn chạy trên máy không."
