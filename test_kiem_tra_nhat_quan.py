@@ -103,7 +103,35 @@ thu("Kỳ chỉ có 2 số",
     lambda b, g: g[4].__setitem__('numbers', [1, 2]),
     "không hợp lệ")
 
-# 4) payload rỗng không được im lặng nuốt
+# 4) secret có ký tự xuống dòng vẫn phải gọi được — lỗi làm job đầu tiên chết
+import json as _json, urllib.request as _ur
+import kiem_tra_nhat_quan as K
+_goi = []
+class _R:
+    def __enter__(s): return s
+    def __exit__(s, *a): pass
+    def read(s): return _json.dumps({"ok": 1}).encode()
+_ur.urlopen = lambda req, timeout=None: (_goi.append(dict(req.headers)), _R())[1]
+K.lay("https://x/y", "abc123\n")
+if _goi and all("\n" not in v for v in _goi[0].values()):
+    print("\n  OK   Secret có xuống dòng -> vẫn tạo được header hợp lệ")
+else:
+    fails.append(f"header còn ký tự xuống dòng: {_goi}")
+    print(f"\n  FAIL header còn xuống dòng: {_goi}")
+
+# 5) không gọi được -> KhongGoiDuoc, không được lẫn với "dữ liệu lệch"
+_ur.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(OSError("mạng hỏng"))
+try:
+    K.lay("https://x/y", "abc")
+    fails.append("lỗi mạng mà không ném KhongGoiDuoc")
+    print("  FAIL lỗi mạng mà im lặng")
+except K.KhongGoiDuoc:
+    print("  OK   Lỗi mạng -> KhongGoiDuoc (phân biệt với dữ liệu lệch)")
+except Exception as e:
+    fails.append(f"ném sai loại: {type(e).__name__}")
+    print(f"  FAIL ném sai loại: {type(e).__name__}")
+
+# 6) payload rỗng không được im lặng nuốt
 loi = kiem_tra({'sums': [], 'triples': []}, [])
 if loi:
     print(f"\n  OK   Payload rỗng -> báo lỗi, không im lặng bỏ qua")
@@ -112,7 +140,7 @@ else:
     print(f"\n  FAIL Payload rỗng mà im lặng")
 
 print("=" * 66)
-tong = 10
+tong = 12
 print(f"RESULTS: {tong - len(fails)} passed, {len(fails)} failed")
 for f in fails:
     print("  FAIL " + f)
