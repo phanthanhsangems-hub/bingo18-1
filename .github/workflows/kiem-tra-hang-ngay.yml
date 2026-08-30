@@ -24,12 +24,37 @@ jobs:
       - name: Đối chiếu dữ liệu production
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
-        run: python scripts/kiem_tra_nhat_quan.py --n 200
+        run: |
+          # Phân biệt hai loại hỏng, vì cách xử lý khác hẳn nhau:
+          #   2 = KHÔNG CHẠY ĐƯỢC  -> app/mạng có vấn đề, chưa biết dữ liệu ra sao
+          #   1 = DỮ LIỆU LỆCH     -> app sống, nhưng số liệu sai
+          # Lần chạy đầu của job này chết vì header rồi in "phát hiện dữ liệu
+          # không nhất quán" — nói sai hẳn chuyện đã xảy ra.
+          set +e
+          python scripts/kiem_tra_nhat_quan.py --n 200
+          MA=$?
+          set -e
+          echo "ma_thoat=$MA" >> "$GITHUB_ENV"
+          case "$MA" in
+            0) echo "Dữ liệu nhất quán." ;;
+            1) echo "::error::DỮ LIỆU LỆCH — xem chi tiết ở trên." ;;
+            2) echo "::error::KHÔNG GỌI ĐƯỢC production — chưa kết luận được gì về dữ liệu." ;;
+            *) echo "::error::Script thoát với mã lạ $MA" ;;
+          esac
+          exit $MA
 
-      - name: Nhắc khi hỏng
+      - name: Gợi ý xử lý
         if: failure()
         run: |
-          echo "Bộ đối chiếu phát hiện dữ liệu không nhất quán."
-          echo "Xem log bước trên để biết lệch ở đâu."
-          echo "Lỗ hổng kỳ thường tự hết sau ~10 phút (watcher tự vá từ Vietlott)."
-          echo "Nếu lặp lại nhiều ngày: kiểm tra watcher còn chạy trên máy không."
+          if [ "${ma_thoat:-}" = "2" ]; then
+            echo "KHÔNG gọi được production. Kiểm tra theo thứ tự:"
+            echo "  1. App còn sống không  -> chạy workflow 'Diagnose Cloud Run'"
+            echo "  2. TRIGGER_SECRET còn đúng không"
+            echo "  3. Cloud Run có đang deploy dở không"
+            echo "LƯU Ý: chưa kết luận được gì về tính đúng của dữ liệu."
+          else
+            echo "Dữ liệu LỆCH. Thường gặp nhất là thiếu kỳ:"
+            echo "  - Lỗ hổng kỳ thường tự hết sau ~10 phút (watcher vá từ Vietlott)."
+            echo "  - Lặp lại nhiều ngày -> kiểm tra watcher còn chạy trên máy không."
+            echo "  - Bù tay: python sync_to_supabase.py --mode gaps"
+          fi

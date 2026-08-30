@@ -23,10 +23,20 @@ import urllib.request
 BASE = "https://bingo18-633959711537.asia-southeast1.run.app"
 
 
+class KhongGoiDuoc(Exception):
+    """Không lấy được dữ liệu — KHÁC hẳn với dữ liệu lấy được nhưng sai."""
+
+
 def lay(url: str, secret: str) -> dict:
-    req = urllib.request.Request(url, headers={"X-Trigger-Secret": secret})
-    with urllib.request.urlopen(req, timeout=40) as r:
-        return json.loads(r.read().decode())
+    # .strip() là bắt buộc: secret của GitHub Actions kèm ký tự xuống dòng ở
+    # cuối, và urllib từ chối header có '\n' (curl thì bỏ qua, nên diagnose.yml
+    # dùng curl vẫn chạy được — lần chạy đầu của job này chết vì chuyện đó).
+    req = urllib.request.Request(url, headers={"X-Trigger-Secret": secret.strip()})
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        raise KhongGoiDuoc(f"{url}: {e}") from e
 
 
 def kiem_tra(board: dict, grid: list) -> list:
@@ -95,16 +105,32 @@ def main() -> int:
     p.add_argument("--n", type=int, default=200, help="số kỳ lấy về đối chiếu")
     a = p.parse_args()
 
-    if a.tu_file:
-        board = json.load(open(a.tu_file[0], encoding="utf-8"))
-        grid = json.load(open(a.tu_file[1], encoding="utf-8"))["draws"]
-    else:
-        secret = os.environ.get("TRIGGER_SECRET", "")
-        if not secret:
-            print("Thiếu TRIGGER_SECRET", file=sys.stderr)
-            return 2
-        board = lay(f"{BASE}/api/board-stats", secret)
-        grid = lay(f"{BASE}/api/draw-grid?n={a.n}", secret)["draws"]
+    # Mã thoát 2 = KHÔNG CHẠY ĐƯỢC (mạng hỏng, thiếu secret, JSON vỡ).
+    # Mã thoát 1 = chạy được nhưng DỮ LIỆU LỆCH.
+    # Gộp hai thứ này lại thì cảnh báo nói sai chuyện đã xảy ra — đúng lỗi lần
+    # chạy đầu: script chết vì header, mà job lại in "phát hiện dữ liệu không
+    # nhất quán".
+    try:
+        if a.tu_file:
+            board = json.load(open(a.tu_file[0], encoding="utf-8"))
+            grid = json.load(open(a.tu_file[1], encoding="utf-8"))["draws"]
+        else:
+            secret = os.environ.get("TRIGGER_SECRET", "").strip()
+            if not secret:
+                print("KHÔNG CHẠY ĐƯỢC: thiếu TRIGGER_SECRET", file=sys.stderr)
+                return 2
+            board = lay(f"{BASE}/api/board-stats", secret)
+            grid = lay(f"{BASE}/api/draw-grid?n={a.n}", secret)["draws"]
+    except KhongGoiDuoc as e:
+        print(f"KHÔNG CHẠY ĐƯỢC: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"KHÔNG CHẠY ĐƯỢC: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+
+    if not grid:
+        print("KHÔNG CHẠY ĐƯỢC: draw-grid trả về rỗng", file=sys.stderr)
+        return 2
 
     dn = [d["draw_number"] for d in grid]
     print(f"Đối chiếu {len(grid)} kỳ  (#{min(dn)} - #{max(dn)}), "
