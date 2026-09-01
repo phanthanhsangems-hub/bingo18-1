@@ -2531,6 +2531,16 @@ def _tinh_thong_ke() -> dict:
         for sv, dn in cur.fetchall():
             hai_ky_cuoi.setdefault(int(sv), []).append(int(dn))
 
+        # P215: 8 KỲ QUAY gần nhất — mọi kỳ, không riêng trip.
+        # Câu riêng vì vòng lặp trip bên dưới chỉ nạp kỳ có tổng chia hết cho
+        # 3, không đủ để lấy 8 kỳ liền nhau. LIMIT 8 chạy thẳng trên
+        # idx_draw_number(draw_number DESC) nên gần như không tốn gì.
+        cur.execute(
+            "SELECT draw_number, numbers FROM draw_history "
+            "WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT 8"
+        )
+        ky_gan_day = cur.fetchall()
+
         # ── theo trip ────────────────────────────────────────
         # Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
         # trong Python. Ghi chú cũ nói "khoảng 2,8% số dòng" — SAI. 2,8% là tỉ
@@ -2572,12 +2582,7 @@ def _tinh_thong_ke() -> dict:
     # đã đi qua đúng những kỳ cần, nên không tốn thêm truy vấn nào.
     kc = {n: [] for n in range(1, 7)}
     kc_any: list = []
-    gan_day: list = []
     any_cnt, any_last, any_prev, any_last_n = 0, None, None, None
-    # P215: 8 lần trip gần nhất. Dòng "Trip gần nhất" cũ chỉ nói được MỘT lần,
-    # nên không thấy được nhịp: 4 trip dồn trong 50 kỳ khác hẳn 4 trip rải đều
-    # 800 kỳ, mà cả hai đều hiện y như nhau. Vòng lặp này vốn đã đi qua đúng
-    # những kỳ cần nên gom thêm không tốn truy vấn nào.
     for dn, raw in rows:
         try:
             ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
@@ -2597,9 +2602,6 @@ def _tinh_thong_ke() -> dict:
             any_last = dn
             any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
                                # lặp là trip mới nhất
-            gan_day.append((dn, a))
-            if len(gan_day) > 8:
-                del gan_day[0]        # chỉ giữ 8 lần cuối
 
     def _row(label, k, lastdn, prevdn=None, gaps=None):
         return {
@@ -2617,14 +2619,26 @@ def _tinh_thong_ke() -> dict:
     # P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
     # bộ nào vừa ra — trả thêm để giao diện hiện được.
     any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
-    # mới nhất lên đầu; 'gap' = cách kỳ mới nhất bao nhiêu kỳ
-    any_row['recent'] = [
-        {'draw': dn, 'combo': str(t) * 3, 'gap': max_dn - dn}
-        for dn, t in reversed(gan_day)
-    ]
+
+    tam = []
+    for dn, raw in ky_gan_day:
+        try:
+            ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
+            ns = [int(x) for x in ns]
+        except Exception:
+            continue
+        t = sum(ns)
+        tam.append({
+            'draw':    int(dn),
+            'numbers': ns,
+            'sum':     t,
+            'size':    'NHO' if t <= 9 else ('HOA' if t <= 11 else 'LON'),
+            'is_trip': len(set(ns)) == 1,
+        })
 
     return {
         'total_draws': total_draws,
+        'recent_draws': tam,          # mới nhất lên đầu
         'sums':        sums,
         'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n], kc[n]) for n in range(1, 7)],
         'any':         any_row,
