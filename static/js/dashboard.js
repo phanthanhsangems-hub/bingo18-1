@@ -656,17 +656,24 @@ async function loadTripleStats(d) {
       ${cell(r)}
     </tr>`;
 
-  // P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
-  // bộ nào vừa ra — thêm một hàng chỉ đích danh trip gần nhất.
+  // P215: 8 LẦN TRIP GẦN NHẤT, thay cho dòng "Trip gần nhất" chỉ nói được
+  // một lần. Một mốc đơn lẻ không cho thấy nhịp: 4 trip dồn trong 50 kỳ khác
+  // hẳn 4 trip rải đều 800 kỳ, mà cả hai đều hiện y như nhau.
   const lastLine = () => {
     const a = d.any;
-    if (!a || !a.last_combo || a.last_draw == null) return '';
-    const gap = a.current_gap;
-    const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
+    const ds = (a && a.recent) || [];
+    if (!ds.length) return '';
+    const o = ds.map(x => {
+      const khi = x.gap === 0 ? 'kỳ này' : `${fmt(x.gap)} kỳ trước`;
+      return `<span class="tr-rec">${miniDice(x.combo.split('').map(Number))}`
+           + `<span class="tr-rec-ky num">#${fmt(x.draw)}</span>`
+           + `<span class="tr-rec-khi">${khi}</span></span>`;
+    }).join('');
     return `<tr class="tr-last">
-      <td>${miniDice(a.last_combo.split('').map(Number))}</td>
-      <td colspan="5" class="tr-last-txt">Trip gần nhất
-        · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
+      <td colspan="6" class="tr-last-txt">
+        <div class="tr-rec-lbl">${ds.length} lần trip gần nhất</div>
+        <div class="tr-rec-wrap">${o}</div>
+      </td>
     </tr>`;
   };
 
