@@ -91,9 +91,14 @@ jobs:
             # khop 2*/3*/4* nen timeout bi dem NHAM thanh loi 5xx. Lan chay #9
             # bao /api/weight-optimizer "5xx" trong khi than tra ve JSON hop le,
             # that ra chi la qua 30 giay.
+            # "bash -e": phep gan CODE=$(curl ...) MANG LUON ma thoat cua
+            # curl, nen khi curl timeout (28) shell chet NGAY tai dong nay —
+            # chua kip chay RC=$?. Lan chay #15 dung o day: khong mot dong
+            # tong ket nao duoc in, ma continue-on-error che mat. Dat phep
+            # gan trong "|| RC=$?" thi set -e bo qua.
+            RC=0
             CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
-                   -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p")
-            RC=$?
+                   -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p") || RC=$?
             if [ "$RC" -ne 0 ] || [ "$CODE" = "000" ]; then
               SLOW=$((SLOW+1)); echo "curl rc=$RC $p (qua 30s hoac dut ket noi)" >> /tmp/slow.txt
               sleep 0.7; continue
@@ -120,6 +125,9 @@ jobs:
           else
             echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
           fi
+          # Chay den day = da quet HET danh sach. Buoc chot doi dau nay;
+          # thieu no nghia la vong lap bi ngat giua chung.
+          touch /tmp/quet_xong
 
       # Kiem tra nhat quan TOAN DIEN: lay 200 ky gan nhat (draw-grid TINH tong
       # tu numbers), roi doi chieu voi current_gap ma sum-stats/triple-stats
@@ -338,6 +346,11 @@ jobs:
           if [ -s /tmp/job_failed ]; then
             echo "=== CAC BUOC CO VAN DE ==="
             cat /tmp/job_failed
+            exit 1
+          fi
+          if [ ! -f /tmp/quet_xong ]; then
+            echo "LOI: buoc quet endpoint ket thuc giua chung — ket qua quet"
+            echo "     KHONG dang tin. Xem log buoc 'Quet endpoint' o tren."
             exit 1
           fi
           echo "Tat ca cac buoc chan doan deu dat."
