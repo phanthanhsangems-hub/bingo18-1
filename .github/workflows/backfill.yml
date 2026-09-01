@@ -43,8 +43,13 @@ jobs:
           # LUU Y: endpoint nay chi nhan GET (app.py:762). Dung -X POST thi
           # bien Google chan truoc voi loi 411 Length Required vi POST khong
           # co body thieu header Content-Length.
+          # "|| RC=$?": duoi bash -e, phep gan CODE=$(curl ...) mang ma thoat
+          # cua curl nen timeout lam shell chet ngay tai day, bao "exit code
+          # 28" tran trui thay vi thong bao doc duoc.
+          RC=0
           CODE=$(curl -s -o /tmp/kq.json -w '%{http_code}' --max-time 300 \
-                 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE/api/sync-github?fill_gaps=1")
+                 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE/api/sync-github?fill_gaps=1") || RC=$?
+          [ "$RC" -eq 0 ] || { echo "curl loi rc=$RC (28 = qua 300 giay)."; exit 1; }
           echo "HTTP $CODE"
           head -c 600 /tmp/kq.json; echo
           [ "$CODE" = "200" ] || { echo "That bai — xem thong bao o tren."; exit 1; }
