@@ -2531,16 +2531,6 @@ def _tinh_thong_ke() -> dict:
         for sv, dn in cur.fetchall():
             hai_ky_cuoi.setdefault(int(sv), []).append(int(dn))
 
-        # P215: 8 KỲ QUAY gần nhất — mọi kỳ, không riêng trip.
-        # Câu riêng vì vòng lặp trip bên dưới chỉ nạp kỳ có tổng chia hết cho
-        # 3, không đủ để lấy 8 kỳ liền nhau. LIMIT 8 chạy thẳng trên
-        # idx_draw_number(draw_number DESC) nên gần như không tốn gì.
-        cur.execute(
-            "SELECT draw_number, numbers FROM draw_history "
-            "WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT 8"
-        )
-        ky_gan_day = cur.fetchall()
-
         # ── theo trip ────────────────────────────────────────
         # Chỉ nạp các kỳ có tổng chia hết cho 3 (3,6,9,12,15,18) rồi lọc tiếp
         # trong Python. Ghi chú cũ nói "khoảng 2,8% số dòng" — SAI. 2,8% là tỉ
@@ -2620,25 +2610,8 @@ def _tinh_thong_ke() -> dict:
     # bộ nào vừa ra — trả thêm để giao diện hiện được.
     any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
 
-    tam = []
-    for dn, raw in ky_gan_day:
-        try:
-            ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
-            ns = [int(x) for x in ns]
-        except Exception:
-            continue
-        t = sum(ns)
-        tam.append({
-            'draw':    int(dn),
-            'numbers': ns,
-            'sum':     t,
-            'size':    'NHO' if t <= 9 else ('HOA' if t <= 11 else 'LON'),
-            'is_trip': len(set(ns)) == 1,
-        })
-
     return {
         'total_draws': total_draws,
-        'recent_draws': tam,          # mới nhất lên đầu
         'sums':        sums,
         'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n], kc[n]) for n in range(1, 7)],
         'any':         any_row,
