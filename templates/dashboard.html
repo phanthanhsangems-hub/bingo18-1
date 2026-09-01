@@ -205,6 +205,15 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     </div>
   </div>
 
+  <!-- ═══ CHUỖI KHOẢNG CÁCH THEO TỔNG (P216) ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Khoảng cách các kỳ theo tổng</h2>
+    <p class="sub">Mỗi dòng một tổng: số kỳ giữa hai lần ra liên tiếp, đọc <b>cũ → mới</b> từ trái sang phải — đúng cách ghi tay trong sổ.</p>
+    <p class="sub">Ô cuối viền đậm là chu kỳ <b>đang chạy</b> (chưa kết thúc). Ô tô đậm = khoảng cách dài hơn gấp đôi mức trung bình của tổng đó.</p>
+    <div id="kc-body"><span class="skeleton">Đang tải...</span></div>
+    <p class="sub" id="kc-note"></p>
+  </div>
+
   <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Cầu đang theo dõi</h2>

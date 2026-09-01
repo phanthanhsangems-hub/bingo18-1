@@ -2418,6 +2418,26 @@ _STATS_TTL = 60      # kỳ về mỗi 6 phút — 60s là đủ bám sát mà k
 _WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
          11:27, 12:25, 13:21, 14:15, 15:10, 16:6, 17:3, 18:1}
 
+# P216: lấy bao nhiêu lần về gần nhất của mỗi tổng để dựng chuỗi khoảng cách.
+# 25 lần về -> 24 khoảng cách. Với tổng 10/11 (27/216) đó là khoảng 200 kỳ,
+# tức hơn một ngày; với tổng 3/18 là gần như toàn bộ lịch sử của chúng.
+_KC_SO_LAN = 25
+
+
+def _chuoi_khoang_cach(dns: list) -> list:
+    """Chuỗi khoảng cách giữa các lần về liên tiếp, CŨ -> MỚI.
+
+    Nhận vào danh sách số kỳ đã sắp GIẢM DẦN (mới nhất đứng đầu) — đúng thứ
+    tự câu truy vấn trả về. Trả ra theo chiều ngược lại vì đó là cách người
+    dùng ghi trong sổ: mỗi lần về lại viết thêm một số vào cuối dòng.
+
+    [184330, 184311, 184307] -> [4, 19]
+      184307 -> 184311 cách 4 kỳ, rồi 184311 -> 184330 cách 19 kỳ.
+    """
+    if len(dns) < 2:
+        return []
+    return [dns[i] - dns[i + 1] for i in range(len(dns) - 1)][::-1]
+
 
 def _trung_vi(xs: list):
     """Trung vị của một danh sách số. None khi chưa đủ dữ liệu.
@@ -2518,6 +2538,12 @@ def _tinh_thong_ke() -> dict:
         # trước đó. Có nó mới so được "đang chưa về 84 kỳ" với "đợt trước về
         # sau bao nhiêu kỳ". Hàm cửa sổ chạy được trên cả Postgres lẫn
         # SQLite (>= 3.25).
+        #
+        # P216: cùng câu này lấy luôn _KC_SO_LAN lần về gần nhất thay vì 2, để
+        # dựng CHUỖI khoảng cách như người dùng vẫn ghi tay trong sổ. Không
+        # thêm truy vấn nào — chỉ đổi rn <= 2 thành rn <= 25, tức 400 dòng
+        # thay vì 32. 'prev_gap' vẫn suy ra từ đúng hai phần tử đầu nên số cũ
+        # không đổi một li.
         cur.execute(
             "SELECT sum_value, draw_number FROM ("
             "  SELECT sum_value, draw_number,"
@@ -2525,7 +2551,7 @@ def _tinh_thong_ke() -> dict:
             "                            ORDER BY draw_number DESC) AS rn"
             "  FROM draw_history"
             "  WHERE numbers IS NOT NULL AND sum_value BETWEEN 3 AND 18"
-            ") t WHERE rn <= 2 ORDER BY sum_value, draw_number DESC"
+            ") t WHERE rn <= %d ORDER BY sum_value, draw_number DESC" % _KC_SO_LAN
         )
         hai_ky_cuoi: dict = {}
         for sv, dn in cur.fetchall():
@@ -2559,6 +2585,11 @@ def _tinh_thong_ke() -> dict:
             # None khi tổng đó mới về đúng 1 lần trong toàn bộ lịch sử
             'prev_gap':     (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
                                 hai_ky_cuoi.get(sv, [])),
+            # P216: chuỗi khoảng cách CŨ -> MỚI, để hiện đúng như sổ tay.
+            # Ô cuối cùng của giao diện là current_gap (chu kỳ ĐANG chạy),
+            # không nằm trong chuỗi này vì nó chưa kết thúc.
+            'gaps':         _chuoi_khoang_cach(hai_ky_cuoi.get(sv, [])),
+            'last_draw':    lastdn,
             'size':         'NHO' if sv <= 9 else ('HOA' if sv <= 11 else 'LON'),
         })
 
