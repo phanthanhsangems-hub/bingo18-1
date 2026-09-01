@@ -710,6 +710,48 @@ async function loadSumStats(d) {
     html += `<tr>${half(by[lo])}<td class="ss-gap"></td>${half(by[21 - lo])}</tr>`;
   }
   $('ss-body').innerHTML = html;
+
+  loadChuoiKhoangCach(by);
+}
+
+// ── P216: chuỗi khoảng cách theo tổng ────────────────────────
+// Dựng lại đúng thứ người dùng vẫn ghi tay: mỗi tổng một dòng, các số là
+// khoảng cách giữa hai lần ra liên tiếp, viết thêm vào CUỐI dòng mỗi lần
+// tổng đó về. Dùng lại y nguyên dữ liệu của bảng thống kê theo tổng nên
+// không phát sinh thêm request nào.
+function loadChuoiKhoangCach(by) {
+  const el = $('kc-body');
+  if (!el) return;
+  const rows = [];
+  let vuaSo = null;
+  for (let sv = 3; sv <= 18; sv++) {
+    const s = by[sv];
+    if (!s) continue;
+    const gaps = s.gaps || [];
+    const tb   = s.avg_gap || 0;
+    // "dài" = hơn gấp đôi TB của CHÍNH tổng đó. Ngưỡng tuyệt đối vô nghĩa ở
+    // đây: 30 kỳ là bình thường với tổng 4 nhưng là đợt hạn với tổng 10.
+    const pills = gaps.map(g =>
+      `<span class="kc-p${tb && g > tb * 2 ? ' kc-long' : ''}">${g}</span>`).join('');
+    const cur = s.current_gap;
+    // current_gap === 0 nghĩa là tổng này ra ở ĐÚNG kỳ mới nhất.
+    const moi = cur === 0;
+    if (moi) vuaSo = sv;
+    rows.push(`<div class="kc-row${moi ? ' kc-hit' : ''}">
+      <span class="kc-sum ${s.size}">${sv}</span>
+      <div class="kc-line">${pills}<span class="kc-p kc-now">${
+        cur == null ? '—' : cur.toLocaleString('vi-VN')}</span></div>
+      ${moi ? '<span class="kc-tag">vừa sổ</span>' : ''}
+    </div>`);
+  }
+  el.innerHTML = rows.join('') || '<span class="sub">Chưa có dữ liệu</span>';
+  const note = $('kc-note');
+  if (note) {
+    note.textContent = (vuaSo != null
+      ? `Kỳ mới nhất ra tổng ${vuaSo} — dòng đó đã chốt lại và ô cuối quay về 0. `
+      : '')
+      + 'Mỗi dòng hiện tối đa 24 khoảng cách gần nhất; kéo ngang để xem hết.';
+  }
 }
 
 function refreshAll() {

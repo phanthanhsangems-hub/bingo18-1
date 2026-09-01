@@ -421,6 +421,55 @@ svg text{font-family:inherit}
 .ss-sum.HOA{background:var(--amber-soft);color:var(--amber)}
 .ss-sum.LON{background:var(--plum-soft);color:var(--plum)}
 
+/* ── P216: chuỗi khoảng cách theo tổng ─────────────────────── */
+/* Mỗi tổng một dòng, đọc cũ -> mới từ trái sang phải. Dòng CUỘN NGANG
+   riêng chứ không để cả trang cuộn: tổng 10 có tới 24 ô, còn tổng 3 chỉ
+   vài ô — bắt cả trang rộng theo dòng dài nhất thì mọi dòng khác đều lệch. */
+.kc-row{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 0;border-bottom:1px solid var(--line);
+}
+.kc-row:last-child{border-bottom:none}
+.kc-sum{
+  flex:none;
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:28px;height:24px;padding:0 6px;border-radius:5px;
+  font-weight:700;font-size:12.5px;font-variant-numeric:tabular-nums;
+}
+.kc-sum.NHO{background:var(--jade-soft);color:var(--jade)}
+.kc-sum.HOA{background:var(--amber-soft);color:var(--amber)}
+.kc-sum.LON{background:var(--plum-soft);color:var(--plum)}
+.kc-line{
+  flex:1 1 auto;min-width:0;
+  display:flex;gap:4px;align-items:center;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  padding-bottom:2px;
+}
+.kc-line::-webkit-scrollbar{height:4px}
+.kc-line::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+.kc-p{
+  flex:none;
+  min-width:26px;padding:2px 6px;border-radius:5px;
+  background:var(--card2);color:var(--muted);
+  font-size:12.5px;font-variant-numeric:tabular-nums;text-align:center;
+}
+/* khoảng cách dài bất thường — ngưỡng tính theo TB của chính tổng đó */
+.kc-long{color:var(--ink);font-weight:700}
+/* chu kỳ ĐANG chạy: chưa kết thúc nên tách hẳn ra bằng viền, không tô nền */
+.kc-now{
+  background:transparent;border:1.5px solid var(--ink);
+  color:var(--ink);font-weight:700;
+}
+.kc-tag{
+  flex:none;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;
+  background:var(--jade-soft);color:var(--jade);font-weight:700;
+}
+@media (max-width:640px){
+  .kc-sum{min-width:24px;height:22px;font-size:12px}
+  .kc-p{min-width:24px;padding:2px 5px;font-size:12px}
+}
+
 /* ── P187: lưới chi tiết ───────────────────────────────────── */
 /* 160 kỳ thì khung 520px chỉ hiện ~15 hàng, cuộn quá nhiều. Dùng 72vh để
    tận dụng chiều cao màn hình nhưng vẫn không nuốt trọn trang; thead đã
