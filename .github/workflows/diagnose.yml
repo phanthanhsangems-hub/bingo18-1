@@ -340,6 +340,99 @@ jobs:
               print(">>> Hai bang cung mot moc — dung")
           PYEOF
 
+      # P216: chuoi khoang cach dung ROW_NUMBER() ... rn <= 25 — cau nay CHUA
+      # BAO GIO chay tren Postgres that (local la SQLite). Va CHIEU cua chuoi
+      # la thu khong the nhin bang mat: dao nguoc thi moi con so van "hop ly".
+      # Doi chieu voi luoi 200 ky — mot duong code hoan toan khac.
+      - name: Chuỗi khoảng cách theo tổng (P216)
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          TS=$(date +%s)
+          H="X-Trigger-Secret: $TRIGGER_SECRET"
+          curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats?cb=$TS"       > /tmp/ss2.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=200&cb=$TS" > /tmp/g2.json
+          for f in ss2 g2; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json
+          ss = {x['sum']: x for x in json.load(open('/tmp/ss2.json'))['sums']}
+          g  = json.load(open('/tmp/g2.json'))['draws']
+          loi = []
+
+          print("=== CO TRUONG 'gaps' VA GIA TRI HOP LE ===")
+          thieu = [s for s, x in ss.items() if not isinstance(x.get('gaps'), list)]
+          if thieu:
+              loi.append(f"tong khong co truong gaps: {thieu}")
+          xau = [(s, x['gaps']) for s, x in ss.items()
+                 if isinstance(x.get('gaps'), list)
+                 and any((not isinstance(v, int)) or v <= 0 for v in x['gaps'])]
+          if xau:
+              loi.append(f"khoang cach <= 0 hoac khong phai so nguyen: {xau}")
+          dai = [(s, len(x['gaps'])) for s, x in ss.items()
+                 if isinstance(x.get('gaps'), list) and len(x['gaps']) > 24]
+          if dai:
+              loi.append(f"chuoi dai hon 24 (rn <= 25 khong an): {dai}")
+          print(f"  16 tong co gaps      : {'OK' if not thieu else 'HONG'}")
+          print(f"  moi khoang cach > 0  : {'OK' if not xau else 'HONG'}")
+          print(f"  do dai <= 24         : {'OK' if not dai else 'HONG'}")
+
+          # gaps[-1] va prev_gap lay tu CUNG mot truy van -> bat buoc bang nhau.
+          # Lech = dao chieu hoac lech mot vi tri.
+          print()
+          print("=== gaps[-1] PHAI BANG prev_gap (cot 'Dot truoc' dang hien) ===")
+          for s in sorted(ss):
+              x = ss[s]
+              gp, pv = x.get('gaps') or [], x.get('prev_gap')
+              if not gp and pv is None:
+                  continue
+              cuoi = gp[-1] if gp else None
+              if cuoi != pv:
+                  loi.append(f"tong {s}: gaps[-1]={cuoi} nhung prev_gap={pv}")
+              print(f"  tong {s:2d}: gaps[-1]={cuoi} | prev_gap={pv}"
+                    f" -> {'OK' if cuoi == pv else 'LECH'}")
+
+          # Doi chieu doc lap: tinh lai tu luoi. Chi xet tong xuat hien >= 2 lan
+          # trong cua so — khoang cach vua chot nam tron trong cua so nen so
+          # sanh duoc truc tiep.
+          print()
+          print("=== DOI CHIEU CHIEU CHUOI VOI LUOI 200 KY ===")
+          lo = min(d['draw_number'] for d in g)
+          theo_tong = {}
+          for d in g:
+              theo_tong.setdefault(d['sum'], []).append(d['draw_number'])
+          da_xet = 0
+          for s in sorted(theo_tong):
+              dns = sorted(theo_tong[s])
+              if len(dns) < 2 or s not in ss:
+                  continue
+              that = dns[-1] - dns[-2]        # khoang cach vua chot, tu LUOI
+              gp = ss[s].get('gaps') or []
+              if not gp:
+                  continue
+              da_xet += 1
+              if gp[-1] != that:
+                  loi.append(f"tong {s}: luoi tinh khoang cach cuoi = {that},"
+                             f" bang tra {gp[-1]}")
+              print(f"  tong {s:2d}: luoi {that:3d} | chuoi {gp[-1]:3d}"
+                    f" -> {'OK' if gp[-1] == that else 'LECH'}")
+          if da_xet < 8:
+              loi.append(f"chi doi chieu duoc {da_xet} tong — cua so qua nho, khong ket luan duoc")
+          print(f"  (doi chieu duoc {da_xet} tong tren cua so tu #{lo})")
+
+          print()
+          if loi:
+              print(">>> CHUOI KHOANG CACH CO VAN DE:")
+              for x in loi:
+                  print("    " + x)
+              open('/tmp/job_failed', 'a').write("chuoi khoang cach theo tong sai\n")
+          else:
+              print(">>> Chuoi khoang cach dung chieu va khop voi luoi")
+          PYEOF
+
       - name: Chốt kết quả
         if: always()
         run: |
