@@ -41,4 +41,3 @@ jobs:
           python test_median.py
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py
-          python test_ky_gan_day.py

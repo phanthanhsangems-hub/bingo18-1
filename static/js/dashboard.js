@@ -656,25 +656,17 @@ async function loadTripleStats(d) {
       ${cell(r)}
     </tr>`;
 
-  // P215: 8 KỲ QUAY GẦN NHẤT — kết quả thật của 8 kỳ vừa rồi, mọi kỳ chứ
-  // không riêng trip. Để nhìn bảng trip là thấy luôn vừa ra gì.
+  // P191: dòng "Bất kỳ trip nào" chỉ nói bao nhiêu kỳ chưa về mà không nói
+  // bộ nào vừa ra — thêm một hàng chỉ đích danh trip gần nhất.
   const lastLine = () => {
-    const ds = d.recent_draws || [];
-    if (!ds.length) return '';
-    const maxdn = ds[0].draw;
-    const o = ds.map(x => {
-      const khi = x.draw === maxdn ? 'kỳ này' : `${fmt(maxdn - x.draw)} kỳ trước`;
-      return `<span class="tr-rec${x.is_trip ? ' la-trip' : ''}">`
-           + miniDice(x.numbers)
-           + `<span class="tr-rec-ky num">#${fmt(x.draw)}</span>`
-           + `<span class="tr-rec-tong num ${x.size}">${x.sum}</span>`
-           + `<span class="tr-rec-khi">${khi}</span></span>`;
-    }).join('');
+    const a = d.any;
+    if (!a || !a.last_combo || a.last_draw == null) return '';
+    const gap = a.current_gap;
+    const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
     return `<tr class="tr-last">
-      <td colspan="6" class="tr-last-txt">
-        <div class="tr-rec-lbl">${ds.length} kỳ quay gần nhất</div>
-        <div class="tr-rec-wrap">${o}</div>
-      </td>
+      <td>${miniDice(a.last_combo.split('').map(Number))}</td>
+      <td colspan="5" class="tr-last-txt">Trip gần nhất
+        · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
     </tr>`;
   };
 
