@@ -559,6 +559,94 @@ jobs:
               raise SystemExit(1)
           PYEOF
 
+      # Tren 1000 ky, he thong dat 36,20% — ngang muc doan mo (tran ly thuyet
+      # 37,5% neu chi chon NHO/LON). Cau hoi tiep: co khung gio / thu nao that
+      # su vuot 37,5% khong?
+      #
+      # CAI BAY o day la SO SANH BOI. Xet 17 gio + 7 thu = 24 lat cat, o muc
+      # p<0,05 thi ky vong CO ~1,2 lat cat "co y nghia" HOAN TOAN do ngau
+      # nhien. Bao cao thang p tho la tu bia ra mot khung gio than ky. Nen
+      # dung nguong Bonferroni 0,05/24 va noi ro ky vong nhieu.
+      - name: Có khung giờ / thứ nào vượt mức đoán mò không
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 40 -H "$H" "$BASE/api/wr-by-hour?n=5000&cb=$TS" > /tmp/wh.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/wr-by-dow?n=5000&cb=$TS"  > /tmp/wd.json
+          for f in wh wd; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json, math
+          MOC = 0.375        # doan mo chi chon NHO/LON thi trung 37,5%
+          TOI_THIEU = 40     # duoi nguong nay khoang tin cay rong den vo nghia
+
+          def p_hai_phia(k, n, p0):
+              ph = k / n
+              se = math.sqrt(p0 * (1 - p0) / n)
+              z  = (ph - p0) / se if se else 0.0
+              return z, 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+
+          lat_cat = []
+
+          wh = json.load(open('/tmp/wh.json'))
+          gio = wh.get('hours')
+          if gio is None:
+              print("HONG: khong co khoa 'hours'."); print(json.dumps(wh)[:300]); raise SystemExit(1)
+          print(f"=== THEO GIO VN (n={wh.get('n')}) ===")
+          for h in gio:
+              t, w = int(h.get('total') or 0), int(h.get('wins') or 0)
+              if t < TOI_THIEU:
+                  print(f"  {h['hour']:02d}h: {t:4d} ky — quá ít, bỏ qua"); continue
+              z, pv = p_hai_phia(w, t, MOC)
+              lat_cat.append((f"{h['hour']:02d}h", w, t, w/t, z, pv))
+              print(f"  {h['hour']:02d}h: {w:4d}/{t:4d} = {w/t*100:5.2f}%   z={z:+5.2f}  p={pv:.3f}")
+
+          wd = json.load(open('/tmp/wd.json'))
+          ngay = wd.get('days')
+          if ngay is None:
+              print("HONG: khong co khoa 'days'."); print(json.dumps(wd)[:300]); raise SystemExit(1)
+          print(f"\n=== THEO THU (n={wd.get('n')}) ===")
+          for d in ngay:
+              t, w = int(d.get('total') or 0), int(d.get('wins') or 0)
+              if t < TOI_THIEU:
+                  print(f"  {d.get('label')}: {t:4d} ky — quá ít, bỏ qua"); continue
+              z, pv = p_hai_phia(w, t, MOC)
+              lat_cat.append((str(d.get('label')), w, t, w/t, z, pv))
+              print(f"  {str(d.get('label')):>10s}: {w:4d}/{t:4d} = {w/t*100:5.2f}%   z={z:+5.2f}  p={pv:.3f}")
+
+          k = len(lat_cat)
+          if not k:
+              print("\nKhong co lat cat nao du du lieu."); raise SystemExit(0)
+          nguong = 0.05 / k
+          print(f"\n=== KET LUAN ===")
+          print(f"Da xet {k} lat cat. O muc p<0,05 thi ky vong co {k*0.05:.1f} lat cat")
+          print(f'"co y nghia" HOAN TOAN do ngau nhien — nen phai dung nguong')
+          print(f"Bonferroni 0,05/{k} = {nguong:.4f}.")
+
+          tho  = [x for x in lat_cat if x[5] < 0.05]
+          that = [x for x in lat_cat if x[5] < nguong]
+          print(f"\n  Vuot nguong tho p<0,05        : {len(tho)}"
+                + (f"  -> {', '.join(x[0] for x in tho)}" if tho else ""))
+          print(f"  Vuot nguong Bonferroni p<{nguong:.4f}: {len(that)}"
+                + (f"  -> {', '.join(x[0] for x in that)}" if that else ""))
+          tren = [x for x in that if x[3] > MOC]
+          if tren:
+              print("\n  >>> CO lat cat that su VUOT muc doan mo:")
+              for x in tren:
+                  print(f"      {x[0]}: {x[3]*100:.2f}% tren {x[2]} ky (p={x[5]:.5f})")
+          else:
+              print("\n  >>> KHONG lat cat nao vuot muc doan mo sau khi hieu chinh.")
+              print("      Tuc chua tim duoc khung gio hay thu nao dang de dat cuoc rieng.")
+              if tho:
+                  print(f"      ({len(tho)} lat cat qua duoc p<0,05 tho, nhung ky vong ngau nhien"
+                        f" da la {k*0.05:.1f} — khong dang tin.)")
+          PYEOF
+
       - name: Chốt kết quả
         if: always()
         run: |
