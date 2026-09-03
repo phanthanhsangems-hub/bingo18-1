@@ -3,7 +3,11 @@ Option Explicit
 Dim oShell, oWMI, oProcs, oProc
 Dim sDir, sPython, sScript
 
-sDir    = "C:\Users\ACER\bingo18"
+' Thu muc CUA CHINH FILE NAY, khong ghi cung.
+' Truoc day dong nay la "C:\Users\ACER\bingo18". Ai chep repo sang thu muc
+' khac (vi du bingo18-moi) van bi vbs do chay code o thu muc CU — watcher
+' trong thu muc moi khong bao gio duoc khoi dong, ma khong co loi nao bao.
+sDir    = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\") - 1)
 sPython = "C:\Users\ACER\AppData\Local\Programs\Python\Python311\pythonw.exe"
 sScript = "sync_to_supabase.py --mode watch"
 
