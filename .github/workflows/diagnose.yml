@@ -433,6 +433,51 @@ jobs:
               print(">>> Chuoi khoang cach dung chieu va khop voi luoi")
           PYEOF
 
+      # Nguoi dung hoi vi sao khong bao gio thay du doan tong 4/5/16/17.
+      # Bon model thong ke deu chon "3 so tot nhat trong 1..6" nen khong bao gio
+      # sinh so lap -> tong chi nam trong 6..15. Buoc nay DO tren du lieu that
+      # thay vi suy luan tu code.
+      - name: Phân bố TỔNG của các dự đoán gần đây
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/predictions?limit=200&cb=$(date +%s)" > /tmp/pd.json
+          python3 -c "import json;json.load(open('/tmp/pd.json'))" 2>/dev/null || {
+            echo "LOI: khong phai JSON:"; head -c 200 /tmp/pd.json; echo; exit 1; }
+          python3 - <<'PYEOF'
+          import json, collections
+          d = json.load(open('/tmp/pd.json'))
+          rows = d if isinstance(d, list) else (d.get('predictions') or d.get('data') or [])
+          nums = []
+          for r in rows:
+              v = r.get('predicted_numbers')
+              if isinstance(v, str):
+                  try: v = json.loads(v)
+                  except Exception: continue
+              if isinstance(v, list) and len(v) == 3:
+                  nums.append([int(x) for x in v])
+          if not nums:
+              print("Khong doc duoc du doan nao — bo qua."); raise SystemExit(0)
+          print(f"Doc duoc {len(nums)} du doan gan nhat\n")
+          tong = collections.Counter(sum(x) for x in nums)
+          print("=== PHAN BO TONG DU DOAN ===")
+          for s in range(3, 19):
+              c = tong.get(s, 0)
+              bar = '#' * min(40, c)
+              print(f"  tong {s:2d}: {c:4d}  {bar}")
+          thieu = [s for s in range(3, 19) if not tong.get(s)]
+          print(f"\nTong KHONG he duoc du doan lan nao: {thieu}")
+          lap = sum(1 for x in nums if len(set(x)) < 3)
+          print(f"Du doan co SO LAP: {lap}/{len(nums)} = {lap/len(nums)*100:.1f}%")
+          print("  (ky THAT co so lap: 44.4%)")
+          bo = collections.Counter(tuple(sorted(x)) for x in nums)
+          print(f"So bo khac nhau da dung: {len(bo)}/56")
+          print("  5 bo hay dung nhat:", bo.most_common(5))
+          PYEOF
+
       - name: Chốt kết quả
         if: always()
         run: |
