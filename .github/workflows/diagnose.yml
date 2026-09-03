@@ -478,6 +478,89 @@ jobs:
           print("  5 bo hay dung nhat:", bo.most_common(5))
           PYEOF
 
+      # 200 du doan gan nhat lech nang ve LON (147 vs 52). Cau hoi that su
+      # dang gia: ti le THANG cua nhanh LON co khac nhanh NHO khong? Neu bang
+      # nhau thi lech chi la thien lech vo hai; neu LON thap hon han thi cac
+      # luat P45/P150 dang day sai huong. So sanh hai ti le bang z-test.
+      - name: Tỉ lệ thắng tách theo SIZE đã dự đoán
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 40 -H "$H" "$BASE/api/size-accuracy?n=1000&cb=$TS"  > /tmp/sa.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/size-confusion?n=1000&cb=$TS" > /tmp/sc.json
+          for f in sa sc; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json, math
+
+          def lay(o, *ten):
+              for t in ten:
+                  if isinstance(o, dict) and t in o:
+                      return o[t]
+              return None
+
+          sa = json.load(open('/tmp/sa.json'))
+          rows = sa if isinstance(sa, list) else (lay(sa, 'sizes', 'data', 'rows') or [])
+          print("=== TI LE THANG THEO SIZE DA DU DOAN (toi da 1000 ky da cham) ===")
+          print("    thang = du doan dung SIZE\n")
+          st = {}
+          for r in rows:
+              if not isinstance(r, dict):
+                  continue
+              k = lay(r, 'pred_size', 'size')
+              n = lay(r, 'total', 'n', 'count')
+              w = lay(r, 'wins', 'win')
+              if k is None or not n:
+                  continue
+              n, w = int(n), int(w or 0)
+              st[k] = (n, w)
+              wr = w / n
+              se = math.sqrt(wr * (1 - wr) / n)
+              print(f"  {k:4s}: {w:4d}/{n:4d} = {wr*100:5.2f}%"
+                    f"  (95% CI {max(0,wr-1.96*se)*100:5.2f}% .. {min(1,wr+1.96*se)*100:5.2f}%)")
+          if not st:
+              print("Khong doc duoc du lieu — bo qua."); raise SystemExit(0)
+
+          print("\n  Nen so voi: doan NHO hay LON thi ti le trung ly thuyet deu la 37,5%")
+          print("  (NHO 81/216, LON 81/216, HOA 54/216 — doan gi cung khong the vuot 37,5%")
+          print("   neu cac ky doc lap nhau).")
+
+          if 'LON' in st and 'NHO' in st:
+              (nl, wl), (nn, wn) = st['LON'], st['NHO']
+              pl, pn = wl / nl, wn / nn
+              pp = (wl + wn) / (nl + nn)
+              se = math.sqrt(pp * (1 - pp) * (1 / nl + 1 / nn))
+              z  = (pl - pn) / se if se else 0.0
+              pv = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+              print(f"\n=== LON vs NHO ===")
+              print(f"  LON {pl*100:.2f}%  vs  NHO {pn*100:.2f}%   chenh {(pl-pn)*100:+.2f} diem")
+              print(f"  z = {z:+.2f}   p = {pv:.3f}")
+              if pv < 0.05:
+                  print("  -> KHAC BIET CO Y NGHIA THONG KE. Nhanh yeu hon dang keo ket qua xuong.")
+              else:
+                  print("  -> Khong co y nghia thong ke: chenh lech nay giai thich duoc bang")
+                  print("     ngau nhien. Viec doan LON nhieu hon khong tu no gay hai.")
+
+          sc = json.load(open('/tmp/sc.json'))
+          m = sc if isinstance(sc, list) else (lay(sc, 'matrix', 'confusion', 'data') or [])
+          if m:
+              print("\n=== MA TRAN: DU DOAN (hang) vs THUC TE (cot) ===")
+              print(f"  {'':6s}" + "".join(f"{c:>8s}" for c in ('NHO', 'HOA', 'LON')))
+              if isinstance(m, dict):
+                  for pr in ('NHO', 'HOA', 'LON'):
+                      hang = m.get(pr) or {}
+                      print(f"  {pr:6s}" + "".join(f"{int(hang.get(a,0)):8d}" for a in ('NHO','HOA','LON')))
+              else:
+                  for r in m:
+                      if isinstance(r, dict):
+                          print("  " + json.dumps(r, ensure_ascii=False))
+          PYEOF
+
       - name: Chốt kết quả
         if: always()
         run: |
