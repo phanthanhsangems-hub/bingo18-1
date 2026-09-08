@@ -209,6 +209,7 @@ class DatabaseManager:
                         model_name        TEXT NOT NULL,
                         predicted_numbers TEXT NOT NULL,
                         confidence        REAL NOT NULL,
+                        win_prob          REAL,
                         prediction_time   TIMESTAMP NOT NULL,
                         created_at        TIMESTAMP DEFAULT NOW()
                     )
@@ -343,6 +344,11 @@ class DatabaseManager:
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_presult_pid_uniq ON prediction_results(prediction_id)",
                     # required by insert_prediction() / voter-weight & analytics queries (app.py, prediction_service.py)
                     "ALTER TABLE predictions        ADD COLUMN IF NOT EXISTS vote_breakdown JSONB",
+                    # win_prob = con so THAT SU hien ra man hinh ("win prob 39,1%").
+                    # Truoc day chi luu 'confidence' (diem THO cua model), nen khong
+                    # co cach nao doi chieu con so nguoi dung nhin thay voi ket qua
+                    # that. NULL o moi dong cu — cac phep do phai bo qua NULL.
+                    "ALTER TABLE predictions        ADD COLUMN IF NOT EXISTS win_prob REAL",
                 ]:
                     cur.execute(ddl)
 
@@ -381,6 +387,7 @@ class DatabaseManager:
                         model_name TEXT NOT NULL,
                         predicted_numbers TEXT NOT NULL,
                         confidence REAL NOT NULL,
+                        win_prob REAL,
                         prediction_time TIMESTAMP NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""")
@@ -477,6 +484,7 @@ class DatabaseManager:
                     "ALTER TABLE model_stats        ADD COLUMN sum_win_rate REAL DEFAULT 0.0",
                     # required by _get_voter_multipliers()'s SQLite-path query (p.vote_breakdown)
                     "ALTER TABLE predictions        ADD COLUMN vote_breakdown TEXT",
+                    "ALTER TABLE predictions        ADD COLUMN win_prob REAL",
                 ]:
                     try:
                         cur.execute(col_ddl)
@@ -572,11 +580,17 @@ class DatabaseManager:
     # ── Predictions ───────────────────────────────────────────
     def insert_prediction(self, draw_number: int, model_name: str,
                           predicted_numbers: List[int], confidence: float,
-                          vote_breakdown: dict = None) -> tuple:
+                          vote_breakdown: dict = None,
+                          win_prob: float = None) -> tuple:
         """Returns (id, is_new) where is_new=False means prediction already existed.
 
         Uses pg_advisory_xact_lock to serialize concurrent inserts for the same
         draw_number across Cloud Run instances, preventing duplicate Telegram sends.
+
+        confidence = diem THO cua model. win_prob = con so DA HIEU CHINH, tuc
+        thu that su hien ra man hinh. Truoc day chi luu diem tho nen khong doi
+        chieu duoc con so nguoi dung nhin thay voi ket qua that. win_prob mac
+        dinh None de nhung cho goi cu (sync_predictions.py:171) khong hong.
         """
         ph   = self._ph()
         conn = self.get_connection()
@@ -603,17 +617,17 @@ class DatabaseManager:
             vb_json = json.dumps(vote_breakdown) if vote_breakdown else None
             if USE_POSTGRES:
                 cur.execute(f"""
-                    INSERT INTO predictions (draw_number, model_name, predicted_numbers, confidence, prediction_time, vote_breakdown)
-                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id
+                    INSERT INTO predictions (draw_number, model_name, predicted_numbers, confidence, prediction_time, vote_breakdown, win_prob)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph},{ph}) RETURNING id
                 """, (draw_number, model_name, json.dumps([int(x) for x in predicted_numbers]),
-                      confidence, datetime.now(), vb_json))
+                      confidence, datetime.now(), vb_json, win_prob))
                 row_id = cur.fetchone()[0]
             else:
                 cur.execute(f"""
-                    INSERT INTO predictions (draw_number, model_name, predicted_numbers, confidence, prediction_time)
-                    VALUES ({ph},{ph},{ph},{ph},{ph})
+                    INSERT INTO predictions (draw_number, model_name, predicted_numbers, confidence, prediction_time, win_prob)
+                    VALUES ({ph},{ph},{ph},{ph},{ph},{ph})
                 """, (draw_number, model_name, json.dumps([int(x) for x in predicted_numbers]),
-                      confidence, datetime.now()))
+                      confidence, datetime.now(), win_prob))
                 row_id = cur.lastrowid
             conn.commit()
             return row_id, True

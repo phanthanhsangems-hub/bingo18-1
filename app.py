@@ -3325,33 +3325,38 @@ def calibration_by_size():
     """P80: Per-SIZE Brier score, avg confidence vs actual WR, calibration gap."""
     try:
         n    = min(int(request.args.get('n', 500)), 2000)
+        # ?field=win_prob de do CON SO HIEN RA MAN HINH thay vi diem tho.
+        # Hai cot khac han: confidence la diem tho cua model (~60%), win_prob
+        # la so DA HIEU CHINH (~39%) — thu nguoi dung that su nhin thay.
+        # Khoa cung thanh hai gia tri, KHONG ghep tham so nguoi dung vao SQL.
+        field = 'win_prob' if request.args.get('field') == 'win_prob' else 'confidence'
         conn = db.get_connection()
         cur  = conn.cursor()
 
         if USE_POSTGRES:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     CASE WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
                          WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
                          ELSE 'LON' END AS pred_size,
-                    p.confidence,
+                    p.{field},
                     COALESCE(pr.is_win_size, FALSE) AS is_win
                 FROM predictions p
                 JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE p.confidence IS NOT NULL AND pr.actual_numbers IS NOT NULL
+                WHERE p.{field} IS NOT NULL AND pr.actual_numbers IS NOT NULL
                 ORDER BY p.draw_number DESC LIMIT %s
             """, (n,))
         else:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     CASE WHEN (SELECT SUM(CAST(value AS INTEGER)) FROM json_each(p.predicted_numbers)) <= 9  THEN 'NHO'
                          WHEN (SELECT SUM(CAST(value AS INTEGER)) FROM json_each(p.predicted_numbers)) <= 11 THEN 'HOA'
                          ELSE 'LON' END AS pred_size,
-                    p.confidence,
+                    p.{field},
                     COALESCE(pr.is_win_size, 0) AS is_win
                 FROM predictions p
                 JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE p.confidence IS NOT NULL AND pr.actual_numbers IS NOT NULL
+                WHERE p.{field} IS NOT NULL AND pr.actual_numbers IS NOT NULL
                 ORDER BY p.draw_number DESC LIMIT ?
             """, (n,))
 
@@ -3403,7 +3408,7 @@ def calibration_by_size():
                 'bins':          bins,
             }
 
-        return jsonify({'sizes': result, 'n': len(rows)})
+        return jsonify({'sizes': result, 'n': len(rows), 'field': field})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

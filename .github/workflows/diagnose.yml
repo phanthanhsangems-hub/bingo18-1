@@ -659,8 +659,11 @@ jobs:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          # field=win_prob: do CON SO HIEN RA MAN HINH. Khong co tham so nay
+          # thi endpoint do cot 'confidence' = diem THO cua model, khong phai
+          # thu nguoi dung nhin thay — de nham lam.
           curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
-               "$BASE/api/calibration-by-size?n=2000&cb=$(date +%s)" > /tmp/cal.json
+               "$BASE/api/calibration-by-size?n=2000&field=win_prob&cb=$(date +%s)" > /tmp/cal.json
           python3 -c "import json;json.load(open('/tmp/cal.json'))" 2>/dev/null || {
             echo "LOI: khong phai JSON:"; head -c 200 /tmp/cal.json; echo; exit 1; }
           python3 - <<'PYEOF'
@@ -669,7 +672,15 @@ jobs:
           sz = d.get('sizes')
           if sz is None:
               print("HONG: khong co khoa 'sizes'."); print(json.dumps(d)[:300]); raise SystemExit(1)
-          print(f"=== HIEU CHINH DO TU TIN (n={d.get('n')} ky da cham) ===")
+          if not any((sz.get(k) or {}).get('n') for k in ('NHO','HOA','LON')):
+              print("Chua co ky nao co win_prob — cot moi them, cho vai ky roi do lai.")
+              raise SystemExit(0)
+          truong = d.get('field')
+          if truong != 'win_prob':
+              print(f"HONG: endpoint do cot '{truong}' chu khong phai win_prob.")
+              print("  Production co the chua deploy ban co tham so ?field.")
+              raise SystemExit(1)
+          print(f"=== HIEU CHINH DO TU TIN (cot={truong}, n={d.get('n')} ky da cham) ===")
           print("  'bao' = do tu tin trung binh he thong hien ra")
           print("  'that'= ti le thang thuc te cua chinh nhung ky do\n")
 

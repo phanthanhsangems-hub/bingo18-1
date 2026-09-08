@@ -2786,7 +2786,9 @@ def run_prediction_cycle() -> dict:
     win_prob, cal_meta = calibrator.calibrate_by_vote_share(_vote_share_for_cal, best_name, confidence)
     is_confident = cal_meta.get('is_confident', False)
 
-    pred_id, _is_new_pred = db.insert_prediction(next_draw, best_name, numbers, confidence, _vote_info)
+    # Luu CA HAI: confidence = diem tho, win_prob = con so hien ra man hinh.
+    pred_id, _is_new_pred = db.insert_prediction(next_draw, best_name, numbers,
+                                                 confidence, _vote_info, win_prob)
     _update_pred_diversity(numbers)  # B: cập nhật diversity tracker
 
     if not _is_new_pred:
