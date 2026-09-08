@@ -647,6 +647,86 @@ jobs:
                         f" da la {k*0.05:.1f} — khong dang tin.)")
           PYEOF
 
+      # Anh chup man hinh thay "win prob 39,1%" trong khi thuc do 36,20%.
+      # Neu he thong bao cao hon thuc te mot cach he thong thi do la loi HIEU
+      # CHINH — sua duoc, va sua xong con so tren man hinh moi dang tin.
+      #
+      # Do khong the nang do chinh xac (3 phep do deu cho thay khong co tin
+      # hieu), thi it nhat con so hien ra phai trung thuc.
+      - name: Độ tự tin hiển thị có khớp thực tế không
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+               "$BASE/api/calibration-by-size?n=2000&cb=$(date +%s)" > /tmp/cal.json
+          python3 -c "import json;json.load(open('/tmp/cal.json'))" 2>/dev/null || {
+            echo "LOI: khong phai JSON:"; head -c 200 /tmp/cal.json; echo; exit 1; }
+          python3 - <<'PYEOF'
+          import json, math
+          d  = json.load(open('/tmp/cal.json'))
+          sz = d.get('sizes')
+          if sz is None:
+              print("HONG: khong co khoa 'sizes'."); print(json.dumps(d)[:300]); raise SystemExit(1)
+          print(f"=== HIEU CHINH DO TU TIN (n={d.get('n')} ky da cham) ===")
+          print("  'bao' = do tu tin trung binh he thong hien ra")
+          print("  'that'= ti le thang thuc te cua chinh nhung ky do\n")
+
+          tong_n = tong_c = tong_w = 0
+          for k in ('NHO', 'HOA', 'LON'):
+              r = sz.get(k)
+              if not r or not r.get('n'):
+                  continue
+              n  = int(r['n']); ac = float(r['avg_conf']); wr = float(r['actual_wr'])
+              se = math.sqrt(wr * (1 - wr) / n) if n else 0
+              z  = (ac - wr) / se if se else 0
+              pv = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+              tong_n += n; tong_c += ac * n; tong_w += wr * n
+              print(f"  {k}: n={n:4d}  bao {ac*100:5.2f}%  that {wr*100:5.2f}%"
+                    f"  lech {r.get('gap',0)*100:+6.2f} diem"
+                    f"  (z={z:+5.2f} p={pv:.3f})"
+                    f"  Brier {r.get('brier')}  skill {r.get('brier_skill')}")
+
+          if tong_n:
+              ac, wr = tong_c / tong_n, tong_w / tong_n
+              se = math.sqrt(wr * (1 - wr) / tong_n)
+              z  = (ac - wr) / se if se else 0
+              pv = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+              print(f"\n  GOP: n={tong_n}  bao {ac*100:5.2f}%  that {wr*100:5.2f}%"
+                    f"  lech {(ac-wr)*100:+.2f} diem  (z={z:+.2f} p={pv:.3f})")
+              if pv < 0.05 and ac > wr:
+                  print("  -> BAO CAO HON THUC TE mot cach co y nghia thong ke.")
+                  print("     Day la loi hieu chinh THAT, dang sua.")
+              elif pv < 0.05:
+                  print("  -> Bao THAP hon thuc te co y nghia thong ke.")
+              else:
+                  print("  -> Lech khong co y nghia thong ke: con so hien ra")
+                  print("     dang khop voi thuc te trong pham vi sai so.")
+
+          print("\n=== TUNG ROI DO TU TIN (do tin cay) ===")
+          print("  Neu hieu chinh dung: cot 'bao' va 'that' phai bam nhau o MOI roi.")
+          for k in ('NHO', 'HOA', 'LON'):
+              r = sz.get(k)
+              if not r or not r.get('bins'):
+                  continue
+              print(f"\n  -- {k} --")
+              for b in r['bins']:
+                  c = int(b.get('count') or 0)
+                  if c == 0:
+                      continue
+                  lo, hi = float(b['conf_lo']) * 100, float(b['conf_hi']) * 100
+                  mc = float(b.get('mean_conf') or 0) * 100
+                  aw = b.get('actual_wr')
+                  if aw is None:
+                      print(f"     {lo:3.0f}-{hi:3.0f}%: n={c:4d}  bao {mc:5.2f}%  that  —"); continue
+                  aw = float(aw) * 100
+                  co = "qua tu tin" if mc - aw > 5 else ("qua rut re" if aw - mc > 5 else "bam sat")
+                  print(f"     {lo:3.0f}-{hi:3.0f}%: n={c:4d}  bao {mc:5.2f}%"
+                        f"  that {aw:5.2f}%  lech {mc-aw:+6.2f}  {co}")
+          print("\n  (Roi it hon ~30 ky thi lech lon la binh thuong, dung doc qua ky.)")
+          PYEOF
+
       - name: Chốt kết quả
         if: always()
         run: |
