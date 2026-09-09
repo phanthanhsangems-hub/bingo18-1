@@ -421,6 +421,27 @@ svg text{font-family:inherit}
 .ss-sum.HOA{background:var(--amber-soft);color:var(--amber)}
 .ss-sum.LON{background:var(--plum-soft);color:var(--plum)}
 
+/* ── P220: cảnh báo ra trễ / ra sớm ────────────────────────── */
+.cb-nhom{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--muted);margin:10px 0 4px;
+}
+.cb-nhom:first-child{margin-top:0}
+.cb-row{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 0;border-bottom:1px solid var(--line);
+}
+.cb-row:last-child{border-bottom:none}
+.cb-ico{flex:none;font-size:14px;width:18px;text-align:center}
+.cb-txt{flex:1 1 auto;min-width:0;font-size:13px;color:var(--ink)}
+.cb-p{
+  flex:none;font-variant-numeric:tabular-nums;font-size:12.5px;
+  font-weight:700;color:var(--muted);
+}
+@media (max-width:640px){
+  .cb-txt{font-size:12px}
+}
+
 /* ── P216: chuỗi khoảng cách theo tổng ─────────────────────── */
 /* Mỗi tổng một dòng, đọc cũ -> mới từ trái sang phải. Dòng CUỘN NGANG
    riêng chứ không để cả trang cuộn: tổng 10 có tới 24 ô, còn tổng 3 chỉ

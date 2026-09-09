@@ -2439,6 +2439,36 @@ def _chuoi_khoang_cach(dns: list) -> list:
     return [dns[i] - dns[i + 1] for i in range(len(dns) - 1)][::-1]
 
 
+def _do_hiem_vang(gap: int, ways: int) -> float:
+    """P(một tổng vắng ÍT NHẤT `gap` kỳ liên tiếp), theo lý thuyết.
+
+    Mỗi kỳ độc lập, xác suất ra tổng đó là p = ways/216. Vắng gap kỳ = gap lần
+    liên tiếp KHÔNG ra, nên P = (1-p)^gap. Đây là phân phối hình học nên có
+    công thức đóng — không cần quét lịch sử.
+
+    Dùng p LÝ THUYẾT chứ không phải tần suất thực tế: đã đo trên 86.624 kỳ
+    (ghi chú P207), TB kỳ về của mọi tổng khớp 216/ways trong ±0,4 kỳ.
+
+    QUAN TRỌNG — con số này nói HIẾM, không nói SẮP RA. Vì phân phối hình học
+    KHÔNG NHỚ: đã vắng 50 kỳ thì xác suất ra ở kỳ tới vẫn đúng bằng p, y hệt
+    lúc vừa mới ra. Đã kiểm chứng thực nghiệm trên chính dữ liệu này: hạn dài
+    của tổng 6/15 không hề làm tăng khả năng ra trip 222/555.
+    """
+    if gap is None or gap <= 0 or not ways:
+        return 1.0
+    return (1.0 - ways / 216.0) ** gap
+
+
+def _do_hiem_som(gap: int, ways: int) -> float:
+    """P(khoảng cách giữa hai lần ra NGẮN HƠN HOẶC BẰNG `gap`).
+
+    Bù của _do_hiem_vang: gap <= g nghĩa là KHÔNG phải vắng quá g kỳ.
+    """
+    if gap is None or gap <= 0 or not ways:
+        return 1.0
+    return 1.0 - (1.0 - ways / 216.0) ** gap
+
+
 def _trung_vi(xs: list):
     """Trung vị của một danh sách số. None khi chưa đủ dữ liệu.
 
@@ -2589,6 +2619,14 @@ def _tinh_thong_ke() -> dict:
             # Ô cuối cùng của giao diện là current_gap (chu kỳ ĐANG chạy),
             # không nằm trong chuỗi này vì nó chưa kết thúc.
             'gaps':         _chuoi_khoang_cach(hai_ky_cuoi.get(sv, [])),
+            # P220: độ HIẾM của đợt vắng đang chạy và của chu kỳ vừa xong.
+            # p_vang nhỏ = đang nén lâu bất thường; p_som nhỏ = đợt trước về
+            # sớm bất thường. Cả hai chỉ nói hiếm, KHÔNG nói sắp ra.
+            'p_vang':       round(_do_hiem_vang(
+                                (max_dn - lastdn) if lastdn else None, _WAYS[sv]), 5),
+            'p_som':        round(_do_hiem_som(
+                                (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
+                                    hai_ky_cuoi.get(sv, [])), _WAYS[sv]), 5),
             'last_draw':    lastdn,
             'size':         'NHO' if sv <= 9 else ('HOA' if sv <= 11 else 'LON'),
         })

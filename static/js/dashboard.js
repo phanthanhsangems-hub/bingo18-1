@@ -758,7 +758,74 @@ async function loadSumStats(d) {
   }
   $('ss-body').innerHTML = html;
 
+  loadCanhBaoTreSom(by);
   loadChuoiKhoangCach(by);
+}
+
+// ── P220: cảnh báo tổng ra trễ / ra sớm ──────────────────────
+// p_vang = P(vắng lâu hơn số kỳ đang vắng). p_som = P(khoảng cách ngắn hơn
+// hoặc bằng chu kỳ vừa xong). Cả hai tính bằng công thức phân phối hình học,
+// đã đối chiếu với mô phỏng 2 triệu kỳ.
+//
+// CẢNH BÁO NÀY NÓI "HIẾM", KHÔNG NÓI "SẮP RA". Phân phối hình học không nhớ:
+// đã vắng 60 kỳ thì khả năng ra ở kỳ tới vẫn đúng bằng lúc vừa mới ra. Đã đo
+// trên chính dữ liệu này — hạn dài của tổng 6/15 không làm tăng khả năng ra
+// trip 222/555. Chữ trong giao diện phải nói rõ điều đó, nếu không người dùng
+// sẽ đọc thành "tổng này đang tới kỳ, đánh đi".
+const _CB_NGUONG = 0.05;
+
+function loadCanhBaoTreSom(by) {
+  const el = $('cb-body');
+  if (!el) return;
+  const pct = v => (v * 100).toFixed(v < 0.01 ? 2 : 1) + '%';
+  const tre = [], som = [];
+
+  for (let sv = 3; sv <= 18; sv++) {
+    const s = by[sv];
+    if (!s) continue;
+    const size = s.size || (sv <= 9 ? 'NHO' : (sv <= 11 ? 'HOA' : 'LON'));
+    if (s.p_vang != null && s.current_gap > 0 && s.p_vang < _CB_NGUONG) {
+      tre.push({ sv, size, gap: s.current_gap, tb: s.avg_gap, p: s.p_vang });
+    }
+    if (s.p_som != null && s.prev_gap > 0 && s.p_som < _CB_NGUONG) {
+      som.push({ sv, size, gap: s.prev_gap, tb: s.avg_gap, p: s.p_som });
+    }
+  }
+  tre.sort((a, b) => a.p - b.p);
+  som.sort((a, b) => a.p - b.p);
+
+  const dong = (x, kieu) => `<div class="cb-row">
+      <span class="cb-ico ${kieu}">${kieu === 'tre' ? '⏳' : '⚡'}</span>
+      <span class="kc-sum ${x.size}">${x.sv}</span>
+      <span class="cb-txt">${kieu === 'tre'
+        ? `đang vắng <b>${x.gap}</b> kỳ · mức thường <b>${x.tb}</b>`
+        : `đợt trước chỉ <b>${x.gap}</b> kỳ · mức thường <b>${x.tb}</b>`}</span>
+      <span class="cb-p">${pct(x.p)}</span>
+    </div>`;
+
+  let html = '';
+  if (tre.length) {
+    html += '<div class="cb-nhom">Ra trễ — nén lâu bất thường</div>'
+          + tre.map(x => dong(x, 'tre')).join('');
+  }
+  if (som.length) {
+    html += '<div class="cb-nhom">Ra sớm — chu kỳ vừa xong ngắn bất thường</div>'
+          + som.map(x => dong(x, 'som')).join('');
+  }
+  if (!html) html = '<span class="sub">Không có tổng nào bất thường lúc này.</span>';
+  el.innerHTML = html;
+
+  const note = $('cb-note');
+  if (note) {
+    const n = tre.length + som.length;
+    note.innerHTML =
+      'Cột % = khả năng gặp tình huống hiếm ít nhất tới mức này, tính theo lý thuyết. '
+      + '<b>Con số này nói HIẾM, không nói SẮP RA.</b> Các kỳ độc lập nhau nên tổng đã vắng '
+      + '60 kỳ vẫn có đúng cùng khả năng ra ở kỳ tới như tổng vừa mới ra — đã kiểm chứng '
+      + 'trên chính dữ liệu này. '
+      + `Soi 16 tổng cùng lúc ở ngưỡng 5% thì trung bình đã có ~0,8 tổng bị gắn cờ do ngẫu nhiên${
+          n ? `, đang gắn ${n}` : ''}.`;
+  }
 }
 
 // ── P216: chuỗi khoảng cách theo tổng ────────────────────────
