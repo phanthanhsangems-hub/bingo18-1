@@ -681,6 +681,53 @@ async function loadTripleStats(d) {
     + 'TB = tổng số kỳ ÷ số lần về, bị vài đợt hạn cực dài kéo lệch lên. '
     + 'TRUNG VỊ = một nửa số lần về sớm hơn con số này — sát thực tế hơn. '
     + 'Ô "chưa về" đậm khi đã vượt mức TB.';
+
+  loadChuoiKhoangCachTrip(d.triples || []);
+}
+
+// ── P218: chuỗi khoảng cách theo TRIP ────────────────────────
+// Giống hệt thẻ theo tổng, chỉ đổi nguồn dữ liệu. Dùng lại y nguyên CSS .kc-*
+// nên hai thẻ đọc cùng một kiểu — người dùng không phải học lại cách đọc.
+//
+// Trip 111 == tổng 3 và trip 666 == tổng 18 (chỉ một bộ duy nhất tạo được các
+// tổng đó), nên hai dòng ấy TRÙNG với thẻ trên — đó là chuyện đúng, không
+// phải lỗi. Bốn trip còn lại khác hẳn tổng tương ứng: tổng 6 có 1-2-3, 1-1-4
+// và 2-2-2, chỉ 2-2-2 mới là trip.
+function loadChuoiKhoangCachTrip(triples) {
+  const el = $('kt-body');
+  if (!el) return;
+  const rows = [];
+  let vuaRa = null;
+  triples.forEach(t => {
+    const combo = String(t.combo || '');
+    if (!/^([1-6])\1\1$/.test(combo)) return;   // bỏ dòng "bất kỳ trip nào"
+    const n     = Number(combo[0]);
+    const gaps  = t.gaps || [];
+    const tb    = t.avg_gap || 0;
+    const pills = gaps.map(g =>
+      `<span class="kc-p${tb && g > tb * 2 ? ' kc-long' : ''}">${g}</span>`).join('');
+    const cur = t.current_gap;
+    const moi = cur === 0;
+    if (moi) vuaRa = combo;
+    // SIZE của trip suy từ tổng: 111=3 NHO ... 666=18 LON
+    const tong = n * 3;
+    const size = tong <= 9 ? 'NHO' : (tong <= 11 ? 'HOA' : 'LON');
+    rows.push(`<div class="kc-row${moi ? ' kc-hit' : ''}">
+      <span class="kc-sum ${size}">${combo}</span>
+      <div class="kc-line">${pills}<span class="kc-p kc-now">${
+        cur == null ? '—' : cur.toLocaleString('vi-VN')}</span></div>
+      ${moi ? '<span class="kc-tag">vừa ra</span>' : ''}
+    </div>`);
+  });
+  el.innerHTML = rows.join('') || '<span class="sub">Chưa có dữ liệu</span>';
+  const note = $('kt-note');
+  if (note) {
+    note.textContent = (vuaRa
+      ? `Kỳ mới nhất ra trip ${vuaRa} — dòng đó đã chốt lại và ô cuối quay về 0. `
+      : '')
+      + 'Mỗi trip về trung bình 1 lần/216 kỳ nên chuỗi này trải rất dài: '
+      + '24 khoảng cách gần nhất có thể phủ hơn 5.000 kỳ. Kéo ngang để xem hết.';
+  }
 }
 
 // ── P185: Thống kê theo tổng ─────────────────────────────────
