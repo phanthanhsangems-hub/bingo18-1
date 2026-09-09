@@ -133,6 +133,7 @@ jobs:
       # tu numbers), roi doi chieu voi current_gap ma sum-stats/triple-stats
       # bao. Bat duoc ca hai loai loi: du lieu sai VA man hinh cu.
       - name: Đối chiếu tổng & trip với 200 kỳ gần nhất
+        continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
@@ -192,12 +193,14 @@ jobs:
           print()
           print(">>> " + (f"CO {len(bad)} CHO LECH:\n  " + "\n  ".join(bad) if bad else "KHOP HET — du lieu dung"))
           PYEOF
+          echo "doi_chieu_200" >> /tmp/da_chay
 
       # Đối chiếu hai nguồn tổng: /api/draw-grid TÍNH tổng từ numbers, còn
       # /api/sum-stats dùng cột sum_value lưu sẵn. Lệch nhau nghĩa là cột
       # sum_value ghi sai (watcher lấy 'total' cào từ web thay vì tự cộng).
       # Thêm tham số cachebust vì cache của app khoá theo full_path.
       - name: Đối chiếu tổng — numbers vs cột sum_value
+        continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
@@ -238,8 +241,10 @@ jobs:
           else:
               print("\n>>> Khop het — khong lech")
           PYEOF
+          echo "sum_value" >> /tmp/da_chay
 
       - name: Bảng tổng và bảng trip phải cùng một mốc kỳ (P207)
+        continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
@@ -316,11 +321,19 @@ jobs:
                   lech.append(f"chuoi tong {tong} != chuoi trip {combo}: {a[-5:]} vs {b[-5:]}")
               print(f"  tong {tong:2d} ({len(a):2d} o) vs trip {combo} ({len(b):2d} o)"
                     f" -> {'OK' if a == b else 'LECH'}")
-          xau_t = [(c, g) for c, x in tt.items()
-                   if (g := x.get('gaps')) is not None
-                   and (not isinstance(g, list)
-                        or any((not isinstance(v, int)) or v <= 0 for v in g)
-                        or len(g) > 24)]
+          # KHONG dung ':=' o day. Toan tu walrus trong comprehension gan vao
+          # scope BEN NGOAI, nen ban truoc da de len chinh bien 'g' (danh sach
+          # ky quay) va lam buoc nay chet voi "'int' object is not
+          # subscriptable" — keo theo 5 buoc sau bi skip. Vong lap tuong minh.
+          xau_t = []
+          for _c, _x in tt.items():
+              _gg = _x.get('gaps')
+              if _gg is None:
+                  continue
+              if (not isinstance(_gg, list)
+                      or any((not isinstance(v, int)) or v <= 0 for v in _gg)
+                      or len(_gg) > 24):
+                  xau_t.append((_c, _gg))
           if xau_t:
               lech.append(f"chuoi trip khong hop le: {xau_t}")
           print(f"  moi chuoi trip > 0 va <= 24 o: {'OK' if not xau_t else 'HONG'}")
@@ -361,12 +374,14 @@ jobs:
           else:
               print(">>> Hai bang cung mot moc — dung")
           PYEOF
+          echo "p207" >> /tmp/da_chay
 
       # P216: chuoi khoang cach dung ROW_NUMBER() ... rn <= 25 — cau nay CHUA
       # BAO GIO chay tren Postgres that (local la SQLite). Va CHIEU cua chuoi
       # la thu khong the nhin bang mat: dao nguoc thi moi con so van "hop ly".
       # Doi chieu voi luoi 200 ky — mot duong code hoan toan khac.
       - name: Chuỗi khoảng cách theo tổng (P216)
+        continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
@@ -454,6 +469,7 @@ jobs:
           else:
               print(">>> Chuoi khoang cach dung chieu va khop voi luoi")
           PYEOF
+          echo "p216" >> /tmp/da_chay
 
       # Nguoi dung hoi vi sao khong bao gio thay du doan tong 4/5/16/17.
       # Bon model thong ke deu chon "3 so tot nhat trong 1..6" nen khong bao gio
@@ -499,6 +515,7 @@ jobs:
           print(f"So bo khac nhau da dung: {len(bo)}/56")
           print("  5 bo hay dung nhat:", bo.most_common(5))
           PYEOF
+          echo "phan_bo" >> /tmp/da_chay
 
       # 200 du doan gan nhat lech nang ve LON (147 vs 52). Cau hoi that su
       # dang gia: ti le THANG cua nhanh LON co khac nhanh NHO khong? Neu bang
@@ -580,6 +597,7 @@ jobs:
               print("\nHONG: khong co khoa 'matrix'.")
               raise SystemExit(1)
           PYEOF
+          echo "wr_size" >> /tmp/da_chay
 
       # Tren 1000 ky, he thong dat 36,20% — ngang muc doan mo (tran ly thuyet
       # 37,5% neu chi chon NHO/LON). Cau hoi tiep: co khung gio / thu nao that
@@ -668,6 +686,7 @@ jobs:
                   print(f"      ({len(tho)} lat cat qua duoc p<0,05 tho, nhung ky vong ngau nhien"
                         f" da la {k*0.05:.1f} — khong dang tin.)")
           PYEOF
+          echo "khung_gio" >> /tmp/da_chay
 
       # Anh chup man hinh thay "win prob 39,1%" trong khi thuc do 36,20%.
       # Neu he thong bao cao hon thuc te mot cach he thong thi do la loi HIEU
@@ -759,6 +778,7 @@ jobs:
                         f"  that {aw:5.2f}%  lech {mc-aw:+6.2f}  {co}")
           print("\n  (Roi it hon ~30 ky thi lech lon la binh thuong, dung doc qua ky.)")
           PYEOF
+          echo "hieu_chinh" >> /tmp/da_chay
 
       - name: Chốt kết quả
         if: always()
@@ -771,6 +791,23 @@ jobs:
           if [ ! -f /tmp/quet_xong ]; then
             echo "LOI: buoc quet endpoint ket thuc giua chung — ket qua quet"
             echo "     KHONG dang tin. Xem log buoc 'Quet endpoint' o tren."
+            exit 1
+          fi
+          # Moi buoc phan tich ghi ten minh vao /tmp/da_chay khi chay XONG.
+          # Thieu ten nao = buoc do crash giua chung.
+          #
+          # Lan chay #24: buoc P207 chet vi loi Python, 5 buoc sau bi skip, ma
+          # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
+          # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
+          # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh"
+          THIEU=""
+          for m in $CAN; do
+            grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
+          done
+          if [ -n "$THIEU" ]; then
+            echo "LOI: cac buoc phan tich sau KHONG chay xong:$THIEU"
+            echo "     Xem log cua chung o tren de biet loi gi."
             exit 1
           fi
           echo "Tat ca cac buoc chan doan deu dat."
