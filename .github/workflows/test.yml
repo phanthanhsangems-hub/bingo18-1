@@ -43,5 +43,6 @@ jobs:
           python test_win_prob.py
           python test_chuoi_kc_trip.py
           python test_excel_tong.py
+          python test_canh_bao.py
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py
