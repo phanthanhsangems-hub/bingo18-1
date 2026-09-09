@@ -6586,6 +6586,10 @@ def daily_summary():
                     18: "212121",   # đen — cực hiếm
                 }
 
+                # P219: đếm luôn trong vòng lặp này thay vì duyệt lại _draws_today
+                # lần nữa — numbers đã được phân tích ở đây rồi.
+                dem_tong = {t: 0 for t in range(3, 19)}
+
                 for row_idx, (draw_num, draw_time_vn, nums_raw) in enumerate(_draws_today, 2):
                     try:
                         nums = json.loads(nums_raw) if isinstance(nums_raw, str) else list(nums_raw)
@@ -6598,6 +6602,8 @@ def daily_summary():
                     total_sum = sum(nums) if nums else ""
                     if isinstance(total_sum, int):
                         sz = "NHO" if total_sum <= 9 else ("HOA" if total_sum <= 11 else "LON")
+                        if 3 <= total_sum <= 18:
+                            dem_tong[total_sum] += 1
                     else:
                         sz = ""
 
@@ -6636,12 +6642,87 @@ def daily_summary():
                 for col, width in zip("ABCDEFG", [8, 16, 7, 7, 7, 8, 8]):
                     ws.column_dimensions[col].width = width
 
+                # ── P219: sheet "Thống kê tổng" ───────────────────────
+                # Sheet RIÊNG chứ không nhét xuống dưới bảng dữ liệu: nhét
+                # chung thì lọc/sắp xếp cột Kỳ sẽ trộn cả phần thống kê vào.
+                #
+                # Không chỉ đếm mà so luôn với KỲ VỌNG — "tổng 10 ra 15 lần"
+                # tự nó vô nghĩa nếu không biết đáng lẽ phải ra bao nhiêu.
+                # Kỳ vọng = n × (số cách tạo tổng đó) / 216.
+                n_ngay = len(_draws_today)
+                ws2 = wb.create_sheet("Thống kê tổng")
+                for col, h in enumerate(
+                        ["Tổng", "Số lần", "Tỉ lệ", "Kỳ vọng", "Chênh", "Số cách ra"], 1):
+                    cell = ws2.cell(row=1, column=col, value=h)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center")
+
+                for i, t in enumerate(range(3, 19), 2):
+                    lan = dem_tong[t]
+                    kv  = n_ngay * _WAYS[t] / 216.0
+                    sz_t = "NHO" if t <= 9 else ("HOA" if t <= 11 else "LON")
+                    hang = [t, lan,
+                            (lan / n_ngay) if n_ngay else 0,
+                            round(kv, 1), round(lan - kv, 1),
+                            f"{_WAYS[t]}/216"]
+                    for col, val in enumerate(hang, 1):
+                        cell = ws2.cell(row=i, column=col, value=val)
+                        cell.alignment = Alignment(horizontal="center")
+                        if col == 3:
+                            cell.number_format = "0.0%"
+                        # cột Tổng dùng lại đúng bảng màu của sheet dữ liệu
+                        if col == 1 and t in sum_colors:
+                            cell.fill = PatternFill("solid", fgColor=sum_colors[t])
+                            cell.font = Font(bold=True, color="FFFFFF", size=12)
+                        elif size_fills.get(sz_t):
+                            cell.fill = size_fills[sz_t]
+                    # Chênh: xanh khi ra nhiều hơn kỳ vọng, đỏ khi ít hơn
+                    o_chenh = ws2.cell(row=i, column=5)
+                    if lan - kv >= 1:
+                        o_chenh.font = Font(bold=True, color="1B5E20")
+                    elif lan - kv <= -1:
+                        o_chenh.font = Font(bold=True, color="B71C1C")
+
+                r = 19
+                o = ws2.cell(row=r, column=1, value="CỘNG")
+                o.font = Font(bold=True)
+                ws2.cell(row=r, column=2, value=n_ngay).font = Font(bold=True)
+                ws2.cell(row=r, column=4, value=round(n_ngay, 1)).font = Font(bold=True)
+
+                # Gộp theo SIZE — đây mới là thứ quyết định thắng/thua
+                r = 21
+                ws2.cell(row=r, column=1, value="Theo SIZE").font = Font(bold=True)
+                for j, (ten, lo, hi, ways) in enumerate(
+                        [("NHỎ (3-9)", 3, 9, 81), ("HÒA (10-11)", 10, 11, 54),
+                         ("LỚN (12-18)", 12, 18, 81)], r + 1):
+                    lan = sum(dem_tong[t] for t in range(lo, hi + 1))
+                    kv  = n_ngay * ways / 216.0
+                    ws2.cell(row=j, column=1, value=ten)
+                    ws2.cell(row=j, column=2, value=lan)
+                    c3 = ws2.cell(row=j, column=3, value=(lan / n_ngay) if n_ngay else 0)
+                    c3.number_format = "0.0%"
+                    ws2.cell(row=j, column=4, value=round(kv, 1))
+                    ws2.cell(row=j, column=5, value=round(lan - kv, 1))
+                    ws2.cell(row=j, column=6, value=f"{ways}/216")
+
+                ws2.cell(row=r + 5, column=1,
+                         value="Kỳ vọng = số kỳ trong ngày × số cách tạo ra tổng đó ÷ 216.")
+                ws2.cell(row=r + 6, column=1,
+                         value="Chênh lệch vài kỳ là bình thường — một ngày chỉ ~160 kỳ "
+                               "nên dao động ngẫu nhiên khá lớn.")
+                for col, width in zip("ABCDEF", [12, 9, 9, 10, 9, 12]):
+                    ws2.column_dimensions[col].width = width
+
                 buf = BytesIO()
                 wb.save(buf)
                 excel_bytes = buf.getvalue()
 
                 filename = f"Bingo18_{date_str}.xlsx"
-                caption = f"📊 Dữ liệu kỳ quay ngày <b>{now_vn.strftime('%d/%m/%Y')}</b> · {len(_draws_today)} kỳ"
+                caption = (f"📊 Dữ liệu kỳ quay ngày <b>{now_vn.strftime('%d/%m/%Y')}</b>"
+                           f" · {len(_draws_today)} kỳ\n"
+                           f"Sheet <b>Thống kê tổng</b>: tổng 3–18 ra bao nhiêu lần,"
+                           f" so với kỳ vọng.")
                 excel_sent = tg.send_document(excel_bytes, filename, caption)
             except Exception as _ex:
                 import traceback as _tb; _tb.print_exc()
