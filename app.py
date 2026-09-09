@@ -2633,6 +2633,11 @@ def _tinh_thong_ke() -> dict:
             'current_gap': (max_dn - lastdn) if lastdn else None,
             # None khi bộ đó mới về đúng 1 lần trong toàn bộ lịch sử
             'prev_gap':    (lastdn - prevdn) if (lastdn and prevdn) else None,
+            # P218: chuỗi khoảng cách CŨ -> MỚI, giống hệt bảng tổng (P216).
+            # 'gaps' truyền vào đây vốn đã là mọi khoảng cách theo thứ tự thời
+            # gian (vòng lặp duyệt rows đã ORDER BY draw_number), nên chỉ cắt
+            # lấy đoạn cuối — không thêm truy vấn nào.
+            'gaps':        (gaps or [])[-(_KC_SO_LAN - 1):],
             'last_draw':   lastdn,
         }
 

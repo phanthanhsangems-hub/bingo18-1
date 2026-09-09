@@ -303,6 +303,28 @@ jobs:
                    and x['median_gap'] > x['avg_gap']]
           print(f"  tong co trung vi > TB: {nguoc if nguoc else 'khong co (dung nhu mong doi)'}")
 
+          # P218: chuoi khoang cach cua TRIP tinh bang vong lap Python, cua
+          # TONG tinh bang truy van ROW_NUMBER trong DB — hai duong khac han.
+          # Tong 3 CHI ra duoc tu 111, tong 18 CHI ra duoc tu 666, nen hai
+          # chuoi do BAT BUOC trung nhau tung phan tu.
+          print()
+          print("=== CHUOI KHOANG CACH: TONG 3 vs TRIP 111, TONG 18 vs TRIP 666 ===")
+          smg = {x['sum']: (x.get('gaps') or []) for x in ss['sums']}
+          for tong, combo in ((3, '111'), (18, '666')):
+              a, b = smg.get(tong, []), (tt[combo].get('gaps') or [])
+              if a != b:
+                  lech.append(f"chuoi tong {tong} != chuoi trip {combo}: {a[-5:]} vs {b[-5:]}")
+              print(f"  tong {tong:2d} ({len(a):2d} o) vs trip {combo} ({len(b):2d} o)"
+                    f" -> {'OK' if a == b else 'LECH'}")
+          xau_t = [(c, g) for c, x in tt.items()
+                   if (g := x.get('gaps')) is not None
+                   and (not isinstance(g, list)
+                        or any((not isinstance(v, int)) or v <= 0 for v in g)
+                        or len(g) > 24)]
+          if xau_t:
+              lech.append(f"chuoi trip khong hop le: {xau_t}")
+          print(f"  moi chuoi trip > 0 va <= 24 o: {'OK' if not xau_t else 'HONG'}")
+
           print()
           print("=== LAN VE GAN NHAT CUA TUNG TRIP (theo bang) ===")
           for n in range(1, 7):
