@@ -422,6 +422,8 @@ svg text{font-family:inherit}
 .ss-sum.LON{background:var(--plum-soft);color:var(--plum)}
 
 /* ── P220: cảnh báo ra trễ / ra sớm ────────────────────────── */
+.cb-table td, .cb-table th{padding:5px 6px;font-size:13px}
+.cb-table tr.cb-hiem td{background:var(--amber-soft);font-weight:700}
 .cb-nhom{
   font-size:11px;letter-spacing:.12em;text-transform:uppercase;
   color:var(--muted);margin:10px 0 4px;

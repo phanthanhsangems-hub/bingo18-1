@@ -125,6 +125,57 @@ ok(sm[10]['p_vang'] < 0.05, "tong 10 vang 100 ky -> duoi nguong canh bao",
    f"{sm[10]['p_vang']}")
 ok(sm[7]['p_vang'] > 0.05, "tong 7 vua ra -> KHONG gan co", f"{sm[7]['p_vang']}")
 
+# ── 7. P221: còn bao nhiêu kỳ nữa sẽ ra ──────────────────────
+print()
+print("  -- P221: con bao nhieu ky nua --")
+
+# Đối chiếu với mô phỏng: lọc riêng những thời điểm đã vắng đúng d kỳ,
+# đo thời gian chờ THÊM. Đây là bằng chứng cho tính không nhớ.
+random.seed(7)
+N2 = 600_000
+t2 = [random.randint(1, 6) + random.randint(1, 6) + random.randint(1, 6)
+      for _ in range(N2)]
+S = 16
+vt = [i for i, t in enumerate(t2) if t == S]
+lech = []
+for d in (0, 30, 66):
+    cho = sorted(b - a - d for a, b in zip(vt, vt[1:]) if b - a > d)
+    if len(cho) < 500:
+        continue
+    n = len(cho)
+    for q, k_lt in ((0.50, A._ky_nua(0.50, 6)), (0.80, A._ky_nua(0.80, 6))):
+        k_mp = cho[int(n * q)]
+        if abs(k_mp - k_lt) > max(3, k_lt * 0.10):
+            lech.append((d, q, k_mp, k_lt))
+ok(not lech, "k50/k80 khop mo phong DU da vang 0/30/66 ky", str(lech))
+
+# Tính KHÔNG NHỚ nói thẳng: horizon chỉ phụ thuộc ways, không phụ thuộc gap.
+# Nếu ai đó sau này thêm tham số gap vào _ky_nua thì test này đỏ.
+import inspect
+tham_so = list(inspect.signature(A._ky_nua).parameters)
+ok(tham_so == ['q', 'ways'],
+   "_ky_nua CHI nhan (q, ways) — khong nhan gap", str(tham_so))
+
+ok(A._ky_nua(0.50, 6) == 25 and A._ky_nua(0.80, 6) == 58
+   and A._ky_nua(0.95, 6) == 107,
+   "tong 16: 50%->25, 80%->58, 95%->107 ky",
+   f"{A._ky_nua(0.5,6)}/{A._ky_nua(0.8,6)}/{A._ky_nua(0.95,6)}")
+ok(A._ky_nua(0.50, 27) < A._ky_nua(0.50, 6) < A._ky_nua(0.50, 1),
+   "tong hay ra -> cho it ky hon")
+ok(all(A._ky_nua(0.5, w) < A._ky_nua(0.8, w) < A._ky_nua(0.95, w)
+       for w in (1, 6, 15, 27)), "50% < 80% < 95% o moi tong")
+ok(A._ky_nua(0.5, 0) == 0 and A._ky_nua(0, 6) == 0 and A._ky_nua(1, 6) == 0,
+   "bien: ways=0 / q=0 / q=1 -> 0, khong no")
+
+# Payload
+ok(all(k in sm[10] for k in ('k50', 'k80', 'k95')), "payload co k50/k80/k95")
+ok(sm[10]['k50'] == A._ky_nua(0.50, 27), "k50 trong payload khop ham",
+   f"{sm[10]['k50']}")
+# Tong 10 dang vang 100 ky nhung horizon van y het tong 10 vua ra
+ok(sm[10]['k50'] == 6 and sm[7]['k50'] == 10,
+   "horizon chi theo tong, khong theo dang vang bao lau",
+   f"tong10={sm[10]['k50']} tong7={sm[7]['k50']}")
+
 print("=" * 62)
 if fails:
     print(f"HONG {len(fails)} test:")

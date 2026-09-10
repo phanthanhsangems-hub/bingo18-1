@@ -2459,6 +2459,25 @@ def _do_hiem_vang(gap: int, ways: int) -> float:
     return (1.0 - ways / 216.0) ** gap
 
 
+def _ky_nua(q: float, ways: int) -> int:
+    """Còn bao nhiêu kỳ nữa thì khả năng ra đạt `q` (0..1), tính TỪ BÂY GIỜ.
+
+    P(ra trong k kỳ tới) = 1-(1-p)^k >= q  ->  k >= ln(1-q)/ln(1-p).
+
+    KHÔNG phụ thuộc đã vắng bao lâu. Đây là điểm dễ hiểu nhầm nhất và cũng là
+    câu hỏi người dùng đặt ra: "tổng 16 vắng 66 kỳ rồi thì bao nhiêu kỳ nữa
+    sẽ ra?". Đáp: đúng bằng lúc nó vừa mới ra xong. Đã mô phỏng 3 triệu kỳ,
+    lọc riêng những thời điểm đã vắng 0/30/66/150 kỳ — thời gian chờ THÊM đều
+    ra TB 36 kỳ và phân vị 25/58/107 y hệt nhau.
+
+    Nói cách khác: bảng này cho biết TẦM CHỜ, không cho biết "sắp tới lượt".
+    """
+    if not ways or not (0 < q < 1):
+        return 0
+    import math as _m
+    return int(_m.ceil(_m.log(1 - q) / _m.log(1 - ways / 216.0)))
+
+
 def _do_hiem_som(gap: int, ways: int) -> float:
     """P(khoảng cách giữa hai lần ra NGẮN HƠN HOẶC BẰNG `gap`).
 
@@ -2624,6 +2643,11 @@ def _tinh_thong_ke() -> dict:
             # sớm bất thường. Cả hai chỉ nói hiếm, KHÔNG nói sắp ra.
             'p_vang':       round(_do_hiem_vang(
                                 (max_dn - lastdn) if lastdn else None, _WAYS[sv]), 5),
+            # P221: còn bao nhiêu kỳ nữa sẽ ra, tính từ BÂY GIỜ. Không phụ
+            # thuộc đã vắng bao lâu — xem ghi chú trong _ky_nua().
+            'k50':          _ky_nua(0.50, _WAYS[sv]),
+            'k80':          _ky_nua(0.80, _WAYS[sv]),
+            'k95':          _ky_nua(0.95, _WAYS[sv]),
             'p_som':        round(_do_hiem_som(
                                 (lambda d: d[0] - d[1] if len(d) >= 2 else None)(
                                     hai_ky_cuoi.get(sv, [])), _WAYS[sv]), 5),
