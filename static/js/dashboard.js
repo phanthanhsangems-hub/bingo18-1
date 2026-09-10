@@ -762,69 +762,73 @@ async function loadSumStats(d) {
   loadChuoiKhoangCach(by);
 }
 
-// ── P220: cảnh báo tổng ra trễ / ra sớm ──────────────────────
-// p_vang = P(vắng lâu hơn số kỳ đang vắng). p_som = P(khoảng cách ngắn hơn
-// hoặc bằng chu kỳ vừa xong). Cả hai tính bằng công thức phân phối hình học,
-// đã đối chiếu với mô phỏng 2 triệu kỳ.
+// ── P220/P221: còn bao nhiêu kỳ nữa sẽ ra ───────────────────
+// Bản đầu (P220) chỉ báo "ra sớm" dựa trên prev_gap — tức chu kỳ ĐÃ kết
+// thúc. Người dùng chỉ ra đúng chỗ thiếu: họ muốn biết TỪ BÂY GIỜ còn bao
+// nhiêu kỳ nữa, chứ không phải đợi nó ra rồi mới báo. Nên bảng này nhìn về
+// phía trước.
 //
-// CẢNH BÁO NÀY NÓI "HIẾM", KHÔNG NÓI "SẮP RA". Phân phối hình học không nhớ:
-// đã vắng 60 kỳ thì khả năng ra ở kỳ tới vẫn đúng bằng lúc vừa mới ra. Đã đo
-// trên chính dữ liệu này — hạn dài của tổng 6/15 không làm tăng khả năng ra
-// trip 222/555. Chữ trong giao diện phải nói rõ điều đó, nếu không người dùng
-// sẽ đọc thành "tổng này đang tới kỳ, đánh đi".
+// k50/k80/k95 = còn bao nhiêu kỳ nữa thì khả năng ra đạt 50%/80%/95%.
+// KHÔNG phụ thuộc đã vắng bao lâu — đã mô phỏng 3 triệu kỳ, lọc riêng những
+// thời điểm đã vắng 0/30/66/150 kỳ, thời gian chờ THÊM đều y hệt nhau.
+// Bảng cho biết TẦM CHỜ, không cho biết "sắp tới lượt".
 const _CB_NGUONG = 0.05;
 
 function loadCanhBaoTreSom(by) {
   const el = $('cb-body');
   if (!el) return;
   const pct = v => (v * 100).toFixed(v < 0.01 ? 2 : 1) + '%';
-  const tre = [], som = [];
 
+  const ds = [];
   for (let sv = 3; sv <= 18; sv++) {
     const s = by[sv];
-    if (!s) continue;
-    const size = s.size || (sv <= 9 ? 'NHO' : (sv <= 11 ? 'HOA' : 'LON'));
-    if (s.p_vang != null && s.current_gap > 0 && s.p_vang < _CB_NGUONG) {
-      tre.push({ sv, size, gap: s.current_gap, tb: s.avg_gap, p: s.p_vang });
-    }
-    if (s.p_som != null && s.prev_gap > 0 && s.p_som < _CB_NGUONG) {
-      som.push({ sv, size, gap: s.prev_gap, tb: s.avg_gap, p: s.p_som });
-    }
+    if (!s || s.k50 == null) continue;
+    ds.push({
+      sv,
+      size: s.size || (sv <= 9 ? 'NHO' : (sv <= 11 ? 'HOA' : 'LON')),
+      gap:  s.current_gap,
+      tb:   s.avg_gap,
+      p:    s.p_vang,
+      k50:  s.k50, k80: s.k80, k95: s.k95,
+    });
   }
-  tre.sort((a, b) => a.p - b.p);
-  som.sort((a, b) => a.p - b.p);
+  // tổng nào đang vắng lâu nhất lên đầu — đó là cái người dùng ngóng
+  ds.sort((a, b) => (b.gap ?? -1) - (a.gap ?? -1));
 
-  const dong = (x, kieu) => `<div class="cb-row">
-      <span class="cb-ico ${kieu}">${kieu === 'tre' ? '⏳' : '⚡'}</span>
-      <span class="kc-sum ${x.size}">${x.sv}</span>
-      <span class="cb-txt">${kieu === 'tre'
-        ? `đang vắng <b>${x.gap}</b> kỳ · mức thường <b>${x.tb}</b>`
-        : `đợt trước chỉ <b>${x.gap}</b> kỳ · mức thường <b>${x.tb}</b>`}</span>
-      <span class="cb-p">${pct(x.p)}</span>
-    </div>`;
+  let hiem = 0;
+  const hang = ds.map(x => {
+    const la = x.p != null && x.gap > 0 && x.p < _CB_NGUONG;
+    if (la) hiem++;
+    return `<tr class="${la ? 'cb-hiem' : ''}">
+      <td><span class="kc-sum ${x.size}">${x.sv}</span></td>
+      <td class="num ta-r">${x.gap == null ? '—' : x.gap}</td>
+      <td class="num ta-r ss-prev">${x.tb == null ? '—' : x.tb}</td>
+      <td class="num ta-r">${x.k50}</td>
+      <td class="num ta-r">${x.k80}</td>
+      <td class="num ta-r">${x.k95}</td>
+      <td class="num ta-r ss-prev">${x.p == null ? '—' : pct(x.p)}</td>
+    </tr>`;
+  }).join('');
 
-  let html = '';
-  if (tre.length) {
-    html += '<div class="cb-nhom">Ra trễ — nén lâu bất thường</div>'
-          + tre.map(x => dong(x, 'tre')).join('');
-  }
-  if (som.length) {
-    html += '<div class="cb-nhom">Ra sớm — chu kỳ vừa xong ngắn bất thường</div>'
-          + som.map(x => dong(x, 'som')).join('');
-  }
-  if (!html) html = '<span class="sub">Không có tổng nào bất thường lúc này.</span>';
-  el.innerHTML = html;
+  el.innerHTML = `<div class="tbl-scroll"><table class="log-table cb-table">
+    <thead><tr>
+      <th>Tổng</th>
+      <th class="ta-r"><span class="lbl-lg">Đang vắng</span><span class="lbl-sm">Vắng</span></th>
+      <th class="ta-r"><span class="lbl-lg">Mức thường</span><span class="lbl-sm">TB</span></th>
+      <th class="ta-r">50%</th><th class="ta-r">80%</th><th class="ta-r">95%</th>
+      <th class="ta-r"><span class="lbl-lg">Độ hiếm</span><span class="lbl-sm">Hiếm</span></th>
+    </tr></thead><tbody>${hang}</tbody></table></div>`;
 
   const note = $('cb-note');
   if (note) {
-    const n = tre.length + som.length;
     note.innerHTML =
-      'Cột % = khả năng gặp tình huống hiếm ít nhất tới mức này, tính theo lý thuyết. '
-      + '<b>Con số này nói HIẾM, không nói SẮP RA.</b> Các kỳ độc lập nhau nên tổng đã vắng '
-      + '60 kỳ vẫn có đúng cùng khả năng ra ở kỳ tới như tổng vừa mới ra — đã kiểm chứng '
-      + 'trên chính dữ liệu này. '
-      + `Soi 16 tổng cùng lúc ở ngưỡng 5% thì trung bình đã có ~0,8 tổng bị gắn cờ do ngẫu nhiên${
-          n ? `, đang gắn ${n}` : ''}.`;
+      'Ba cột 50/80/95% = còn bao nhiêu kỳ nữa thì khả năng ra đạt mức đó, tính TỪ BÂY GIỜ. '
+      + '<b>Ba cột này KHÔNG đổi theo số kỳ đã vắng.</b> Tổng đã vắng 66 kỳ có đúng cùng '
+      + 'tầm chờ như tổng vừa mới ra xong — đã mô phỏng 3 triệu kỳ để kiểm, và kiểm cả trên '
+      + 'chính dữ liệu này (hạn dài của tổng 6/15 không làm tăng khả năng ra trip 222/555). '
+      + 'Nên bảng cho biết <b>tầm chờ</b>, không cho biết "sắp tới lượt". '
+      + `Cột Độ hiếm nói đợt vắng hiện tại lạ tới đâu; soi 16 tổng ở ngưỡng 5% thì trung bình `
+      + `đã có ~0,8 tổng bị tô do ngẫu nhiên${hiem ? `, đang tô ${hiem}` : ''}.`;
   }
 }
 

@@ -205,10 +205,11 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     </div>
   </div>
 
-  <!-- ═══ CẢNH BÁO RA TRỄ / RA SỚM (P220) ═══ -->
+  <!-- ═══ CÒN BAO NHIÊU KỲ NỮA SẼ RA (P220/P221) ═══ -->
   <div class="card" style="margin-top:16px">
-    <h2>Cảnh báo: tổng ra trễ / ra sớm</h2>
-    <p class="sub">So đợt vắng đang chạy và chu kỳ vừa xong với mức thường của <b>chính tổng đó</b>. Chỉ hiện tổng nào rơi vào nhóm hiếm nhất 5%.</p>
+    <h2>Còn bao nhiêu kỳ nữa sẽ ra</h2>
+    <p class="sub">Với mỗi tổng: đang vắng bao nhiêu kỳ, và <b>còn bao nhiêu kỳ nữa</b> thì khả năng ra đạt 50% / 80% / 95%.</p>
+    <p class="sub">Hàng tô đậm = đợt vắng đang chạy rơi vào nhóm hiếm nhất 5% của chính tổng đó.</p>
     <div id="cb-body"><span class="skeleton">Đang tải...</span></div>
     <p class="sub" id="cb-note"></p>
   </div>
