@@ -780,6 +780,89 @@ jobs:
           PYEOF
           echo "hieu_chinh" >> /tmp/da_chay
 
+      # Nguyen nhan GOC cua moi lan "app cap nhat sai" trong du an nay deu la
+      # KY BI THIEU, khong phai bang tinh sai. Cua so doi chieu 200 ky chi phu
+      # ~1,25 ngay — khong du. Buoc nay soi 5000 ky (~31 ngay) va doi chieu
+      # thang: co ky nao thieu NAM SAU lan ve gan nhat cua tung trip khong?
+      # Neu co thi trip do RAT CO THE da ra trong lo hong do.
+      - name: Lỗ hổng kỳ trên 5000 kỳ gần nhất
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-gaps?n=5000&cb=$TS" > /tmp/lh.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/triple-stats?cb=$TS"     > /tmp/lt.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/sum-stats?cb=$TS"        > /tmp/ls.json
+          for f in lh lt ls; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json
+          lh = json.load(open('/tmp/lh.json'))
+          if 'gaps' not in lh:
+              print("HONG: khong co khoa 'gaps'."); print(json.dumps(lh)[:300]); raise SystemExit(1)
+          gaps = lh['gaps']
+          print(f"=== LO HONG KY (soi {lh.get('look_back')} ky gan nhat) ===")
+          print(f"  Khoang du lieu : #{lh.get('draw_min')} .. #{lh.get('draw_max')}")
+          print(f"  Co             : {lh.get('draw_count')} / {lh.get('expected')} ky"
+                f"  ({lh.get('coverage_pct')}%)")
+          print(f"  So doan thieu  : {lh.get('gap_count')}"
+                f"   Tong ky thieu: {lh.get('total_missing')}")
+          thieu = set()
+          if gaps:
+              print("")
+              print("  Cac doan thieu (moi nhat truoc):")
+              for g in gaps[:20]:
+                  a, b, n = g['gap_start'], g['gap_end'], g['gap_size']
+                  print(f"    #{a} .. #{b}  ({n} ky)")
+                  if n <= 5000:
+                      thieu.update(range(a, b + 1))
+          else:
+              print("")
+              print("  Khong co lo hong nao.")
+
+          tt = {x['combo']: x for x in json.load(open('/tmp/lt.json'))['triples']}
+          print("")
+          print("=== KY THIEU CO NAM SAU LAN VE GAN NHAT CUA TRIP KHONG ===")
+          print("  Neu co, trip do RAT CO THE da ra trong lo hong ma DB khong biet.")
+          print("")
+          ngo = []
+          for n in range(1, 7):
+              c = str(n) * 3
+              ld = tt[c].get('last_draw')
+              if ld is None:
+                  continue
+              sau = sorted(k for k in thieu if k > ld)
+              if sau:
+                  ngo.append(c)
+                  print(f"  {c}: lan cuoi #{ld} — co {len(sau)} ky thieu SAU do:"
+                        f" {sau[:10]}{' ...' if len(sau) > 10 else ''}  <== NGHI NGO")
+              else:
+                  print(f"  {c}: lan cuoi #{ld} — khong ky thieu nao sau do  OK")
+
+          ss = {x['sum']: x for x in json.load(open('/tmp/ls.json'))['sums']}
+          ngo_t = [sv for sv in range(3, 19)
+                   if ss.get(sv, {}).get('last_draw') is not None
+                   and any(k > ss[sv]['last_draw'] for k in thieu)]
+          print("")
+          print(f"=== TONG co ky thieu sau lan ve gan nhat: {ngo_t if ngo_t else 'khong co'}")
+
+          print("")
+          if ngo:
+              print(">>> CO THE DANG THIEU DU LIEU: " + ", ".join(ngo))
+              print("    Chay tren may: python sync_to_supabase.py --mode gaps")
+              open('/tmp/job_failed', 'a').write("co ky thieu sau lan ve gan nhat cua trip\n")
+          elif gaps:
+              print(">>> Co lo hong nhung KHONG doan nao nam sau lan ve gan nhat cua trip nao.")
+              print("    Cac bang trip dang dung.")
+          else:
+              print(">>> Du lieu lien mach, khong thieu ky nao.")
+          PYEOF
+          echo "lo_hong" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -800,7 +883,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
