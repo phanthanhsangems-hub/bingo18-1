@@ -8,6 +8,18 @@ name: Bù kỳ thiếu
 # secret lần nào.
 on:
   workflow_dispatch:
+  schedule:
+    # 03:00 UTC = 10:00 VN.
+    #
+    # Vi sao can LICH chu khong chi bam tay: watcher tren PC thinh thoang
+    # rot ky, ma mirror vietvudanh/vietlott-data lai tre vai tieng. Nen luc
+    # phat hien lo hong va bam bu ngay thi nguon THUONG CHUA CO du lieu cho
+    # dung nhung ky vua rot — bu tay gan nhu chac chan truot.
+    # Do dung lan chay 19/09: lo hong #187285-#187286 vua xay ra, goi bu
+    # ngay -> gaps_filled=1 (chi bu duoc ky cu), hai ky moi van thieu.
+    # Chay lai moi ngay thi lo hong tu lanh ngay khi nguon co du lieu,
+    # khong phai doi nguoi de y.
+    - cron: '0 3 * * *'
 
 jobs:
   backfill:
@@ -19,16 +31,30 @@ jobs:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          # Truoc day buoc nay soi /api/draw-grid?n=100 — chi phu ~10 tieng.
+          # Lo hong #186679-#186680 da 3 ngay tuoi nen nam NGOAI cua so do:
+          # ca truoc lan sau deu dem ra 0, roi buoc cuoi in "Khong co ky nao
+          # thieu tu dau" trong khi DB dang thung that. Dung bao dat trong khi
+          # khong do duoc gi thi te hon la khong co buoc kiem tra.
+          # Nay dung /api/draw-gaps?n=5000 (~31 ngay) — cung cua so voi buoc
+          # "Lo hong ky" cua chan doan, nen hai ben khong the noi khac nhau.
           curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
-               "$BASE/api/draw-grid?n=100&cb=$(date +%s)" > /tmp/truoc.json
+               "$BASE/api/draw-gaps?n=5000&cb=$(date +%s)" > /tmp/truoc.json
           python3 - <<'PYEOF'
           import json
-          d = json.load(open('/tmp/truoc.json'))['draws']
-          dns = sorted(x['draw_number'] for x in d)
-          thieu = [n for n in range(dns[0], dns[-1] + 1) if n not in set(dns)]
-          print(f"Khoang kiem tra: #{dns[0]} -> #{dns[-1]}  ({len(dns)} ky co that)")
-          print(f"Ky THIEU: {len(thieu)}" + (f" -> {thieu}" if thieu else " (khong thieu ky nao)"))
-          open('/tmp/thieu_truoc.txt','w').write(str(len(thieu)))
+          d = json.load(open('/tmp/truoc.json'))
+          if 'gaps' not in d:
+              print("HONG: khong doc duoc khoa 'gaps'.")
+              print(json.dumps(d)[:300])
+              raise SystemExit(1)
+          thieu = d['total_missing']
+          print(f"Cua so soi     : {d['look_back']} ky gan nhat (het #{d['draw_max']})")
+          print(f"So doan thieu  : {d['gap_count']}   Tong ky thieu: {thieu}")
+          for g in d['gaps'][:20]:
+              print(f"    #{g['gap_start']} .. #{g['gap_end']}  ({g['gap_size']} ky)")
+          if not d['gaps']:
+              print("    (lien mach)")
+          open('/tmp/thieu_truoc.txt', 'w').write(str(thieu))
           PYEOF
 
       - name: Gọi /api/sync-github để bù kết quả quay
@@ -61,21 +87,29 @@ jobs:
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           sleep 10
           curl -s --max-time 40 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
-               "$BASE/api/draw-grid?n=100&cb=$(date +%s)" > /tmp/sau.json
+               "$BASE/api/draw-gaps?n=5000&cb=$(date +%s)" > /tmp/sau.json
           python3 - <<'PYEOF'
           import json
-          d = json.load(open('/tmp/sau.json'))['draws']
-          dns = sorted(x['draw_number'] for x in d)
-          thieu = [n for n in range(dns[0], dns[-1] + 1) if n not in set(dns)]
+          d = json.load(open('/tmp/sau.json'))
+          if 'gaps' not in d:
+              print("HONG: khong doc duoc khoa 'gaps'.")
+              print(json.dumps(d)[:300])
+              raise SystemExit(1)
+          sau   = d['total_missing']
           truoc = int(open('/tmp/thieu_truoc.txt').read())
-          print(f"Khoang kiem tra: #{dns[0]} -> #{dns[-1]}")
+          print(f"Cua so soi    : {d['look_back']} ky gan nhat (het #{d['draw_max']})")
           print(f"Ky thieu TRUOC: {truoc}")
-          print(f"Ky thieu SAU  : {len(thieu)}" + (f" -> {thieu}" if thieu else ""))
-          if len(thieu) < truoc:
-              print(f"\n>>> Da bu duoc {truoc - len(thieu)} ky.")
-          elif truoc == 0:
-              print("\n>>> Khong co ky nao thieu tu dau.")
+          print(f"Ky thieu SAU  : {sau}")
+          for g in d['gaps'][:20]:
+              print(f"    con thieu #{g['gap_start']} .. #{g['gap_end']}  ({g['gap_size']} ky)")
+          print("")
+          if truoc == 0:
+              print(">>> Khong co ky nao thieu tu dau.")
+          elif sau < truoc:
+              print(f">>> Da bu duoc {truoc - sau} ky.")
+              if sau:
+                  print(f"    Con {sau} ky chua bu — nguon GitHub chua co du lieu cho chung.")
           else:
-              print("\n>>> Khong bu duoc ky nao. Nguon GitHub co the chua co du lieu")
+              print(">>> Khong bu duoc ky nao. Nguon GitHub co the chua co du lieu")
               print("    cho cac ky do, hoac chung that su khong ton tai.")
           PYEOF
