@@ -863,6 +863,98 @@ jobs:
           PYEOF
           echo "lo_hong" >> /tmp/da_chay
 
+      - name: Lỗ hổng — thiếu thật hay Vietlott nhảy số?
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          # Buoc tren chi dem duoc CO BAO NHIEU so ky bi khuyet. No KHONG phan
+          # biet duoc hai chuyen rat khac nhau:
+          #   (a) ky co that, watcher rot -> phai bu, bang trip dang sai
+          #   (b) Vietlott NHAY SO ky     -> khong co gi de bu, bao dong gia
+          # Phan biet bang mocs thoi gian: neu giua ky truoc va ky sau lo hong
+          # troi qua dung so phut tuong ung voi so ky khuyet thi cac ky do co
+          # that; neu chi troi qua ~6 phut thi so ky bi nhay, khong mat gi.
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-gaps?n=5000&cb=$TS" > /tmp/pl_lh.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=500&cb=$TS"  > /tmp/pl_lu.json
+          for f in pl_lh pl_lu; do
+            python3 -c "import json;json.load(open('/tmp/$f.json'))" 2>/dev/null || {
+              echo "LOI: /tmp/$f.json khong phai JSON:"; head -c 200 /tmp/$f.json; echo; exit 1; }
+          done
+          python3 - <<'PYEOF'
+          import json
+
+          lh = json.load(open('/tmp/pl_lh.json'))
+          lu = json.load(open('/tmp/pl_lu.json'))
+          if 'gaps' not in lh or 'draws' not in lu:
+              print("HONG: thieu khoa 'gaps' hoac 'draws'.")
+              raise SystemExit(1)
+
+          gaps = lh['gaps']
+          gio = {d['draw_number']: d.get('time') or '' for d in lu['draws']}
+          KY = 6  # phut giua hai ky
+
+          print("=== LO HONG: THIEU THAT HAY NHAY SO? ===")
+          print("  So sanh so phut troi qua voi so phut LE RA phai troi qua.")
+          print("")
+
+          if not gaps:
+              print("  Khong co lo hong nao.")
+              raise SystemExit(0)
+
+          def phut(s):
+              # 'HH:MM' -> phut trong ngay; '' hoac sai dinh dang -> None
+              if not s or len(s) < 5 or s[2] != ':':
+                  return None
+              try:
+                  return int(s[:2]) * 60 + int(s[3:5])
+              except ValueError:
+                  return None
+
+          that_su, nhay_so, chua_ro = [], [], []
+          for g in gaps[:20]:
+              a, b, n = g['gap_start'], g['gap_end'], g['gap_size']
+              truoc, sau = phut(gio.get(a - 1)), phut(gio.get(b + 1))
+              if truoc is None or sau is None:
+                  chua_ro.append((a, b, n, "ngoai 500 ky gan nhat"))
+                  print(f"  #{a}..#{b} ({n} ky): khong co moc gio -> chua ro")
+                  continue
+              troi = (sau - truoc) % (24 * 60)          # qua nua dem van dung
+              can = (n + 1) * KY                         # n ky khuyet = n+1 buoc
+              print(f"  #{a}..#{b} ({n} ky): #{a-1} luc {gio[a-1]} -> "
+                    f"#{b+1} luc {gio[b+1]} = {troi} phut, le ra {can} phut")
+              if abs(troi - can) <= KY:
+                  that_su.append((a, b, n))
+                  print(f"      -> KHOP: {n} ky nay CO THAT, dang bi thieu")
+              elif troi <= KY * 2:
+                  nhay_so.append((a, b, n))
+                  print(f"      -> CHI {troi} phut: Vietlott NHAY SO, khong mat ky nao")
+              else:
+                  chua_ro.append((a, b, n, f"lech {troi} vs {can}"))
+                  print(f"      -> khong khop kieu nao -> chua ro")
+
+          print("")
+          print("  LUU Y ve do tin cay: draw_time do watcher ghi luc CHEN, va khi")
+          print("  bat kip mot lo thi P175 gian nguoc 6 phut/ky. Nen moc gio quanh")
+          print("  mot lan bat kip bi bop meo. Day la CAN CU, khong phai bang chung.")
+          print("  Muon chac chan: xem log watcher tren may, tim dong 'vietlott-gaps'.")
+          print("")
+          if that_su:
+              print(">>> CO KY THAT SU BI THIEU: "
+                    + ", ".join(f"#{a}..#{b}" for a, b, _ in that_su))
+              print("    Chay tren may: python sync_to_supabase.py --mode gaps")
+          if nhay_so:
+              print(">>> VIETLOTT NHAY SO (khong mat du lieu): "
+                    + ", ".join(f"#{a}..#{b}" for a, b, _ in nhay_so))
+              print("    Khong can lam gi. Canh bao o buoc tren la bao dong gia.")
+          if chua_ro:
+              print(">>> CHUA KET LUAN DUOC: "
+                    + ", ".join(f"#{a}..#{b} ({ly})" for a, b, _, ly in chua_ro))
+          PYEOF
+          echo "phan_loai_lo_hong" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -883,7 +975,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
