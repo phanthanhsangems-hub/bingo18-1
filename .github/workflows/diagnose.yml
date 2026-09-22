@@ -925,15 +925,36 @@ jobs:
               can = (n + 1) * KY                         # n ky khuyet = n+1 buoc
               print(f"  #{a}..#{b} ({n} ky): #{a-1} luc {gio[a-1]} -> "
                     f"#{b+1} luc {gio[b+1]} = {troi} phut, le ra {can} phut")
-              if abs(troi - can) <= KY:
+              # DEM SO NHIP, khong so sanh so phut. Hai lan toi lam sai o day:
+              #
+              # 1) abs(troi - can) <= KY (doi khop ca hai phia). Ca that dau
+              #    tien cho troi=87 vs can=72 va roi thang vao "chua ro" —
+              #    vo dung dung luc can dung nhat. draw_time la luc CHEN chu
+              #    khong phai luc quay, nen watcher hoi phuc muon lam troi
+              #    LUON >= can; 15 phut du chinh la do tre hoi phuc, no la
+              #    dau hieu CUA "ky co that" chu khong mau thuan gi.
+              # 2) Noi long thanh troi >= can - KY. Lo hong 1 ky ma chi troi
+              #    6 phut (dung MOT nhip) khi do lai bi gan nhan "co that",
+              #    trong khi mot nhip thi khong the chua ky nao — do dung la
+              #    ca nhay so.
+              #
+              # Dem nhip thi ca hai ca deu ra dung: n so ky khuyet can (n+1)
+              # nhip. Quan sat duoc bao nhieu nhip thi biet co cho cho bao
+              # nhieu ky.
+              nhip = (troi + KY // 2) // KY
+              print(f"      quan sat {nhip} nhip, can {n + 1} nhip")
+              if nhip >= n + 1:
                   that_su.append((a, b, n))
-                  print(f"      -> KHOP: {n} ky nay CO THAT, dang bi thieu")
-              elif troi <= KY * 2:
+                  them = (f" (du {(nhip - n - 1) * KY} phut do watcher hoi phuc muon)"
+                          if nhip > n + 1 else "")
+                  print(f"      -> {n} ky nay CO THAT, dang bi thieu{them}")
+              elif nhip <= 1:
                   nhay_so.append((a, b, n))
-                  print(f"      -> CHI {troi} phut: Vietlott NHAY SO, khong mat ky nao")
+                  print(f"      -> chi MOT nhip: khong the chua ky nao, "
+                        f"Vietlott NHAY SO, khong mat du lieu")
               else:
-                  chua_ro.append((a, b, n, f"lech {troi} vs {can}"))
-                  print(f"      -> khong khop kieu nao -> chua ro")
+                  chua_ro.append((a, b, n, f"{nhip} nhip cho {n} ky"))
+                  print(f"      -> chi du cho ~{nhip - 1} ky trong so {n} -> chua ro")
 
           print("")
           print("  LUU Y ve do tin cay: draw_time do watcher ghi luc CHEN, va khi")
