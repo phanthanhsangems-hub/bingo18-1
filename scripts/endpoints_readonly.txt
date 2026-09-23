@@ -90,7 +90,6 @@
 /api/size-streak
 /api/size-transition
 /api/smart-summary
-/api/sse/draws
 /api/statistics
 /api/streak-history
 /api/sum-distribution
@@ -126,3 +125,22 @@
 /manifest.json
 /sw.js
 /api/board-stats
+
+# /api/sse/draws DA GO KHOI DANH SACH NAY — co y.
+#
+# No khong phai endpoint REST ma la LUONG Server-Sent Events song lau.
+# Quet no bang curl thuong gay hai chuyen, ca hai deu da xay ra:
+#
+# 1) Cuop mot suat cua dashboard that. App chi cho _SSE_MAX_CLIENTS = 5
+#    luong dong thoi (moi luong giu mot ket noi DB toi 240s, ma app co y
+#    khong dung connection pool). curl om luong den het --max-time 30 nen
+#    moi lan chan doan lai chiem mot suat trong 30 giay.
+#
+# 2) Bao 5xx gia. Lan chay #29 bao '503 /api/sse/draws :: retry: 60000' —
+#    do chinh la than 'too_many_sse_clients', tuc CAI CHOT DANG LAM DUNG
+#    viec cua no, khong phai app hong. Lan #30 bay phut sau khong tai hien.
+#    Mot bao dong khong tai hien duoc lai lam nguoi doc tuong app chet.
+#
+# Mat gi khi bo: khong con theo doi SSE. Chap nhan duoc, vi dashboard van
+# tu lam moi moi 60 giay khi SSE bi tu choi (static/js/dashboard.js) — mat
+# SSE chi mat thong bao tuc thi, khong lam hong trang.

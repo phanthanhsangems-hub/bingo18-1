@@ -86,6 +86,7 @@ jobs:
           : > /tmp/slow.txt
           while read -r p; do
             [ -z "$p" ] && continue
+            case "$p" in \#*) continue ;; esac
             # KHONG dung "|| echo 000": curl da in http_code=000 khi transfer
             # hong, echo them mot lan nua thanh chuoi "000000" — case khong
             # khop 2*/3*/4* nen timeout bi dem NHAM thanh loi 5xx. Lan chay #9
