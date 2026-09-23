@@ -121,7 +121,14 @@ jobs:
           if [ "$FAIL" -gt 0 ]; then
             echo "--- CHI TIET LOI 5xx ---"
             cat /tmp/fail.txt
-            echo "quet endpoint: $FAIL loi 5xx" >> /tmp/job_failed
+            # Buoc chot chi doc /tmp/job_failed. Truoc day dong nay chi ghi
+            # SO LUONG, nen phan tong ket in "quet endpoint: 1 loi 5xx" ma
+            # khong noi endpoint nao — muon biet phai loi nguoc ~900 dong log.
+            # Ghi ca duong dan vao day thi doc phan cuoi la du.
+            {
+              echo "quet endpoint: $FAIL loi 5xx"
+              awk '{print "    " $1 " " $2}' /tmp/fail.txt
+            } >> /tmp/job_failed
           else
             echo "Toan bo endpoint chi doc chay duoc tren Postgres that."
           fi
