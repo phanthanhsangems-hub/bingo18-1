@@ -10979,12 +10979,29 @@ def set_telegram_webhook():
 
     webhook_url = f"https://bingo18-633959711537.asia-southeast1.run.app/telegram/webhook"
     bot_token   = config.TELEGRAM_BOT_TOKEN
+    # P225: PHẢI gửi kèm secret_token, và luôn gửi giá trị app đang dùng.
+    #
+    # Trước đây endpoint này chỉ gửi url. Ai bấm nó sau khi đã cài secret sẽ
+    # XOÁ secret_token bên Telegram — Telegram thôi gửi header, còn app vẫn
+    # đòi header, nên mọi lệnh bot bị 403 và không có gì nói vì sao. Một cái
+    # bẫy đúng nghĩa: nút "thiết lập webhook" lại làm bot chết.
+    #
+    # Nay nhiệm vụ của endpoint là LÀM TELEGRAM KHỚP VỚI CẤU HÌNH CỦA APP:
+    #   config có secret  -> Telegram gửi header, app kiểm  -> cả hai BẬT
+    #   config rỗng       -> xoá token bên Telegram, app bỏ qua -> cả hai TẮT
+    # Kiểu nào cũng nhất quán, không còn cảnh một bên đòi mà bên kia không gửi.
     r = requests.post(
         f"https://api.telegram.org/bot{bot_token}/setWebhook",
-        json={"url": webhook_url, "drop_pending_updates": True},
+        json={"url": webhook_url,
+              "drop_pending_updates": True,
+              "secret_token": getattr(config, 'TELEGRAM_WEBHOOK_SECRET', '') or ''},
         timeout=10
     )
-    return jsonify(r.json())
+    kq = r.json()
+    if isinstance(kq, dict):
+        # Nói rõ đang ở trạng thái nào, để người bấm không phải đoán.
+        kq['secret_token_da_dat'] = bool(getattr(config, 'TELEGRAM_WEBHOOK_SECRET', ''))
+    return jsonify(kq)
 
 
 @app.route('/api/recent-outcomes')
