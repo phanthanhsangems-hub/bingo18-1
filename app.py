@@ -121,8 +121,20 @@ _consecutive_db_errors: int = 0   # debounce: chỉ alert khi >= 2 lần fail li
 
 # ── Sync lag alert ────────────────────────────────────────────
 _last_sync_alert_ts: float = 0.0
+_last_gap_alert_ts: float = 0.0
+_last_gap_alert_sig: str = ''   # chữ ký lỗ hổng lần báo gần nhất
 _SYNC_ALERT_COOLDOWN_SEC   = 1800  # max 1 alert/30 phút
 _SYNC_LAG_THRESHOLD_MIN    = 15    # alert nếu lag > 15 phút trong giờ game
+
+# P222: cảnh báo LỖ HỔNG kỳ — khác hẳn cảnh báo lag ở trên.
+# _SYNC_LAG_THRESHOLD_MIN đo TUỔI CỦA KỲ MỚI NHẤT. Mọi sự cố tháng 9 đều là
+# lỗ hổng Ở GIỮA trong khi kỳ mới vẫn về đều, nên lag ≈ 0 và nó không bao giờ
+# bắn. Đo thực tế 22/09: thiếu #187690-#187700 (11 kỳ) mà kỳ mới vẫn lên
+# #187705 → #187706 → #187707 đúng nhịp 6 phút. 23/09: thiếu #187881 và
+# #187884-#187886. Cả bốn lần trong tháng người dùng phát hiện trước, hệ
+# thống im lặng — không phải vì thiếu cảnh báo, mà vì cảnh báo đang đo sai thứ.
+_GAP_ALERT_COOLDOWN_SEC = 1800   # nhắc lại tối đa 30 phút/lần nếu lỗ hổng chưa đổi
+_GAP_ALERT_WINDOW       = 300    # soi 300 kỳ gần nhất (~1,9 ngày)
 
 # ── Size bias alert ───────────────────────────────────────────
 _last_bias_alert_ts: float = 0.0
@@ -340,6 +352,94 @@ def _check_sync_lag():
         )
     except Exception:
         pass
+
+def _gom_doan(thieu: list) -> list:
+    """[5,6,7,10] -> [(5,7),(10,10)]. Gom số kỳ liền nhau thành đoạn để tin nhắn gọn."""
+    doan = []
+    for n in sorted(thieu):
+        if doan and n == doan[-1][1] + 1:
+            doan[-1][1] = n
+        else:
+            doan.append([n, n])
+    return [(a, b) for a, b in doan]
+
+
+def _check_draw_gap_alert():
+    """Cảnh báo Telegram khi CÓ LỖ HỔNG kỳ. Gọi từ cron endpoint mỗi 6 phút.
+
+    KHÁC _check_sync_lag: hàm đó đo tuổi của kỳ MỚI NHẤT, nên chỉ bắt được
+    trường hợp không có gì về nữa. Lỗ hổng ở giữa thì kỳ mới vẫn về đều, lag
+    ≈ 0, và nó im lặng — xem chú thích ở _GAP_ALERT_WINDOW để biết số đo.
+
+    Bắn lại khi CHỮ KÝ lỗ hổng đổi (xuất hiện lỗ mới), không phải chỉ khi hết
+    cooldown — lỗ hổng mới là tin mới, đừng để cooldown che mất. Ngược lại,
+    cùng một lỗ hổng thì tối đa 30 phút nhắc một lần.
+    """
+    global _last_gap_alert_ts, _last_gap_alert_sig
+    try:
+        from zoneinfo import ZoneInfo
+        vn_now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+        if vn_now.hour < 6 or vn_now.hour >= 22:
+            return                      # ngoài giờ xổ, thiếu kỳ là bình thường
+
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT draw_number FROM draw_history "
+                f"ORDER BY draw_number DESC LIMIT {ph}", (_GAP_ALERT_WINDOW,))
+            dns = sorted(int(r[0]) for r in cur.fetchall())
+        finally:
+            conn.close()
+        if len(dns) < 2:
+            return
+
+        co     = set(dns)
+        thieu  = [n for n in range(dns[0], dns[-1] + 1) if n not in co]
+        doan   = _gom_doan(thieu)
+        # Chữ ký: đổi khi tập lỗ hổng đổi. Dùng để phân biệt "lỗ mới" với
+        # "vẫn lỗ cũ" mà không cần lưu state ra DB.
+        sig    = ','.join(f"{a}-{b}" for a, b in doan)
+        now_t  = _time.monotonic()
+
+        if not thieu:
+            # Vừa liền mạch lại sau khi đã báo -> báo một tin dứt điểm, để
+            # người dùng biết đã xong chứ không phải tự đoán.
+            if _last_gap_alert_sig:
+                _last_gap_alert_sig = ''
+                _last_gap_alert_ts  = now_t
+                from telegram_bot import TelegramBot
+                TelegramBot().send_message(
+                    "✅ <b>Đã liền mạch</b> — không còn kỳ thiếu trong "
+                    f"{_GAP_ALERT_WINDOW} kỳ gần nhất.\n"
+                    f"Time: {vn_now.strftime('%H:%M %d/%m/%Y')} VN"
+                )
+            return
+
+        moi = (sig != _last_gap_alert_sig)
+        if not moi and (now_t - _last_gap_alert_ts) < _GAP_ALERT_COOLDOWN_SEC:
+            return
+        _last_gap_alert_sig = sig
+        _last_gap_alert_ts  = now_t
+
+        mo_ta = ', '.join(f"#{a}" if a == b else f"#{a}-#{b}" for a, b in doan[:8])
+        if len(doan) > 8:
+            mo_ta += f" (+{len(doan) - 8} đoạn nữa)"
+        muc = "🔴 <b>CRITICAL</b>" if len(thieu) >= 10 else "⚠️ <b>WARNING</b>"
+        from telegram_bot import TelegramBot
+        TelegramBot().send_message(
+            f"{muc} — Thiếu kỳ\n"
+            f"Thiếu <b>{len(thieu)} kỳ</b> trong {_GAP_ALERT_WINDOW} kỳ gần nhất "
+            f"(mới nhất #{dns[-1]}).\n"
+            f"Đoạn thiếu: {mo_ta}\n"
+            f"Bảng tổng và bảng trip đang tính SAI cho tới khi bù xong.\n"
+            f"Chạy trên máy: <code>python sync_to_supabase.py --mode gaps</code>\n"
+            f"Time: {vn_now.strftime('%H:%M %d/%m/%Y')} VN"
+        )
+    except Exception:
+        pass    # cảnh báo hỏng thì tuyệt đối không được làm chết vòng dự đoán
+
 
 def _check_lon_excess_alert(prediction_result: dict):
     """P70: Gửi Telegram alert khi consecutive_excess >= threshold (LON bias escalating)."""
@@ -905,6 +1005,7 @@ def auto_predict_cron():
         from prediction_service import run_prediction_cycle
         result = run_prediction_cycle()
         _check_sync_lag()
+        _check_draw_gap_alert()
         _check_lon_excess_alert(result)
         _check_checkpoint_alert(result.get('draw_number', 0))
         _check_triple_drought_alert()
