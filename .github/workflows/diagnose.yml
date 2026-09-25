@@ -984,6 +984,85 @@ jobs:
           PYEOF
           echo "phan_loai_lo_hong" >> /tmp/da_chay
 
+      - name: Cổng đăng nhập & biến môi trường (điểm mù của bộ quét)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          # DIEM MU: vong quet o tren GUI X-Trigger-Secret nen _machine_caller()
+          # cho qua, tuc no DI VONG QUA cong dang nhap. No lai tinh 2xx/3xx/4xx
+          # la dat. Nghia la neu nguoi dung khong dang nhap noi — sai mat khau,
+          # APP_USER bi doi — thi TOAN BO 127 phep kiem van xanh trong khi ho
+          # khong vao duoc app. Ngay 23/09 nguoi dung bao "app khong chay" ma
+          # moi thu tôi do duoc deu binh thuong; day dung la cho tôi khong thay.
+          echo "===== CONG DANG NHAP ====="
+          # Goi mot duong KHONG cong khai va KHONG kem secret — dung nhu nguoi
+          # la mo trinh duyet.
+          KHONG=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+                  "$BASE/api/sum-stats" || echo 000)
+          echo "  /api/sum-stats khong kem secret -> HTTP $KHONG"
+          case "$KHONG" in
+            401|302) echo "     -> cong DANG BAT. Nguoi la khong doc duoc du lieu." ;;
+            200)     echo "     -> cong DANG TAT (APP_USER chua dat)."
+                     echo "        Dashboard va toan bo API dang cong khai." ;;
+            403)     echo "     -> bi chan boi danh sach IP (P202), khong phai dang nhap." ;;
+            *)       echo "     -> ma la, xem lai." ;;
+          esac
+          # Trang dang nhap phai voi tay toi duoc, neu khong thi cong bat cung
+          # bang khoa cua roi nem chia khoa.
+          LOGIN=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+                  "$BASE/login" || echo 000)
+          echo "  /login -> HTTP $LOGIN"
+          if [ "$LOGIN" != "200" ]; then
+            echo "     -> LOI: khong voi toi duoc trang dang nhap. Cong bat ma"
+            echo "        khong the dang nhap = app khong dung duoc."
+            echo "cong dang nhap bat ma /login tra $LOGIN" >> /tmp/job_failed
+          else
+            echo "     -> OK, con dang nhap duoc."
+          fi
+
+          echo
+          echo "===== TEN BIEN MOI TRUONG (chi TEN, khong gia tri) ====="
+          # Buoc "Service description" loc bo phan env, nen truoc day muon biet
+          # mot secret co duoc dat hay khong phai nho nguoi dung chay gcloud.
+          gcloud run services describe bingo18 \
+            --region asia-southeast1 --project bingo18-predictor \
+            --format="value(spec.template.spec.containers[0].env[].name)" \
+            2>/dev/null | tr ';' '\n' | tr ',' '\n' | sed '/^$/d' | sort > /tmp/env_names.txt || true
+          if [ -s /tmp/env_names.txt ]; then
+            sed 's/^/  /' /tmp/env_names.txt
+          else
+            echo "  (khong doc duoc — thieu quyen hoac khong co bien nao)"
+          fi
+
+          echo
+          echo "===== SECRET QUAN TRONG CO DUOC DAT CHUA ====="
+          for ten in TELEGRAM_WEBHOOK_SECRET TRIGGER_SECRET ADMIN_SECRET_KEY APP_USER; do
+            if grep -qx "$ten" /tmp/env_names.txt 2>/dev/null; then
+              echo "  $ten: co"
+            else
+              echo "  $ten: KHONG THAY"
+            fi
+          done
+          if ! grep -qx TELEGRAM_WEBHOOK_SECRET /tmp/env_names.txt 2>/dev/null; then
+            echo
+            echo "  >>> CANH BAO: /telegram/webhook chi kiem secret token KHI bien"
+            echo "      TELEGRAM_WEBHOOK_SECRET duoc dat (app.py: 'if _wh_secret and ...')."
+            echo "      Chua dat thi phep kiem bi bo qua hoan toan, ma duong nay"
+            echo "      nam trong _PUBLIC_PATHS (di vong qua dang nhap) va mo ~25"
+            echo "      lenh bot, trong do co lenh doi trang thai. Bo loc chat_id"
+            echo "      KHONG cuu duoc: chat_id lay tu chinh payload cua nguoi gui."
+            echo "      Cach dat:"
+            echo "        gcloud run services update bingo18 --region asia-southeast1 \\"
+            echo "          --update-env-vars TELEGRAM_WEBHOOK_SECRET=<chuoi-ngau-nhien>"
+            echo "        roi setWebhook cua Telegram voi secret_token=<cung chuoi do>"
+            # CO Y khong ghi vao job_failed: dat hay khong la quyet dinh cua chu
+            # he thong (fail-closed se lam bot NGUNG chay cho toi khi dat xong).
+            # In ro moi lan chay de khong bi quen, nhung khong bat bao do.
+          fi
+          echo "cong_dang_nhap" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -1004,7 +1083,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
