@@ -2748,9 +2748,22 @@ def _tinh_thong_ke() -> dict:
         # lệ của TRIP (6/216); còn tổng chia hết cho 3 chiếm 72/216 = 33%. Bộ
         # lọc vẫn đáng giá (bỏ được hai phần ba bảng) nhưng đừng tưởng nó rẻ
         # hơn thực tế.
+        # P226: BO bo loc sum_value. Truoc day chi nap ky co tong chia het
+        # cho 3 vi trip luon thoa dieu kien do. Nhung bang DOI (mot so ra it
+        # nhat 2 lan) khong co rang buoc tong nao — 2-2-5 tong 9, 3-3-1 tong
+        # 7, bat ky tong nao cung co the. Nen phai quet het.
+        #
+        # Gia: ~33% -> 100% so dong (~30k -> ~91k). Chi ton them mot lan moi
+        # khi CO KY MOI, vi anh chup duoc nho theo moc ky (P223) — khong phai
+        # moi request. Doi lai: hai bang tinh trong CUNG MOT vong quet, khong
+        # them truy van nao.
+        #
+        # Tien the: trip nay khong con phu thuoc cot sum_value. Truoc day mot
+        # dong co numbers=[3,3,3] ma sum_value sai/NULL se bi loai khoi bang
+        # trip trong im lang.
         cur.execute(
             "SELECT draw_number, numbers FROM draw_history "
-            "WHERE numbers IS NOT NULL AND sum_value IN (3,6,9,12,15,18) "
+            "WHERE numbers IS NOT NULL "
             "ORDER BY draw_number"
         )
         rows = cur.fetchall()
@@ -2802,6 +2815,21 @@ def _tinh_thong_ke() -> dict:
     kc = {n: [] for n in range(1, 7)}
     kc_any: list = []
     any_cnt, any_last, any_prev, any_last_n = 0, None, None, None
+
+    # P226: bang DOI — mot so ra IT NHAT 2 lan trong ky (KE CA bo ba).
+    # Da doi chieu voi bang nguoi dung gui: 16/216 = 7,41%, TB 216/16 = 13,5
+    # -> hien 13, khop chinh xac. Hieu theo "dung 2 lan" thi la 15/216 va TB
+    # = 14,4 -> 14, KHONG khop. Nen dinh nghia dung la "it nhat 2 lan".
+    #
+    # Ba so thi KHONG THE co hai so khac nhau cung lap (can 4 cho), nen sau
+    # bien co cua 6 so la loai tru nhau — cong lai bang so ky co doc nao do.
+    cnt_d  = {n: 0 for n in range(1, 7)}
+    last_d = {n: None for n in range(1, 7)}
+    prev_d = {n: None for n in range(1, 7)}
+    kc_d   = {n: [] for n in range(1, 7)}
+    kc_d_any: list = []
+    d_cnt, d_last, d_prev, d_last_n = 0, None, None, None
+
     for dn, raw in rows:
         try:
             ns = raw if isinstance(raw, list) else _ast.literal_eval(raw)
@@ -2821,6 +2849,22 @@ def _tinh_thong_ke() -> dict:
             any_last = dn
             any_last_n = a     # rows đã ORDER BY draw_number nên cuối vòng
                                # lặp là trip mới nhất
+
+        # ── bảng đôi: số nào ra ít nhất 2 lần trong kỳ này ──────────
+        # Nhiều nhất một số thoả, nên tìm thấy là dừng.
+        nd = a if (a == b or a == c) else (b if b == c else None)
+        if nd is not None and 1 <= nd <= 6:
+            cnt_d[nd] += 1
+            if last_d[nd] is not None:
+                kc_d[nd].append(dn - last_d[nd])
+            prev_d[nd] = last_d[nd]
+            last_d[nd] = dn
+            d_cnt += 1
+            if d_last is not None:
+                kc_d_any.append(dn - d_last)
+            d_prev   = d_last
+            d_last   = dn
+            d_last_n = nd
 
     def _row(label, k, lastdn, prevdn=None, gaps=None):
         return {
@@ -2844,8 +2888,25 @@ def _tinh_thong_ke() -> dict:
     # bộ nào vừa ra — trả thêm để giao diện hiện được.
     any_row['last_combo'] = str(any_last_n) * 3 if any_last_n else None
 
+    # P226: bảng đôi. Dùng LẠI _row() của bảng trip — cùng cách tính avg_gap,
+    # median_gap, current_gap, prev_gap và chuỗi khoảng cách, nên hai bảng
+    # không thể nói khác nhau về cùng một khái niệm.
+    doi_rows = [_row(str(n) * 2, cnt_d[n], last_d[n], prev_d[n], kc_d[n])
+                for n in range(1, 7)]
+    for r in doi_rows:
+        # 216/16 = 13,5 CHẴN. round() của Python làm tròn về số chẵn nên
+        # round(13.5) ra 14 — lệch với bảng đối chiếu ghi 13 và trông như lỗi.
+        # Giữ nguyên 13,5 thì vừa đúng vừa không phải giải thích.
+        r['avg_gap_ly_thuyet'] = round(216 / 16, 1)
+    doi_any = _row('**', d_cnt, d_last, d_prev, kc_d_any)
+    doi_any['last_combo']        = str(d_last_n) * 2 if d_last_n else None
+    # 6 biến cố loại trừ nhau -> 96/216 = 4/9; TB = 216/96 = 2,25
+    doi_any['avg_gap_ly_thuyet'] = round(216 / 96, 2)
+
     return {
         'total_draws': total_draws,
+        'pairs':       doi_rows,
+        'pair_any':    doi_any,
         # P223: trả luôn MỐC KỲ của ảnh chụp này. Không có nó thì người gọi
         # không cách nào biết bảng đang nói về kỳ nào, nên không phân biệt
         # được "dữ liệu sai" với "ảnh chụp cũ hơn một kỳ".
@@ -2936,6 +2997,27 @@ def triple_stats():
                         'max_draw':    d.get('max_draw'),
                         'triples':     d['triples'],
                         'any':         d['any']})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pair-stats')
+@limiter.limit("30 per minute")
+def pair_stats():
+    """P226: thống kê bộ 2 số trùng nhau (11..66) — một số ra ít nhất 2 lần.
+
+    "Ít nhất 2 lần" là KỂ CẢ bộ ba: 16/216 cách, TB 216/16 = 13,5 kỳ. Hiểu
+    theo "đúng 2 lần" sẽ là 15/216 và TB 14,4 — không khớp bảng đối chiếu.
+
+    Đọc cùng ảnh chụp với /api/sum-stats và /api/triple-stats nên cả ba bảng
+    luôn nói về cùng một mốc kỳ (P207, P223).
+    """
+    try:
+        d = _thong_ke()
+        return jsonify({'total_draws': d['total_draws'],
+                        'max_draw':    d.get('max_draw'),
+                        'pairs':       d['pairs'],
+                        'any':         d['pair_any']})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -188,6 +188,26 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <p class="sub" id="tr-note"></p>
   </div>
 
+  <!-- ═══ THỐNG KÊ BỘ 2 SỐ TRÙNG NHAU (P226) ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Bộ 2 số trùng nhau</h2>
+    <p class="sub" id="dd-sub">Toàn bộ lịch sử · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
+    <p class="sub">Tính là <b>ít nhất 2 lần</b> — nên <b>1-1-1</b> cũng được tính vào dòng <b>11</b>. Ba số thì không thể có hai số khác nhau cùng lặp, nên sáu dòng dưới đây không bao giờ chồng nhau.</p>
+    <div class="tbl-scroll">
+      <table class="log-table" id="dd-table">
+        <thead><tr>
+          <th>Bộ 2 số</th><th class="ta-r"><span class="lbl-lg">Số lần về</span><span class="lbl-sm">Lần về</span></th>
+          <th class="ta-r"><span class="lbl-lg">TB số kỳ về</span><span class="lbl-sm">TB</span></th>
+          <th class="ta-r"><span class="lbl-lg">Trung vị</span><span class="lbl-sm">TV</span></th>
+          <th class="ta-r"><span class="lbl-lg">Đợt trước</span><span class="lbl-sm">Trước</span></th>
+          <th class="ta-r"><span class="lbl-lg">Số kỳ chưa về</span><span class="lbl-sm">Chưa</span></th>
+        </tr></thead>
+        <tbody id="dd-body"><tr><td colspan="6" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <p class="sub" id="dd-note"></p>
+  </div>
+
   <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Thống kê theo tổng</h2>
