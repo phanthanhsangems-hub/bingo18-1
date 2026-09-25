@@ -685,6 +685,68 @@ async function loadTripleStats(d) {
   loadChuoiKhoangCachTrip(d.triples || []);
 }
 
+// ── P226: bảng BỘ 2 SỐ TRÙNG NHAU ───────────────────────────
+// Dựng y hệt bảng trip ở trên để người dùng không phải học lại cách đọc —
+// cùng cột, cùng quy tắc tô đậm ô "chưa về", dùng lại luôn CSS .tr-*.
+//
+// Khác một chỗ quan trọng và phải nói rõ: đây là "ít nhất 2 lần", KỂ CẢ bộ
+// ba. Nên mỗi kỳ có trip 1-1-1 cũng được đếm vào dòng 11. Đã chốt định nghĩa
+// này bằng bảng đối chiếu: 16/216 -> TB 13,5; nếu là "đúng 2 lần" thì 15/216
+// -> TB 14,4, không khớp.
+async function loadPairStats(d) {
+  d = d || await J('/api/pair-stats');
+  const rows = d.pairs || [];
+  if (!rows.length) return;
+  // BẪY: hai nguồn đặt tên dòng "bất kỳ" khác nhau.
+  //   /api/pair-stats  -> {pairs, any}          (any = của ĐÔI)
+  //   /api/board-stats -> {pairs, pair_any, any} (any = của TRIP!)
+  // Lấy thẳng d.any sẽ hiện nhầm dòng trip vào bảng đôi. Ưu tiên pair_any.
+  const bk = d.pair_any || d.any;
+  const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
+
+  const cell = r => {
+    if (r.current_gap == null || !r.avg_gap) return '<td class="num ta-r">—</td>';
+    const ratio = r.current_gap / r.avg_gap;
+    const cls = ratio >= 1.5 ? ' overdue-hi' : ratio >= 1 ? ' overdue' : '';
+    return `<td class="num ta-r${cls}">${fmt(r.current_gap)}</td>`;
+  };
+
+  const line = (r, isAny) => `<tr${isAny ? ' class="tr-any"' : ''}>
+      <td>${isAny ? '<span class="tr-any-lbl">Bất kỳ bộ đôi nào</span>'
+                  : miniDice(r.combo.split('').map(Number))}</td>
+      <td class="num ta-r">${fmt(r.count)}</td>
+      <td class="num ta-r ss-prev">${fmt(r.avg_gap)}</td>
+      <td class="num ta-r">${fmt(r.median_gap)}</td>
+      <td class="num ta-r ss-prev">${fmt(r.prev_gap)}</td>
+      ${cell(r)}
+    </tr>`;
+
+  const lastLine = () => {
+    const a = bk;
+    if (!a || !a.last_combo || a.last_draw == null) return '';
+    const gap = a.current_gap;
+    const khi = gap === 0 ? 'kỳ này' : `<b class="num">${fmt(gap)}</b> kỳ trước`;
+    return `<tr class="tr-last">
+      <td>${miniDice(a.last_combo.split('').map(Number))}</td>
+      <td colspan="5" class="tr-last-txt">Bộ đôi gần nhất
+        · kỳ <b class="num">#${fmt(a.last_draw)}</b> · ${khi}</td>
+    </tr>`;
+  };
+
+  $('dd-body').innerHTML = rows.map(r => line(r, false)).join('')
+                         + (bk ? line(bk, true) : '')
+                         + lastLine();
+  $('dd-sub').textContent = `${fmt(d.total_draws)} kỳ`;
+  // Vì sao phải nói "13,5" chứ không làm tròn: 216/16 đúng bằng 13,5, mà mọi
+  // cách làm tròn đều che mất điều đó và khiến cột TB trông như bị lệch.
+  $('dd-note').textContent =
+    'Lý thuyết: mỗi bộ đôi cụ thể 1 lần/13,5 kỳ (16 trong 216 cách), '
+    + 'bất kỳ bộ đôi nào 1 lần/2,25 kỳ (96 trong 216). '
+    + 'TB = tổng số kỳ ÷ số lần về, bị vài đợt hạn dài kéo lệch lên. '
+    + 'TRUNG VỊ = một nửa số lần về sớm hơn con số này — sát thực tế hơn. '
+    + 'Ô "chưa về" đậm khi đã vượt mức TB.';
+}
+
 // ── P218: chuỗi khoảng cách theo TRIP ────────────────────────
 // Giống hệt thẻ theo tổng, chỉ đổi nguồn dữ liệu. Dùng lại y nguyên CSS .kc-*
 // nên hai thẻ đọc cùng một kiểu — người dùng không phải học lại cách đọc.
@@ -896,8 +958,11 @@ function loadBangLichSu() {
   safe(async () => {
     let d = null;
     try { d = await J('/api/board-stats'); } catch (e) { d = null; }
-    if (d && d.sums && d.triples) { await loadTripleStats(d); await loadSumStats(d); }
-    else { await loadTripleStats(); await loadSumStats(); }
+    if (d && d.sums && d.triples) {
+      await loadTripleStats(d); await loadSumStats(d); await loadPairStats(d);
+    } else {
+      await loadTripleStats(); await loadSumStats(); await loadPairStats();
+    }
   });
 }
 
