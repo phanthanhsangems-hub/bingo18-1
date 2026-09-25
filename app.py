@@ -2811,18 +2811,56 @@ def _tinh_thong_ke() -> dict:
 
     return {
         'total_draws': total_draws,
+        # P223: trả luôn MỐC KỲ của ảnh chụp này. Không có nó thì người gọi
+        # không cách nào biết bảng đang nói về kỳ nào, nên không phân biệt
+        # được "dữ liệu sai" với "ảnh chụp cũ hơn một kỳ".
+        'max_draw':    max_dn,
         'sums':        sums,
         'triples':     [_row(str(n) * 3, cnt[n], last[n], prev[n], kc[n]) for n in range(1, 7)],
         'any':         any_row,
     }
 
 
+def _moc_ky_hien_tai():
+    """MAX(draw_number) sống, một truy vấn có index. None nếu hỏi không được."""
+    try:
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+            row = cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else None
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
 def _thong_ke() -> dict:
-    """Ảnh chụp, nhớ tạm _STATS_TTL giây. Hết hạn thì tính lại một lần."""
-    now = _time.time()
+    """Ảnh chụp, nhớ tạm _STATS_TTL giây — NHƯNG hết hiệu lực ngay khi có kỳ mới.
+
+    P223: trước đây chỉ hết hạn theo thời gian. Kỳ về mỗi ~360 giây mà TTL là
+    60 giây, nên ngay sau mỗi kỳ có một cửa sổ tới 60 giây mà bảng còn nói về
+    kỳ TRƯỚC: đúng cái tổng vừa ra lại hiện "chưa về" của lần trước. Người
+    dùng nhìn thấy sai, và chẩn đoán thì báo động giả — lần chạy #31 kết luận
+    "cột sum_value nghi ghi sai" trong khi dữ liệu hoàn toàn đúng, chỉ là
+    draw-grid đọc sống còn sum-stats đọc ảnh chụp cũ hơn một kỳ.
+
+    Sửa bằng cách đối chiếu MỐC KỲ: một truy vấn MAX(draw_number) có index,
+    rẻ hơn hẳn việc tính lại cả hai bảng. Mốc dịch thì tính lại, không thì
+    dùng ảnh cũ như trước. TTL vẫn giữ làm chốt phụ, để một loạt lệnh gọi
+    trong cùng một kỳ vẫn chỉ tính một lần.
+
+    Hỏi mốc không được (DB chớp) thì rơi về đúng hành vi cũ — thà trả ảnh cũ
+    hơn là làm hỏng cả endpoint.
+    """
+    now  = _time.time()
+    moc  = _moc_ky_hien_tai()
     with _stats_snap_lock:
-        if _stats_snap['data'] is not None and now < _stats_snap['exp']:
-            return _stats_snap['data']
+        d = _stats_snap['data']
+        if d is not None and now < _stats_snap['exp'] \
+           and (moc is None or d.get('max_draw') == moc):
+            return d
     data = _tinh_thong_ke()
     with _stats_snap_lock:
         _stats_snap['data'], _stats_snap['exp'] = data, _time.time() + _STATS_TTL
@@ -2860,6 +2898,7 @@ def triple_stats():
     try:
         d = _thong_ke()
         return jsonify({'total_draws': d['total_draws'],
+                        'max_draw':    d.get('max_draw'),
                         'triples':     d['triples'],
                         'any':         d['any']})
     except Exception as e:
@@ -2876,7 +2915,8 @@ def sum_stats():
     """
     try:
         d = _thong_ke()
-        return jsonify({'total_draws': d['total_draws'], 'sums': d['sums']})
+        return jsonify({'total_draws': d['total_draws'],
+                        'max_draw': d.get('max_draw'), 'sums': d['sums']})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
