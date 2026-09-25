@@ -94,6 +94,7 @@
 /api/streak-history
 /api/sum-distribution
 /api/sum-rolling
+/api/pair-stats
 /api/sum-stats
 /api/sum-today
 /api/system-health-badge
