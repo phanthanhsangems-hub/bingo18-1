@@ -566,8 +566,31 @@ def _check_triple_drought_alert():
 
 # ── Rate Limiting ─────────────────────────────────────────────
 # Dùng memory storage (Cloud Run stateless – mỗi instance độc lập)
+def _khoa_gioi_han() -> str:
+    """Khoá rate limit theo IP THẬT của khách, không phải IP proxy của Cloud Run.
+
+    P224: trước đây dùng get_remote_address, tức request.remote_addr. App không
+    gắn ProxyFix, nên sau biên Google con số đó là địa chỉ của PROXY — giống
+    nhau cho mọi khách. Hệ quả: mọi @limiter.limit trong app dùng CHUNG MỘT XÔ
+    cho cả thế giới, nên không tách được kẻ lạm dụng khỏi người dùng thật. Thêm
+    giới hạn mà chưa sửa chỗ này thì chỉ tạo thêm cách để người lạ khoá chính
+    chủ ra ngoài.
+
+    _client_ip() đã có sẵn từ P202 và lấy PHẦN TỬ CUỐI của X-Forwarded-For nên
+    không giả mạo được (xem chú thích tại chỗ định nghĩa nó). Nó nằm bên dưới
+    trong file, nhưng hàm này chỉ chạy khi có request nên thứ tự không sao.
+
+    Không đọc được IP thì rơi về remote_addr — thà dùng xô chung còn hơn ném
+    lỗi và làm chết mọi request.
+    """
+    try:
+        return _client_ip() or get_remote_address()
+    except Exception:
+        return get_remote_address()
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=_khoa_gioi_han,
     app=app,
     default_limits=["200 per minute"],
     storage_uri="memory://",
@@ -759,6 +782,7 @@ def _check_password(pw: str) -> bool:
 
 
 @app.route('/whoami')
+@limiter.limit("120 per minute")
 def whoami():
     """P202: cho biết máy chủ nhìn thấy IP nào — để lấy giá trị điền vào
     ALLOWED_IPS. Cố ý để CÔNG KHAI: nếu lỡ tự khoá mình ra ngoài thì đây vẫn
@@ -799,6 +823,7 @@ def login_page():
 
 
 @app.route('/logout')
+@limiter.limit("20 per minute")
 def logout_page():
     session.clear()
     return redirect('/login')
@@ -1093,6 +1118,7 @@ def ingest_draws():
 
 
 @app.route('/api/morning-digest', methods=['POST'])
+@limiter.limit("10 per minute")
 def morning_digest():
     """Gửi digest sáng qua Telegram — gọi từ GitHub Actions (không cần DB secrets trong GHA)."""
     secret = request.headers.get("X-Trigger-Secret")
@@ -1259,6 +1285,7 @@ def _make_png(size: int, r: int, g: int, b: int) -> bytes:
             + _chunk(b'IEND', b''))
 
 @app.route('/icon-<int:sz>.png')
+@limiter.limit("120 per minute")
 def pwa_icon(sz):
     png = _make_png(min(sz, 512), 0, 229, 255)  # cyan #00e5ff
     resp = make_response(png)
@@ -1267,6 +1294,7 @@ def pwa_icon(sz):
     return resp
 
 @app.route('/manifest.json')
+@limiter.limit("120 per minute")
 def pwa_manifest():
     return jsonify({
         "name": "Bingo18 Predictor",
@@ -1283,6 +1311,7 @@ def pwa_manifest():
     })
 
 @app.route('/sw.js')
+@limiter.limit("120 per minute")
 def service_worker():
     # Kill SW: xóa cache + tự unregister → dashboard chạy như plain web app
     sw = r"""
@@ -1913,6 +1942,7 @@ def number_freq_n():
 
 # ── API: Dashboard ────────────────────────────────────────────
 @app.route('/')
+@limiter.limit("60 per minute")
 def home():
     resp = make_response(_load_dashboard())
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
@@ -1920,6 +1950,7 @@ def home():
 
 
 @app.route('/art')
+@limiter.limit("60 per minute")
 def art_page():
     resp = make_response(render_template('art.html'))
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
@@ -1927,6 +1958,7 @@ def art_page():
 
 
 @app.route('/healthz')
+@limiter.limit("120 per minute")
 def healthz():
     """Fast Cloud Run health check — DB ping + config validation."""
     try:
@@ -1941,6 +1973,7 @@ def healthz():
 
 
 @app.route('/api/health')
+@limiter.limit("120 per minute")
 def health_check():
     global _last_alert_ts
     result = {
@@ -2391,6 +2424,7 @@ def get_statistics():
 
 
 @app.route('/api/hot_cold_numbers')
+@limiter.limit("30 per minute")
 def get_hot_cold_numbers():
     try:
         window = int(request.args.get('window', 50))
@@ -2400,6 +2434,7 @@ def get_hot_cold_numbers():
 
 
 @app.route('/api/number_frequency')
+@limiter.limit("30 per minute")
 def get_number_frequency():
     try:
         # P188: today=1 → chỉ đếm các kỳ TRONG NGÀY HÔM NAY (giờ VN),
@@ -2922,6 +2957,7 @@ def sum_stats():
 
 
 @app.route('/api/cold-streaks')
+@limiter.limit("30 per minute")
 def cold_streaks():
     """Kỳ chưa ra cho số 1-6 và tất cả bộ 3 số (sorted combo)."""
     try:
@@ -2999,6 +3035,7 @@ def cold_streaks():
 
 
 @app.route('/api/transition-stats')
+@limiter.limit("10 per minute")
 @cache_resp(ttl=120)
 def get_transition_stats():
     """P(next_size | prev_sum) and top-3 next sums, computed from full draw history."""
@@ -3153,11 +3190,13 @@ def multi_preview():
 
 
 @app.route('/api/next-prediction')
+@limiter.limit("30 per minute")
 def next_prediction_hyphen():
     return multi_preview()
 
 
 @app.route('/api/next_prediction')
+@limiter.limit("30 per minute")
 def get_next_prediction():
     try:
         conn = db.get_connection()
@@ -3207,6 +3246,7 @@ def get_next_prediction():
 
 
 @app.route('/api/calibration')
+@limiter.limit("30 per minute")
 def get_calibration_stats():
     """Trả về win rate thực tế của từng model — nguồn gốc của calibrated confidence."""
     try:
@@ -5862,6 +5902,7 @@ def ai_predict_endpoint():
 
 
 @app.route('/api/prediction-gap')
+@limiter.limit("30 per minute")
 def prediction_gap():
     """Kiểm tra số kỳ chưa có prediction."""
     try:
@@ -6954,6 +6995,7 @@ def daily_summary():
 
 
 @app.route('/api/learning-status')
+@limiter.limit("30 per minute")
 def learning_status():
     """Trả về trạng thái learning của hệ thống."""
     try:
@@ -7212,6 +7254,7 @@ def backtest_models():
 
 
 @app.route('/api/combo-predict', methods=['GET'])
+@limiter.limit("10 per minute")
 def combo_predict():
     """
     Dự đoán tổ hợp 2 số & 3 số (có thể trùng nhau) cho kỳ tiếp theo.
@@ -7244,6 +7287,7 @@ def combo_predict():
 
 
 @app.route('/api/time_analysis')
+@limiter.limit("10 per minute")
 def get_time_analysis():
     """
     FIX: PostgreSQL không có strftime() — dùng EXTRACT(HOUR FROM ...) thay thế.
@@ -7284,6 +7328,7 @@ def get_time_analysis():
 
 # ── Analytics ────────────────────────────────────────────────
 @app.route('/analytics')
+@limiter.limit("60 per minute")
 def analytics_page():
     return render_template('analytics.html')
 
@@ -7935,6 +7980,7 @@ _sse_lock         = _threading.Lock()
 
 
 @app.route('/api/sse/draws')
+@limiter.limit("30 per minute")
 def sse_draws():
     """Server-Sent Events: push new draws to dashboard in real-time (poll DB every 6s)."""
     _slot = _time.time()
@@ -10579,6 +10625,7 @@ def _tg_ai_chat(conn, user_message: str, reply):
 
 # ── Telegram Webhook: commands + ảnh → vision AI ─────────────
 @app.route('/telegram/webhook', methods=['POST'])
+@limiter.limit("60 per minute")
 def telegram_webhook():
     import logging as _log
     _wlog = _log.getLogger("telegram_webhook")
@@ -10923,6 +10970,7 @@ def search_history():
 
 
 @app.route('/telegram/set-webhook', methods=['POST'])
+@limiter.limit("5 per minute")
 def set_telegram_webhook():
     """One-time setup: register webhook URL with Telegram."""
     secret = request.headers.get("X-Admin-Secret", "")
