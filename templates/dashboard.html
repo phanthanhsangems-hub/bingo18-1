@@ -208,6 +208,30 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <p class="sub" id="dd-note"></p>
   </div>
 
+  <!-- ═══ BỘ NÀO HAY RA NGAY SAU BỘ NÀY (P227) ═══ -->
+  <div class="card" style="margin-top:16px">
+    <h2>Bộ nào hay ra ngay sau bộ này</h2>
+    <p class="sub">Chọn một bộ, xem trên toàn bộ lịch sử: mỗi lần bộ đó ra thì <b>kỳ kế tiếp</b> đã ra những bộ nào.</p>
+    <div style="margin:10px 0">
+      <label for="ts-chon" class="sub">Bộ vừa ra:</label>
+      <select id="ts-chon" class="sel"></select>
+    </div>
+    <p class="sub" id="ts-sub"><span class="skeleton">Đang tải...</span></p>
+    <div class="tbl-scroll">
+      <table class="log-table" id="ts-table">
+        <thead><tr>
+          <th>Bộ theo sau</th>
+          <th class="ta-r"><span class="lbl-lg">Số lần</span><span class="lbl-sm">Lần</span></th>
+          <th class="ta-r"><span class="lbl-lg">Lẽ ra</span><span class="lbl-sm">Lẽ ra</span></th>
+          <th class="ta-r"><span class="lbl-lg">Chênh</span><span class="lbl-sm">Chênh</span></th>
+        </tr></thead>
+        <tbody id="ts-body"><tr><td colspan="4" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <p class="sub" id="ts-verdict"></p>
+    <p class="sub" id="ts-note"></p>
+  </div>
+
   <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Thống kê theo tổng</h2>

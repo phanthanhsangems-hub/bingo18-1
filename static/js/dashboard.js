@@ -685,6 +685,73 @@ async function loadTripleStats(d) {
   loadChuoiKhoangCachTrip(d.triples || []);
 }
 
+// ── P227: bộ nào hay ra NGAY SAU bộ này ─────────────────────
+// Bảng này dễ bị đọc sai nhất trong cả dashboard, nên nó KHÔNG chỉ có cột
+// "số lần". Kỳ quay độc lập, vậy mà trên dữ liệu ngẫu nhiên thuần bộ đứng
+// đầu vẫn vượt mức lẽ ra tới ~43% (đo được: 65 lần so với 45,5). Không đặt
+// cột "lẽ ra" ngay cạnh thì người đọc chắc chắn hiểu đó là cầu.
+let _tsDangTai = false;
+async function loadTheoSau(combo) {
+  if (_tsDangTai) return;
+  _tsDangTai = true;
+  try {
+    const q = combo ? `?combo=${encodeURIComponent(combo)}` : '';
+    const d = await J('/api/theo-sau' + q);
+    if (!d || !d.rows) return;
+    const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
+
+    const sel = $('ts-chon');
+    if (sel && !sel.options.length) {
+      // 56 bộ đã sắp xếp
+      const opts = [];
+      for (let i = 1; i <= 6; i++)
+        for (let j = i; j <= 6; j++)
+          for (let k = j; k <= 6; k++)
+            opts.push(`${i}${j}${k}`);
+      sel.innerHTML = opts.map(c =>
+        `<option value="${c}">${c[0]}-${c[1]}-${c[2]}</option>`).join('');
+      sel.onchange = () => loadTheoSau(sel.value);
+    }
+    if (sel) sel.value = d.combo;
+
+    $('ts-body').innerHTML = d.rows.map(r => {
+      const ch = r.diff;
+      const cls = ch > 0 ? 'ts-hon' : (ch < 0 ? 'ts-kem' : '');
+      const dau = ch > 0 ? '+' : '';
+      return `<tr>
+        <td>${miniDice(r.combo.split('').map(Number))}</td>
+        <td class="num ta-r">${fmt(r.count)}</td>
+        <td class="num ta-r ss-prev">${fmt(r.expected)}</td>
+        <td class="num ta-r ${cls}">${dau}${fmt(ch)}</td>
+      </tr>`;
+    }).join('');
+
+    const b = d.combo;
+    $('ts-sub').innerHTML =
+      `Bộ <b>${b[0]}-${b[1]}-${b[2]}</b> đã ra <b class="num">${fmt(d.total_after)}</b> lần `
+      + `có kỳ kế tiếp, trên <b class="num">${fmt(d.total_draws)}</b> kỳ.`;
+
+    // Câu chốt. Phải nói thẳng, vì đây là thứ người đọc sẽ dựa vào.
+    $('ts-verdict').innerHTML = d.lech_co_y_nghia
+      ? `<b>Có lệch so với ngẫu nhiên</b> (chi² = ${d.chi2}, df = ${d.df}, p = ${d.p}). `
+        + `Vẫn nên xem lại trước khi tin: bấm thử nhiều bộ là nhiều phép kiểm, `
+        + `soi 56 bộ ở ngưỡng 5% thì trung bình đã có ~2,8 bộ bị gắn cờ hoàn toàn do ngẫu nhiên.`
+      : `<b>KHÔNG có cầu.</b> Phân bố này không khác ngẫu nhiên `
+        + `(chi² = ${d.chi2}, df = ${d.df}, p = ${d.p}). `
+        + `Bộ đứng đầu bảng vượt mức "lẽ ra" là chuyện bình thường, không phải quy luật.`;
+
+    $('ts-note').textContent =
+      'Cột "lẽ ra" = số lần kỳ vọng nếu các kỳ độc lập nhau: tổng số lần × (số cách tạo bộ đó ÷ 216). '
+      + 'Bộ 3 số khác nhau có 6 cách nên lẽ ra ra nhiều gấp đôi bộ có đôi, gấp sáu bộ ba — '
+      + 'so số lần với nhau mà bỏ qua cột này là so nhầm. '
+      + 'Chỉ đếm khi hai kỳ liên tiếp thật sự; kỳ nằm sau một lỗ hổng dữ liệu bị bỏ qua.';
+  } catch (e) {
+    /* im lặng — thẻ khác vẫn phải chạy */
+  } finally {
+    _tsDangTai = false;
+  }
+}
+
 // ── P226: bảng BỘ 2 SỐ TRÙNG NHAU ───────────────────────────
 // Dựng y hệt bảng trip ở trên để người dùng không phải học lại cách đọc —
 // cùng cột, cùng quy tắc tô đậm ô "chưa về", dùng lại luôn CSS .tr-*.
@@ -963,6 +1030,10 @@ function loadBangLichSu() {
     } else {
       await loadTripleStats(); await loadSumStats(); await loadPairStats();
     }
+    // P227: để trống combo -> lấy bộ của kỳ MỚI NHẤT. Nhưng nếu người dùng
+    // đang tự chọn một bộ khác để xem thì đừng giật nó về kỳ mới nhất.
+    const _sel = $('ts-chon');
+    safe(() => loadTheoSau(_sel && _sel.value ? _sel.value : ''));
   });
 }
 
