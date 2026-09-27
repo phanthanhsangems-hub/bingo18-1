@@ -179,6 +179,104 @@ ds = open('scripts/endpoints_readonly.txt', encoding='utf-8').read().splitlines(
 kiem("/api/theo-sau co trong danh sach quet", '/api/theo-sau' in ds,
      "chua dang ky — loi 500 se khong ai biet")
 
+print("\n=== 10. CUA SO n KY (P228) ===")
+# Du lieu: 20 ky lien tiep, 235 ra o #1, #10, #18 (so thu tu trong day)
+ky3, dn3 = [], 200_000
+mau = [[2,3,5],[1,4,6],[3,3,5],[1,2,3],[2,2,4],[5,5,6],[1,1,2],[4,5,6],[3,4,5],
+       [2,3,5],[6,6,6],[1,3,5],[2,4,6],[1,1,1],[3,5,6],[2,2,2],[4,4,5],
+       [2,3,5],[1,2,6],[3,3,3]]
+for m in mau:
+    dn3 += 1
+    ky3.append((dn3, m))
+kq3 = chay(ky3)
+
+class CW:
+    def __init__(s, ky): s.ky = ky; s.sql=''
+    def execute(s, q, *a):
+        s.sql = q; s.args = a[0] if a else ()
+    def fetchall(s):
+        n = s.args[0] if s.args else len(s.ky)
+        return [(d, str(v)) for d, v in sorted(s.ky, key=lambda r: -r[0])[:n]]
+    def fetchone(s): return (str(s.ky[-1][1]),)
+    def close(s): pass
+class KW:
+    def __init__(s, ky): s.ky = ky
+    def cursor(s): return CW(s.ky)
+    def close(s): pass
+
+def goi(combo, n=None):
+    q = f'/api/theo-sau?combo={combo}' + (f'&n={n}' if n is not None else '')
+    with mock.patch.object(A, '_thong_ke', return_value=kq3), \
+         mock.patch.object(A.db, 'get_connection', return_value=KW(ky3)):
+        return A.app.test_client().get(q).get_json()
+
+# Toan bo: 235 ra 3 lan, ca ba deu co ky ke tiep -> 3 cap
+jt = goi('235')
+kiem("toan bo: look_back = 0", jt.get('look_back') == 0, str(jt.get('look_back')))
+kiem("toan bo: 3 cap (235 ra 3 lan)", jt['total_after'] == 3, str(jt['total_after']))
+kiem("toan bo: theo sau co 666, 224(->225?), ...",
+     jt['rows'][0]['count'] >= 1)
+
+# Cua so 5 ky cuoi (#200016..#200020): 235 o #200018 -> ke tiep 126
+j5 = goi('235', 5)
+kiem("n=5: look_back = 5", j5.get('look_back') == 5, str(j5.get('look_back')))
+kiem("n=5: chi 1 cap", j5['total_after'] == 1, str(j5['total_after']))
+d126 = [r for r in j5['rows'] if r['combo'] == '126'][0]
+kiem("n=5: bo theo sau la 1-2-6", d126['count'] == 1, str(d126))
+
+# Cua so 3 ky cuoi (#200018..#200020) VAN chua 235 o #200018 -> 1 cap.
+# Lan dau toi viet test nay cho n=3 va doi 0 cap — TEST SAI, khong phai code.
+# Phai lui ve n=2 (#200019, #200020) moi khong con 235 nao.
+j3 = goi('235', 3)
+kiem("n=3: van 1 cap (235 o #200018 nam trong cua so)",
+     j3['total_after'] == 1, str(j3['total_after']))
+j2 = goi('235', 2)
+kiem("n=2: khong cap nao (cua so khong chua 235)",
+     j2['total_after'] == 0, str(j2['total_after']))
+
+print("\n=== 11. MAU IT -> KHONG duoc dua con so p ===")
+for n in (None, 5, 100):
+    j = goi('235', n)
+    if j['total_after'] < 216:
+        kiem(f"n={n}: du_mau = False", j.get('du_mau') is False, str(j.get('du_mau')))
+        kiem(f"n={n}: p = None (khong dua so rac)", j.get('p') is None, str(j.get('p')))
+        kiem(f"n={n}: khong bao 'co cau'", j.get('lech_co_y_nghia') is False)
+
+# Du mau -> phai co p tro lai
+kq_lon = chay([(300_000 + i, sorted(random.randint(1,6) for _ in range(3)))
+               for i in range(60_000)])
+with mock.patch.object(A, '_thong_ke', return_value=kq_lon):
+    jl = A.app.test_client().get('/api/theo-sau?combo=235').get_json()
+kiem("du mau (n>=216) -> du_mau=True", jl.get('du_mau') is True,
+     f"total_after={jl.get('total_after')}")
+kiem("du mau -> co con so p", jl.get('p') is not None, str(jl.get('p')))
+
+print("\n=== 12. CUA SO CUNG PHAI BO QUA LO HONG ===")
+# #400001 235, #400002 146  (lien tiep -> dem)
+# #400005 235, #400009 111  (cach 4 ky -> KHONG dem)
+ky4 = [(400001,[2,3,5]), (400002,[1,4,6]), (400005,[2,3,5]), (400009,[1,1,1])]
+with mock.patch.object(A, '_thong_ke', return_value=kq3), \
+     mock.patch.object(A.db, 'get_connection', return_value=KW(ky4)):
+    j4 = A.app.test_client().get('/api/theo-sau?combo=235&n=10').get_json()
+kiem("cua so: chi dem cap lien tiep that su", j4['total_after'] == 1,
+     str(j4['total_after']))
+r146 = [r for r in j4['rows'] if r['combo'] == '146'][0]
+kiem("cua so: dung cap 235->146", r146['count'] == 1, str(r146))
+r111 = [r for r in j4['rows'] if r['combo'] == '111'][0]
+kiem("cua so: cap vat qua lo hong bi loai", r111['count'] == 0, str(r111))
+
+print("\n=== 13. GIAO DIEN: o chon cua so + 3 trang thai ===")
+html = open('templates/dashboard.html', encoding='utf-8').read()
+js   = open('static/js/dashboard.js', encoding='utf-8').read()
+kiem("the co o chon cua so", 'id="ts-ws"' in html)
+kiem("co muc 100 ky", '>100 kỳ<' in html)
+kiem("co muc toan bo", 'toàn bộ lịch sử' in html)
+kiem("JS gui tham so n", "qs.push(`n=" in js)
+kiem("JS co nhanh 'Qua it mau'", 'Quá ít mẫu để kết luận' in js)
+kiem("JS noi ro vi sao khong co p", 'không có con số p' in js)
+kiem("ba trang thai tach biet, khong gop",
+     js.count('ts-verdict') >= 1 and 'd.du_mau' in js)
+
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

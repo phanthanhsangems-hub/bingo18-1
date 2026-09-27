@@ -695,8 +695,12 @@ async function loadTheoSau(combo) {
   if (_tsDangTai) return;
   _tsDangTai = true;
   try {
-    const q = combo ? `?combo=${encodeURIComponent(combo)}` : '';
-    const d = await J('/api/theo-sau' + q);
+    const ws = $('ts-ws');
+    const n  = ws ? (ws.value || '0') : '0';
+    const qs = [];
+    if (combo) qs.push(`combo=${encodeURIComponent(combo)}`);
+    if (n !== '0') qs.push(`n=${encodeURIComponent(n)}`);
+    const d = await J('/api/theo-sau' + (qs.length ? '?' + qs.join('&') : ''));
     if (!d || !d.rows) return;
     const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
 
@@ -711,6 +715,10 @@ async function loadTheoSau(combo) {
       sel.innerHTML = opts.map(c =>
         `<option value="${c}">${c[0]}-${c[1]}-${c[2]}</option>`).join('');
       sel.onchange = () => loadTheoSau(sel.value);
+    }
+    if (ws && !ws.dataset.noi) {
+      ws.dataset.noi = '1';
+      ws.onchange = () => loadTheoSau(sel ? sel.value : '');
     }
     if (sel) sel.value = d.combo;
 
@@ -727,18 +735,34 @@ async function loadTheoSau(combo) {
     }).join('');
 
     const b = d.combo;
+    const pham = d.look_back ? `${fmt(d.look_back)} kỳ gần nhất`
+                             : `toàn bộ ${fmt(d.total_draws)} kỳ`;
     $('ts-sub').innerHTML =
       `Bộ <b>${b[0]}-${b[1]}-${b[2]}</b> đã ra <b class="num">${fmt(d.total_after)}</b> lần `
-      + `có kỳ kế tiếp, trên <b class="num">${fmt(d.total_draws)}</b> kỳ.`;
+      + `có kỳ kế tiếp, trong ${pham}.`;
 
     // Câu chốt. Phải nói thẳng, vì đây là thứ người đọc sẽ dựa vào.
-    $('ts-verdict').innerHTML = d.lech_co_y_nghia
-      ? `<b>Có lệch so với ngẫu nhiên</b> (chi² = ${d.chi2}, df = ${d.df}, p = ${d.p}). `
+    // Ba trạng thái, KHÔNG gộp: quá ít mẫu / không có cầu / có lệch.
+    // Gộp "quá ít mẫu" vào "không có cầu" là nói sai — chưa đo được thì
+    // chưa biết, khác hẳn với đã đo và thấy không có.
+    if (!d.du_mau) {
+      $('ts-verdict').innerHTML =
+        `<b>Quá ít mẫu để kết luận.</b> Chỉ có <b class="num">${fmt(d.total_after)}</b> lần `
+        + `bộ này ra trong phạm vi đang xem, chia cho 56 bộ thì mỗi bộ chưa tới một lần. `
+        + `Phép kiểm chi² cần ít nhất ~216 mẫu mới cho con số đáng tin, nên ở đây `
+        + `<b>không có con số p</b> — thà nói chưa biết còn hơn đưa một số trông có vẻ khoa học. `
+        + `Muốn kết luận thì chọn "toàn bộ lịch sử".`;
+    } else if (d.lech_co_y_nghia) {
+      $('ts-verdict').innerHTML =
+        `<b>Có lệch so với ngẫu nhiên</b> (chi² = ${d.chi2}, df = ${d.df}, p = ${d.p}). `
         + `Vẫn nên xem lại trước khi tin: bấm thử nhiều bộ là nhiều phép kiểm, `
-        + `soi 56 bộ ở ngưỡng 5% thì trung bình đã có ~2,8 bộ bị gắn cờ hoàn toàn do ngẫu nhiên.`
-      : `<b>KHÔNG có cầu.</b> Phân bố này không khác ngẫu nhiên `
+        + `soi 56 bộ ở ngưỡng 5% thì trung bình đã có ~2,8 bộ bị gắn cờ hoàn toàn do ngẫu nhiên.`;
+    } else {
+      $('ts-verdict').innerHTML =
+        `<b>KHÔNG có cầu.</b> Phân bố này không khác ngẫu nhiên `
         + `(chi² = ${d.chi2}, df = ${d.df}, p = ${d.p}). `
         + `Bộ đứng đầu bảng vượt mức "lẽ ra" là chuyện bình thường, không phải quy luật.`;
+    }
 
     $('ts-note').textContent =
       'Cột "lẽ ra" = số lần kỳ vọng nếu các kỳ độc lập nhau: tổng số lần × (số cách tạo bộ đó ÷ 216). '

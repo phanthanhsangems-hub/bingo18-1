@@ -3038,6 +3038,43 @@ def triple_stats():
         return jsonify({'error': str(e)}), 500
 
 
+def _theo_sau_cua_so(bo: tuple, n: int) -> dict:
+    """Đếm 'bộ nào ra ngay sau `bo`' trong n kỳ GẦN NHẤT.
+
+    Toàn bộ lịch sử thì dùng ma trận đã đếm sẵn trong ảnh chụp; riêng cửa sổ
+    hẹp phải quét lại, nhưng n nhỏ và draw_number có index nên rẻ.
+
+    Giữ đúng quy tắc của bản toàn bộ: CHỈ đếm khi hai kỳ liên tiếp thật sự.
+    Dữ liệu từng thủng 11 kỳ hồi 22/09; nối qua lỗ hổng là sinh cặp giả.
+    """
+    import ast as _a
+    ph = '%s' if USE_POSTGRES else '?'
+    conn = db.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT draw_number, numbers FROM draw_history "
+            f"WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT {ph}",
+            (n,))
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    dem: dict = {}
+    truoc_bo, truoc_dn = None, None
+    for dn, raw in sorted(rows, key=lambda r: r[0]):   # cũ -> mới
+        try:
+            ns = raw if isinstance(raw, list) else _a.literal_eval(raw)
+            cur_bo = tuple(sorted(int(x) for x in ns))
+        except Exception:
+            truoc_bo, truoc_dn = None, None
+            continue
+        if truoc_bo == bo and truoc_dn is not None and dn == truoc_dn + 1:
+            dem[cur_bo] = dem.get(cur_bo, 0) + 1
+        truoc_bo, truoc_dn = cur_bo, dn
+    return dem
+
+
 def _p_chi2(chi2: float, df: int) -> float:
     """P(X >= chi2) cho phan phoi chi binh phuong, xap xi Wilson-Hilferty.
 
@@ -3073,6 +3110,14 @@ def theo_sau_stats():
         d   = _thong_ke()
         ts  = d.get('theo_sau') or {}
 
+        # P228: ?n=100 -> chỉ xét 100 kỳ GẦN NHẤT. n=0 (hoặc thiếu) = toàn bộ
+        # lịch sử, dùng ma trận đã đếm sẵn trong ảnh chụp nên không tốn truy
+        # vấn nào. Có n thì phải quét riêng — một truy vấn có index, N nhỏ.
+        try:
+            n_ws = max(0, min(int(request.args.get('n', 0)), 20000))
+        except ValueError:
+            n_ws = 0
+
         if len(so) != 3 or not all(1 <= x <= 6 for x in so):
             # Mặc định: bộ của kỳ mới nhất — câu người dùng hay hỏi nhất là
             # "kỳ vừa ra bộ này, lịch sử sau nó ra gì".
@@ -3091,8 +3136,11 @@ def theo_sau_stats():
             _n = _r[0] if isinstance(_r[0], list) else _a.literal_eval(_r[0])
             so = [int(x) for x in _n]
 
-        bo   = tuple(sorted(so))
-        dem  = ts.get(bo) or {}
+        bo = tuple(sorted(so))
+        if n_ws:
+            dem = _theo_sau_cua_so(bo, n_ws)
+        else:
+            dem = ts.get(bo) or {}
         tong = sum(dem.values())
 
         rows, chi2 = [], 0.0
@@ -3108,19 +3156,27 @@ def theo_sau_stats():
         rows.sort(key=lambda r: (-r['count'], r['combo']))
 
         df = len(_SO_CACH_BO) - 1
-        p  = _p_chi2(chi2, df) if tong else 1.0
+        # Chi bình phương chỉ dùng được khi số lần KỲ VỌNG đủ lớn. Ô hiếm
+        # nhất (bộ ba) kỳ vọng tong/216, nên dưới 216 mẫu là ô đó chưa tới 1
+        # — con số p tính ra sẽ là rác. Cửa sổ 100 kỳ cho tong ~2,8 nên rơi
+        # thẳng vào vùng này; thà nói "quá ít mẫu" còn hơn đưa một số p trông
+        # có vẻ khoa học.
+        du_mau = tong >= 216
+        p  = _p_chi2(chi2, df) if (tong and du_mau) else None
         return jsonify({
             'combo':       ''.join(map(str, bo)),
+            'look_back':   n_ws,            # 0 = toàn bộ lịch sử
+            'du_mau':      du_mau,
             'total_after': tong,
             'total_draws': d['total_draws'],
             'max_draw':    d.get('max_draw'),
             'rows':        rows,
             'chi2':        round(chi2, 1),
             'df':          df,
-            'p':           round(p, 4),
+            'p':           (round(p, 4) if p is not None else None),
             # Ngưỡng 0,05 trên MỘT phép kiểm. Người dùng bấm xem nhiều bộ thì
             # đây là nhiều phép kiểm — chú thích giao diện nói rõ chuyện đó.
-            'lech_co_y_nghia': bool(tong and p < 0.05),
+            'lech_co_y_nghia': bool(p is not None and p < 0.05),
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
