@@ -1,3 +1,21 @@
+# /api/sse/draws DA GO KHOI DANH SACH NAY — co y.
+#
+# No khong phai endpoint REST ma la LUONG Server-Sent Events song lau.
+# Quet no bang curl thuong gay hai chuyen, ca hai deu da xay ra:
+#
+# 1) Cuop mot suat cua dashboard that. App chi cho _SSE_MAX_CLIENTS = 5
+#    luong dong thoi (moi luong giu mot ket noi DB toi 240s, ma app co y
+#    khong dung connection pool). curl om luong den het --max-time 30 nen
+#    moi lan chan doan lai chiem mot suat trong 30 giay.
+#
+# 2) Bao 5xx gia. Lan chay #29 bao '503 /api/sse/draws :: retry: 60000' —
+#    do chinh la than 'too_many_sse_clients', tuc CAI CHOT DANG LAM DUNG
+#    viec cua no, khong phai app hong. Lan #30 bay phut sau khong tai hien.
+#    Mot bao dong khong tai hien duoc lai lam nguoi doc tuong app chet.
+#
+# Mat gi khi bo: khong con theo doi SSE. Chap nhan duoc, vi dashboard van
+# tu lam moi moi 60 giay khi SSE bi tu choi (static/js/dashboard.js) — mat
+# SSE chi mat thong bao tuc thi, khong lam hong trang.
 /
 /analytics
 /api/adaptive-state
@@ -11,6 +29,8 @@
 /api/analytics/patterns
 /api/autotune-history
 /api/bet-signal
+/api/board-stats
+/api/cai-dat/the
 /api/calibration
 /api/calibration-by-size
 /api/calibration-chart
@@ -45,6 +65,7 @@
 /api/hot-combos-today
 /api/hot_cold_numbers
 /api/hourly-today
+/api/lap-lai
 /api/last-draw-id
 /api/learning-status
 /api/model-performance
@@ -66,6 +87,7 @@
 /api/number-trend
 /api/number_frequency
 /api/pair-heatmap
+/api/pair-stats
 /api/pair-today
 /api/pl-running
 /api/pl-simulation
@@ -94,8 +116,6 @@
 /api/streak-history
 /api/sum-distribution
 /api/sum-rolling
-/api/lap-lai
-/api/pair-stats
 /api/sum-stats
 /api/sum-today
 /api/system-health-badge
@@ -126,23 +146,3 @@
 /healthz
 /manifest.json
 /sw.js
-/api/board-stats
-
-# /api/sse/draws DA GO KHOI DANH SACH NAY — co y.
-#
-# No khong phai endpoint REST ma la LUONG Server-Sent Events song lau.
-# Quet no bang curl thuong gay hai chuyen, ca hai deu da xay ra:
-#
-# 1) Cuop mot suat cua dashboard that. App chi cho _SSE_MAX_CLIENTS = 5
-#    luong dong thoi (moi luong giu mot ket noi DB toi 240s, ma app co y
-#    khong dung connection pool). curl om luong den het --max-time 30 nen
-#    moi lan chan doan lai chiem mot suat trong 30 giay.
-#
-# 2) Bao 5xx gia. Lan chay #29 bao '503 /api/sse/draws :: retry: 60000' —
-#    do chinh la than 'too_many_sse_clients', tuc CAI CHOT DANG LAM DUNG
-#    viec cua no, khong phai app hong. Lan #30 bay phut sau khong tai hien.
-#    Mot bao dong khong tai hien duoc lai lam nguoi doc tuong app chet.
-#
-# Mat gi khi bo: khong con theo doi SSE. Chap nhan duoc, vi dashboard van
-# tu lam moi moi 60 giay khi SSE bi tu choi (static/js/dashboard.js) — mat
-# SSE chi mat thong bao tuc thi, khong lam hong trang.

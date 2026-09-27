@@ -118,14 +118,29 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     </div>
   </div>
 
+  <!-- ═══ CÀI ĐẶT HIỂN THỊ (P232) ═══ -->
+  <div class="card cd-card" style="margin-top:16px">
+    <button type="button" class="cd-mo" id="cd-mo" aria-expanded="false" aria-controls="cd-than">
+      <span>⚙️ Cài đặt hiển thị</span>
+      <span class="cd-dem sub" id="cd-dem"></span>
+    </button>
+    <div class="cd-than" id="cd-than" hidden>
+      <p class="sub">Bỏ chọn để ẩn thẻ khỏi màn hình. Lựa chọn lưu trên máy chủ nên
+        điện thoại và máy tính đều giống nhau, và không mất khi deploy lại.</p>
+      <div class="cd-luoi" id="cd-luoi"></div>
+      <p class="sub" id="cd-trangthai" role="status" aria-live="polite"></p>
+      <button type="button" class="cd-reset" id="cd-reset">Hiện lại tất cả</button>
+    </div>
+  </div>
+
   <!-- ═══ CHARTS ═══ -->
-  <div class="grid2">
-    <div class="card">
+  <div class="grid2" data-nhom="1">
+    <div class="card" data-the="winrate">
       <h2>Win rate 7 ngày</h2>
       <p class="sub">Tỷ lệ đoán đúng theo ngày · nét đứt = baseline 35%</p>
       <div class="chart-wrap" id="wr-chart"><span class="skeleton">Đang tải...</span></div>
     </div>
-    <div class="card">
+    <div class="card" data-the="size-today">
       <h2>Phân bố SIZE hôm nay</h2>
       <p class="sub" id="size-dist-sub">Theo kết quả thực tế</p>
       <div class="szbars" id="size-bars"></div>
@@ -133,14 +148,14 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ HOT / COLD NUMBERS ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="nong-lanh">
     <h2>Số nóng · Số lạnh</h2>
     <p class="sub" id="hc-sub">Tần suất từng số trong ngày hôm nay · mỗi số một màu riêng</p>
     <div class="hc-grid" id="hc-grid"><span class="skeleton">Đang tải...</span></div>
   </div>
 
   <!-- ═══ TODAY COMBOS ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="bo-hom-nay">
     <h2>Bộ số hôm nay</h2>
     <p class="sub" id="tc-sub">Trong 56 bộ 3 có thể · giờ VN</p>
     <div class="tc-sums" id="tc-by-sum"><span class="skeleton">Đang tải...</span></div>
@@ -148,7 +163,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ LƯỚI CHI TIẾT ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="luoi">
     <h2>Lưới chi tiết</h2>
     <p class="sub">Mỗi hàng một kỳ · chấm = số lần con số đó xuất hiện</p>
     <div class="dg-wrap">
@@ -170,7 +185,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ THỐNG KÊ BỘ 3 SỐ TRÙNG NHAU ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="trip">
     <h2>Bộ 3 số trùng nhau</h2>
     <p class="sub" id="tr-sub">Toàn bộ lịch sử · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
     <div class="tbl-scroll">
@@ -189,7 +204,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ THỐNG KÊ BỘ 2 SỐ TRÙNG NHAU (P226) ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="doi">
     <h2>Bộ 2 số trùng nhau</h2>
     <p class="sub" id="dd-sub">Toàn bộ lịch sử · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
     <p class="sub">Tính là <b>ít nhất 2 lần</b> — nên <b>1-1-1</b> cũng được tính vào dòng <b>11</b>. Ba số thì không thể có hai số khác nhau cùng lặp, nên sáu dòng dưới đây không bao giờ chồng nhau.</p>
@@ -209,7 +224,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="tong">
     <h2>Thống kê theo tổng</h2>
     <p class="sub">Ghép cặp đối xứng — hai tổng cùng hàng có xác suất lý thuyết y hệt nhau · "Đợt trước" = chu kỳ vừa xong kéo dài bao nhiêu kỳ</p>
     <p class="sub">TB bị vài đợt hạn cực dài kéo lệch lên; <b>trung vị</b> = một nửa số lần về sớm hơn con số đó, sát thực tế hơn.</p>
@@ -226,7 +241,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ CÒN BAO NHIÊU KỲ NỮA SẼ RA (P220/P221) ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="con-bao-nhieu">
     <h2>Còn bao nhiêu kỳ nữa sẽ ra</h2>
     <p class="sub">Với mỗi tổng: đang vắng bao nhiêu kỳ, và <b>còn bao nhiêu kỳ nữa</b> thì khả năng ra đạt 50% / 80% / 95%.</p>
     <p class="sub">Hàng tô đậm = đợt vắng đang chạy rơi vào nhóm hiếm nhất 5% của chính tổng đó.</p>
@@ -235,7 +250,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ CHUỖI KHOẢNG CÁCH THEO TỔNG (P216) ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="kc-tong">
     <h2>Khoảng cách các kỳ theo tổng</h2>
     <p class="sub">Mỗi dòng một tổng: số kỳ giữa hai lần ra liên tiếp, đọc <b>cũ → mới</b> từ trái sang phải — đúng cách ghi tay trong sổ.</p>
     <p class="sub">Ô cuối viền đậm là chu kỳ <b>đang chạy</b> (chưa kết thúc). Ô tô đậm = khoảng cách dài hơn gấp đôi mức trung bình của tổng đó.</p>
@@ -244,7 +259,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ CHUỖI KHOẢNG CÁCH THEO TRIP (P218) ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="kc-trip">
     <h2>Khoảng cách các kỳ theo bộ 3 số trùng</h2>
     <p class="sub">Đọc giống thẻ trên: <b>cũ → mới</b> từ trái sang phải, ô cuối viền đậm là chu kỳ <b>đang chạy</b>.</p>
     <p class="sub">Lưu ý: trip <b>111</b> chính là tổng 3 và trip <b>666</b> chính là tổng 18 — hai dòng đó trùng với thẻ trên. Bốn trip còn lại thì khác hẳn: tổng 6 có 3 bộ nhưng chỉ <b>2-2-2</b> mới là trip.</p>
@@ -253,7 +268,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="cau">
     <h2>Cầu đang theo dõi</h2>
     <p class="sub" id="wp-sub">46 cầu [bộ dẫn trước → trip] · forward-test từ khi bật alert</p>
     <div id="wp-active"></div>
@@ -269,14 +284,14 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   </div>
 
   <!-- ═══ ALERTS ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="canh-bao">
     <h2>Cảnh báo thông minh</h2>
     <p class="sub">Tín hiệu gần nhất từ hệ thống</p>
     <div class="alerts" id="alerts"><span class="skeleton">Đang tải...</span></div>
   </div>
 
   <!-- ═══ LOG ═══ -->
-  <div class="card" style="margin-top:16px">
+  <div class="card" style="margin-top:16px" data-the="nhat-ky">
     <h2>Nhật ký dự đoán</h2>
     <p class="sub">10 kỳ gần nhất · thắng = đúng SIZE</p>
     <div class="tbl-scroll">

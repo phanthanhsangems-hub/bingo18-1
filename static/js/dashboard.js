@@ -1005,3 +1005,120 @@ document.addEventListener('visibilitychange', () => {
 });
 
 connectSSE();
+
+// ── P232: bật/tắt từng thẻ trên dashboard ───────────────────
+// Máy chủ là nguồn sự thật (lưu ở system_config) nên điện thoại và máy tính
+// giống nhau, và deploy lại không mất. Nhưng gọi mạng thì mất vài trăm ms,
+// trong lúc đó thẻ đã ẩn vẫn hiện rồi mới biến mất — chớp một cái rất khó
+// chịu. Nên dựng NGAY từ localStorage lúc nạp trang, xong mới đối chiếu với
+// máy chủ. localStorage ở đây chỉ là bộ nhớ đệm, không phải nguồn sự thật.
+const CD_DEM_KEY = 'bingo18_the_an';
+const CD_TEN = {
+  'winrate':       'Win rate 7 ngày',
+  'size-today':    'Phân bố SIZE hôm nay',
+  'nong-lanh':     'Số nóng · Số lạnh',
+  'bo-hom-nay':    'Bộ số hôm nay',
+  'luoi':          'Lưới chi tiết',
+  'trip':          'Bộ 3 số trùng nhau',
+  'doi':           'Bộ 2 số trùng nhau',
+  'tong':          'Thống kê theo tổng',
+  'con-bao-nhieu': 'Còn bao nhiêu kỳ nữa sẽ ra',
+  'kc-tong':       'Khoảng cách các kỳ theo tổng',
+  'kc-trip':       'Khoảng cách các kỳ theo bộ 3 số trùng',
+  'cau':           'Cầu đang theo dõi',
+  'canh-bao':      'Cảnh báo thông minh',
+  'nhat-ky':       'Nhật ký dự đoán',
+};
+let _cdAn = [];
+
+function cdDemDoc() {
+  try {
+    const v = JSON.parse(localStorage.getItem(CD_DEM_KEY) || '[]');
+    return Array.isArray(v) ? v.filter(k => k in CD_TEN) : [];
+  } catch (e) { return []; }     // chế độ riêng tư / bị chặn -> coi như trống
+}
+function cdDemGhi(an) {
+  try { localStorage.setItem(CD_DEM_KEY, JSON.stringify(an)); } catch (e) {}
+}
+
+function cdApDung(an) {
+  _cdAn = an;
+  document.querySelectorAll('[data-the]').forEach(el => {
+    el.hidden = an.includes(el.dataset.the);
+  });
+  // Khung grid2 ôm hai thẻ biểu đồ: ẩn cả hai thì ẩn luôn khung, nếu không
+  // sẽ còn lại một khoảng trống không giải thích được.
+  document.querySelectorAll('[data-nhom]').forEach(kh => {
+    const con = [...kh.querySelectorAll('[data-the]')];
+    kh.hidden = con.length > 0 && con.every(c => c.hidden);
+  });
+  const d = $('cd-dem');
+  if (d) d.textContent = an.length ? `đang ẩn ${an.length}/${Object.keys(CD_TEN).length} thẻ` : '';
+}
+
+async function cdLuu(an) {
+  cdDemGhi(an);
+  cdApDung(an);
+  const st = $('cd-trangthai');
+  try {
+    const r = await fetch('/api/cai-dat/the', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ an }),
+    });
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    cdDemGhi(d.an || an);
+    if (st) st.textContent = 'Đã lưu.';
+  } catch (e) {
+    // Nói thẳng là CHƯA lưu được. Im lặng ở đây thì người dùng đổi máy là
+    // thấy lựa chọn "tự quay về cũ" mà không hiểu vì sao.
+    if (st) st.textContent = 'Chưa lưu được lên máy chủ — máy này vẫn nhớ, thử lại sau.';
+  }
+  if (st) setTimeout(() => { if (st) st.textContent = ''; }, 4000);
+}
+
+function cdDungBang() {
+  const l = $('cd-luoi');
+  if (!l) return;
+  l.innerHTML = Object.entries(CD_TEN).map(([k, ten]) =>
+    `<label class="cd-o"><input type="checkbox" data-cd="${k}"${
+      _cdAn.includes(k) ? '' : ' checked'}><span>${esc(ten)}</span></label>`).join('');
+  l.querySelectorAll('input[data-cd]').forEach(o => {
+    o.onchange = () => {
+      const an = [...l.querySelectorAll('input[data-cd]')]
+        .filter(x => !x.checked).map(x => x.dataset.cd);
+      cdLuu(an);
+    };
+  });
+}
+
+async function cdKhoiTao() {
+  // 1) Dựng ngay từ bộ nhớ đệm — không chớp.
+  cdApDung(cdDemDoc());
+
+  const mo = $('cd-mo'), than = $('cd-than');
+  if (mo && than) {
+    mo.onclick = () => {
+      const hien = than.hidden;
+      than.hidden = !hien;
+      mo.setAttribute('aria-expanded', String(hien));
+      if (hien) cdDungBang();
+    };
+  }
+  const rs = $('cd-reset');
+  if (rs) rs.onclick = () => { cdLuu([]); cdDungBang(); };
+
+  // 2) Đối chiếu với máy chủ. Máy chủ thắng.
+  try {
+    const d = await J('/api/cai-dat/the');
+    const an = Array.isArray(d.an) ? d.an.filter(k => k in CD_TEN) : [];
+    cdDemGhi(an);
+    cdApDung(an);
+    if (than && !than.hidden) cdDungBang();
+  } catch (e) {
+    /* mất mạng -> giữ nguyên bộ nhớ đệm, thẻ vẫn dùng được */
+  }
+}
+
+cdKhoiTao();
