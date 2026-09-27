@@ -604,17 +604,19 @@ def _check_lap_lai_alert():
 
         su_kien.sort(key=lambda x: (x['cach'], x['den']))
         dong = []
+        # P234: người dùng chỉ cần "bộ nào ra lại" + "các tổng đã ra kể từ lần
+        # trước". Bỏ dòng số kỳ (#188.572 → #188.578) và bỏ dòng "tổng của chính
+        # kỳ ra lại" — dòng đó thừa: tổng của 2-3-5 lúc nào cũng là 10.
+        # GIỮ cảnh báo thiếu kỳ: thiếu dữ liệu mà im lặng là để người đọc tưởng
+        # đã thấy đủ dãy tổng.
         for e in su_kien[:_LAPLAI_MAX_LIET_KE]:
             bo = '-'.join(e['combo'])
-            dong.append(
-                f"🔁 <b>{bo}</b> ra lại sau <b>{e['cach']} kỳ</b>\n"
-                f"#{e['tu']:,} → #{e['den']:,}".replace(',', '.'))
+            dong.append(f"🔁 <b>{bo}</b> ra lại sau <b>{e['cach']} kỳ</b>")
             if e['tong_giua']:
-                dong.append("Tổng các kỳ ở giữa: <b>"
+                dong.append("Tổng đã ra: <b>"
                             + " · ".join(str(t) for t in e['tong_giua']) + "</b>")
             else:
-                dong.append("Không có kỳ nào ở giữa (hai kỳ liền nhau).")
-            dong.append(f"Tổng của chính kỳ ra lại: <b>{e['tong_lap']}</b>")
+                dong.append("Ra lại ngay kỳ kế tiếp — chưa có tổng nào ra xen giữa.")
             if e['thieu_ky']:
                 dong.append("⚠️ Giữa chừng thiếu kỳ — dãy tổng trên CHƯA ĐỦ.")
             dong.append("")
@@ -624,8 +626,7 @@ def _check_lap_lai_alert():
         from telegram_bot import TelegramBot
         TelegramBot().send_message(
             "\n".join(dong).rstrip()
-            + f"\n\n<i>Báo khi bộ ra lại trong ≤ {_LAPLAI_ALERT_GAP} kỳ · "
-              f"{vn_now.strftime('%H:%M %d/%m/%Y')} VN</i>"
+            + f"\n\n<i>{vn_now.strftime('%H:%M %d/%m')}</i>"
         )
     except Exception:
         pass    # cảnh báo hỏng thì tuyệt đối không được làm chết vòng dự đoán
