@@ -1121,4 +1121,160 @@ async function cdKhoiTao() {
   }
 }
 
+// ── P233: phóng to / thu nhỏ ────────────────────────────────
+// Ba thứ người dùng yêu cầu, ba cơ chế riêng:
+//   1. cỡ chữ CẢ TRANG   -> zoom .wrap
+//   2. cỡ chữ BẢNG SỐ    -> zoom riêng các khung bảng (lồng trong (1))
+//   3. bật to TỪNG THẺ   -> phủ toàn màn hình, không lưu (là thao tác nhất thời)
+// (1) và (2) lưu lên máy chủ như cài đặt ẩn/hiện. (3) thì không: bật to một
+// thẻ rồi tắt máy, mở lại vẫn thấy dashboard bình thường mới đúng.
+const NAC = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+const PHONG_DEM_KEY = 'bingo18_phong';
+let _phong = { trang: 1, bang: 1 };
+
+function phongDoc() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PHONG_DEM_KEY) || '{}');
+    return { trang: NAC.includes(v.trang) ? v.trang : 1,
+             bang:  NAC.includes(v.bang)  ? v.bang  : 1 };
+  } catch (e) { return { trang: 1, bang: 1 }; }
+}
+function phongGhiDem(p) {
+  try { localStorage.setItem(PHONG_DEM_KEY, JSON.stringify(p)); } catch (e) {}
+}
+
+// @media không thấy zoom, nên tự tính bề ngang HIỆU DỤNG và gắn lớp hep-*.
+// Xem chú thích "điểm ngắt theo bề ngang hiệu dụng" trong dashboard.css.
+const HEP = [820, 640, 520, 420, 300];
+function capNhatHep() {
+  const w = window.innerWidth / (_phong.trang || 1);
+  const cl = document.documentElement.classList;
+  HEP.forEach(n => cl.toggle('hep-' + n, w <= n));
+}
+window.addEventListener('resize', capNhatHep);
+
+function phongApDung(p) {
+  _phong = p;
+  capNhatHep();
+  const r = document.documentElement.style;
+  r.setProperty('--ty-le-trang', String(p.trang));
+  r.setProperty('--ty-le-bang',  String(p.bang));
+  [['pt', 'trang'], ['pb', 'bang']].forEach(([tien, ten]) => {
+    const m = $(tien + '-muc');
+    if (m) m.textContent = Math.round(p[ten] * 100) + '%';
+    // Tắt nút ở hai đầu thang, để không bấm hoài mà chẳng thấy gì đổi.
+    const g = $(tien + '-giam'), t = $(tien + '-tang');
+    if (g) g.disabled = p[ten] <= NAC[0];
+    if (t) t.disabled = p[ten] >= NAC[NAC.length - 1];
+  });
+}
+
+async function phongDoi(ten, buoc) {
+  const i = NAC.indexOf(_phong[ten]);
+  const j = Math.max(0, Math.min(NAC.length - 1, (i < 0 ? NAC.indexOf(1) : i) + buoc));
+  const p = { ..._phong, [ten]: NAC[j] };
+  if (p[ten] === _phong[ten]) return;
+  phongGhiDem(p);
+  phongApDung(p);
+  const st = $('cd-trangthai');
+  try {
+    const r = await fetch('/api/cai-dat/the', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phong: { [ten]: NAC[j] } }),   // chỉ gửi cái vừa đổi
+    });
+    if (!r.ok) throw new Error(r.status);
+    if (st) st.textContent = 'Đã lưu.';
+  } catch (e) {
+    if (st) st.textContent = 'Chưa lưu được lên máy chủ — máy này vẫn nhớ, thử lại sau.';
+  }
+  if (st) setTimeout(() => { if (st) st.textContent = ''; }, 4000);
+}
+
+// ── Bật to từng thẻ ──
+function theToTat() {
+  const el = document.querySelector('.card.the-to');
+  if (!el) return false;
+  el.classList.remove('the-to');
+  document.body.classList.remove('co-the-to');
+  const n = el.querySelector('.the-to-nut');
+  if (n) { n.textContent = '⛶'; n.title = 'Bật to thẻ này'; n.setAttribute('aria-label', n.title); }
+  return true;
+}
+
+function theToGan() {
+  document.querySelectorAll('[data-the]').forEach(the => {
+    if (the.querySelector('.the-to-nut')) return;       // đã gắn rồi
+    const h = the.querySelector('h2');
+    if (!h) return;
+    // Bọc h2 lại để nút nằm cùng hàng với tiêu đề, không đè lên chữ.
+    const hang = document.createElement('div');
+    hang.className = 'the-dau';
+    h.parentNode.insertBefore(hang, h);
+    hang.appendChild(h);
+    const nut = document.createElement('button');
+    nut.type = 'button';
+    nut.className = 'the-to-nut';
+    nut.textContent = '⛶';
+    nut.title = 'Bật to thẻ này';
+    nut.setAttribute('aria-label', nut.title);
+    nut.onclick = () => {
+      const dang = the.classList.contains('the-to');
+      theToTat();                                        // chỉ một thẻ to mỗi lúc
+      if (!dang) {
+        the.classList.add('the-to');
+        document.body.classList.add('co-the-to');
+        nut.textContent = '✕';
+        nut.title = 'Đóng (Esc)';
+        nut.setAttribute('aria-label', nut.title);
+        the.scrollTop = 0;
+      }
+    };
+    hang.appendChild(nut);
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') theToTat();
+});
+
+async function cdKhoiTao() {
+  // 1) Dựng ngay từ bộ nhớ đệm — không chớp.
+  cdApDung(cdDemDoc());
+  phongApDung(phongDoc());
+  theToGan();
+
+  const mo = $('cd-mo'), than = $('cd-than');
+  if (mo && than) {
+    mo.onclick = () => {
+      const hien = than.hidden;
+      than.hidden = !hien;
+      mo.setAttribute('aria-expanded', String(hien));
+      if (hien) cdDungBang();
+    };
+  }
+  const rs = $('cd-reset');
+  if (rs) rs.onclick = () => { cdLuu([]); cdDungBang(); };
+  const noi = [['pt-giam', 'trang', -1], ['pt-tang', 'trang', +1],
+               ['pb-giam', 'bang',  -1], ['pb-tang', 'bang',  +1]];
+  noi.forEach(([id, ten, b]) => { const n = $(id); if (n) n.onclick = () => phongDoi(ten, b); });
+
+  // 2) Đối chiếu với máy chủ. Máy chủ thắng.
+  try {
+    const d = await J('/api/cai-dat/the');
+    const an = Array.isArray(d.an) ? d.an.filter(k => k in CD_TEN) : [];
+    cdDemGhi(an);
+    cdApDung(an);
+    if (d.phong) {
+      const p = { trang: NAC.includes(d.phong.trang) ? d.phong.trang : 1,
+                  bang:  NAC.includes(d.phong.bang)  ? d.phong.bang  : 1 };
+      phongGhiDem(p);
+      phongApDung(p);
+    }
+    if (than && !than.hidden) cdDungBang();
+  } catch (e) {
+    /* mất mạng -> giữ nguyên bộ nhớ đệm, thẻ vẫn dùng được */
+  }
+}
+
 cdKhoiTao();

@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p205">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p233">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -127,6 +127,22 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <div class="cd-than" id="cd-than" hidden>
       <p class="sub">Bỏ chọn để ẩn thẻ khỏi màn hình. Lựa chọn lưu trên máy chủ nên
         điện thoại và máy tính đều giống nhau, và không mất khi deploy lại.</p>
+      <div class="cd-phong">
+        <div class="cd-hang">
+          <span class="sub cd-nhan">Cỡ chữ cả trang</span>
+          <button type="button" class="cd-nut" id="pt-giam" aria-label="Thu nhỏ cả trang">A−</button>
+          <span class="cd-muc" id="pt-muc" role="status" aria-live="polite">100%</span>
+          <button type="button" class="cd-nut" id="pt-tang" aria-label="Phóng to cả trang">A+</button>
+        </div>
+        <div class="cd-hang">
+          <span class="sub cd-nhan">Cỡ chữ bảng số</span>
+          <button type="button" class="cd-nut" id="pb-giam" aria-label="Thu nhỏ bảng số">A−</button>
+          <span class="cd-muc" id="pb-muc" role="status" aria-live="polite">100%</span>
+          <button type="button" class="cd-nut" id="pb-tang" aria-label="Phóng to bảng số">A+</button>
+        </div>
+        <p class="sub">Cỡ bảng nhân thêm lên cỡ trang, nên đặt cả hai ở 125% là bảng to gấp ~1,56 lần.
+          Mỗi thẻ còn có nút ⛶ ở góc để bật to riêng thẻ đó ra toàn màn hình (bấm Esc để đóng).</p>
+      </div>
       <div class="cd-luoi" id="cd-luoi"></div>
       <p class="sub" id="cd-trangthai" role="status" aria-live="polite"></p>
       <button type="button" class="cd-reset" id="cd-reset">Hiện lại tất cả</button>
@@ -310,6 +326,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p205"></script>
+<script src="/static/js/dashboard.js?v=p233"></script>
 </body>
 </html>
