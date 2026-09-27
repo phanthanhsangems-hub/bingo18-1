@@ -3230,46 +3230,118 @@ def _doc_the_an():
         return []
 
 
+# ── P233: phóng to / thu nhỏ ─────────────────────────────────────────────
+# CSS của dashboard dùng 405 chỗ px và 0 chỗ rem, nên chỉnh font-size gốc
+# KHÔNG có tác dụng gì. Phải dùng CSS zoom (đã chuẩn hoá, Firefox 126+).
+# Nấc rời rạc chứ không phải số tuỳ ý: để người dùng không tự đưa mình vào
+# mức 3,7x rồi không bấm nổi nút thu nhỏ để quay lại.
+_NAC_PHONG    = (0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0)
+_PHONG_KEY    = {'trang': 'dashboard_phong_trang', 'bang': 'dashboard_phong_bang'}
+
+
+def _gan_nac(x):
+    """Về nấc gần nhất. Giá trị lạ -> 1.0 (cỡ thường), không bao giờ ném lỗi."""
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return 1.0
+    if v != v or v in (float('inf'), float('-inf')):   # NaN / vô cực
+        return 1.0
+    return min(_NAC_PHONG, key=lambda n: abs(n - v))
+
+
+def _doc_phong():
+    """Mức phóng đang lưu. Hỏng gì cũng trả 1.0 — thà cỡ thường còn hơn để
+    người dùng mở ra thấy chữ to gấp đôi mà không hiểu vì sao."""
+    ra = {'trang': 1.0, 'bang': 1.0}
+    try:
+        ph   = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            for ten, khoa in _PHONG_KEY.items():
+                cur.execute(
+                    f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                    (khoa,))
+                r = cur.fetchone()
+                if r and r[0]:
+                    ra[ten] = _gan_nac(r[0])
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return ra
+
+
 @app.route('/api/cai-dat/the')
 @limiter.limit("60 per minute")
 def cai_dat_the_doc():
-    """P232: thẻ nào đang ẩn. Nằm sau cổng đăng nhập như mọi endpoint khác."""
-    return jsonify({'tat_ca': list(_THE_DASHBOARD), 'an': _doc_the_an()})
+    """P232: thẻ nào đang ẩn. P233: kèm mức phóng.
+    Nằm sau cổng đăng nhập như mọi endpoint khác."""
+    return jsonify({'tat_ca': list(_THE_DASHBOARD), 'an': _doc_the_an(),
+                    'phong': _doc_phong(), 'nac': list(_NAC_PHONG)})
 
 
 @app.route('/api/cai-dat/the', methods=['POST'])
 @limiter.limit("60 per minute")
 def cai_dat_the_ghi():
-    """P232: lưu danh sách thẻ ẩn."""
+    """P232: lưu danh sách thẻ ẩn. P233: lưu cả mức phóng.
+
+    Nhận riêng lẻ: chỉ 'an', chỉ 'phong', hay cả hai đều được — giao diện
+    đổi mức phóng thì không phải gửi kèm cả danh sách thẻ (và ngược lại),
+    nên hai thứ không ghi đè lẫn nhau.
+    """
     try:
         du = request.get_json(silent=True) or {}
+        co_an, co_phong = 'an' in du, 'phong' in du
+        if not co_an and not co_phong:
+            return jsonify({'error': "can truong 'an' hoac 'phong'"}), 400
+
         xin = du.get('an')
-        if not isinstance(xin, list):
+        if co_an and not isinstance(xin, list):
             return jsonify({'error': "can truong 'an' la mang"}), 400
-        an = sorted({k for k in xin if isinstance(k, str) and k in _THE_DASHBOARD})
+        xp = du.get('phong')
+        if co_phong and not isinstance(xp, dict):
+            return jsonify({'error': "can truong 'phong' la doi tuong"}), 400
+
+        ra = {}
         conn = db.get_connection()
         try:
             cur = conn.cursor()
-            gt  = ','.join(an)
-            mo  = 'P232: cac the dashboard dang an'
-            if USE_POSTGRES:
-                cur.execute("""
-                    INSERT INTO system_config (config_key, config_value, description)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (config_key) DO UPDATE
-                      SET config_value = EXCLUDED.config_value,
-                          updated_at   = NOW()
-                """, (_THE_STATE_KEY, gt, mo))
-            else:
-                cur.execute(
-                    "INSERT OR REPLACE INTO system_config "
-                    "(config_key, config_value, description) VALUES (?,?,?)",
-                    (_THE_STATE_KEY, gt, mo))
+
+            def ghi(khoa, gt, mo):
+                if USE_POSTGRES:
+                    cur.execute("""
+                        INSERT INTO system_config (config_key, config_value, description)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (config_key) DO UPDATE
+                          SET config_value = EXCLUDED.config_value,
+                              updated_at   = NOW()
+                    """, (khoa, gt, mo))
+                else:
+                    cur.execute(
+                        "INSERT OR REPLACE INTO system_config "
+                        "(config_key, config_value, description) VALUES (?,?,?)",
+                        (khoa, gt, mo))
+
+            if co_an:
+                an = sorted({k for k in xin
+                             if isinstance(k, str) and k in _THE_DASHBOARD})
+                ghi(_THE_STATE_KEY, ','.join(an), 'P232: cac the dashboard dang an')
+                ra['an']     = an
+                ra['bo_qua'] = sorted(set(map(str, xin)) - set(an))
+            if co_phong:
+                p = {}
+                for ten, khoa in _PHONG_KEY.items():
+                    if ten in xp:
+                        p[ten] = _gan_nac(xp[ten])
+                        ghi(khoa, str(p[ten]), f'P233: muc phong {ten}')
+                ra['phong'] = p
             conn.commit()
         finally:
             conn.close()
-        # Trả lại đúng cái đã lưu, để giao diện biết khoá nào bị loại.
-        return jsonify({'an': an, 'bo_qua': sorted(set(map(str, xin)) - set(an))})
+        # Trả lại đúng cái đã lưu, để giao diện biết cái gì bị loại/nắn lại.
+        return jsonify(ra)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

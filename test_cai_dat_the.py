@@ -154,6 +154,73 @@ kiem("khong vao _CRON_PATHS",
 kiem("co gioi han toc do", "@limiter.limit(\"60 per minute\")" in APP)
 kiem("co danh sach trang trong app.py", '_THE_DASHBOARD' in APP)
 
+print("\n=== 7. PHONG TO / THU NHO (P233) ===")
+kiem("nac tu 80% den 200%", A._NAC_PHONG[0] == 0.8 and A._NAC_PHONG[-1] == 2.0)
+kiem("1.0 nam trong thang", 1.0 in A._NAC_PHONG)
+for vao, ra in [(1.25, 1.25), (1.3, 1.25), (0.1, 0.8), (99, 2.0), ('1.5', 1.5),
+                ('abc', 1.0), (None, 1.0), (float('nan'), 1.0),
+                (float('inf'), 1.0), (-5, 0.8)]:
+    kiem(f"_gan_nac({vao!r}) = {ra}", A._gan_nac(vao) == ra, str(A._gan_nac(vao)))
+
+def doc_phong(bang):
+    """bang: {config_key: value} gia lap system_config."""
+    class C:
+        def execute(s, q, *a): s.k = a[0][0] if a and a[0] else None
+        def fetchone(s): v = bang.get(s.k); return None if v is None else (v,)
+        def close(s): pass
+    class K:
+        def cursor(s): return C()
+        def close(s): pass
+    with mock.patch.object(A.db, 'get_connection', return_value=K()):
+        return A.app.test_client().get('/api/cai-dat/the').get_json()
+
+d = doc_phong({})
+kiem("chua luu gi -> ca hai 1.0", d['phong'] == {'trang': 1.0, 'bang': 1.0}, str(d['phong']))
+kiem("tra ve danh sach nac cho giao dien", d['nac'] == list(A._NAC_PHONG))
+d = doc_phong({'dashboard_phong_trang': '1.5', 'dashboard_phong_bang': '1.25'})
+kiem("doc dung muc da luu", d['phong'] == {'trang': 1.5, 'bang': 1.25}, str(d['phong']))
+d = doc_phong({'dashboard_phong_trang': '9999'})
+kiem("gia tri la trong DB -> nan ve nac gan nhat", d['phong']['trang'] == 2.0)
+d = doc_phong({'dashboard_phong_trang': 'rac'})
+kiem("rac trong DB -> 1.0, khong chet", d['phong']['trang'] == 1.0)
+with mock.patch.object(A.db, 'get_connection', side_effect=RuntimeError('DB die')):
+    d = A.app.test_client().get('/api/cai-dat/the').get_json()
+kiem("DB chet -> 1.0 (co thuong, khong phong bua)",
+     d['phong'] == {'trang': 1.0, 'bang': 1.0})
+
+r, luu = ghi({'phong': {'trang': 1.5}})
+kiem("ghi RIENG phong (khong gui 'an') -> 200", r.status_code == 200, str(r.status_code))
+kiem("tra lai muc da luu", r.get_json().get('phong') == {'trang': 1.5})
+kiem("KHONG dung toi danh sach the an", 'an' not in r.get_json())
+r, _ = ghi({'phong': {'trang': 7, 'bang': 'x'}})
+kiem("muc la -> nan lai (7->2.0, 'x'->1.0)",
+     r.get_json()['phong'] == {'trang': 2.0, 'bang': 1.0}, str(r.get_json()))
+r, _ = ghi({'phong': {'rac': 1.5}})
+kiem("khoa la trong phong -> bo qua", r.get_json()['phong'] == {})
+r, _ = ghi({'phong': [1, 2]})
+kiem("phong khong phai doi tuong -> 400", r.status_code == 400)
+r, _ = ghi({'an': ['luoi'], 'phong': {'bang': 1.25}})
+kiem("gui ca hai cung luc -> luu ca hai",
+     r.get_json().get('an') == ['luoi'] and r.get_json().get('phong') == {'bang': 1.25})
+
+kiem("html: nut A-/A+ cho ca trang", 'id="pt-giam"' in HTML and 'id="pt-tang"' in HTML)
+kiem("html: nut A-/A+ cho bang", 'id="pb-giam"' in HTML and 'id="pb-tang"' in HTML)
+kiem("html: muc hien thi co aria-live", 'id="pt-muc" role="status" aria-live' in HTML)
+kiem("css: zoom .wrap chu KHONG zoom body (topbar sticky)",
+     '.wrap { zoom: var(--ty-le-trang); }' in CSS and 'body { zoom' not in CSS)
+kiem("css: bang zoom rieng", 'zoom: var(--ty-le-bang)' in CSS)
+kiem("css: diem ngat theo be ngang hieu dung (hep-*)", 'html.hep-640' in CSS)
+kiem("css: .cd-luoi co duoc (min(240px,100%))", 'minmax(min(240px, 100%), 1fr)' in CSS)
+kiem("css: .tiles co duoc (minmax(0,1fr))", 'repeat(4,minmax(0,1fr))' in CSS)
+kiem("js: tinh be ngang HIEU DUNG = innerWidth / muc phong",
+     'window.innerWidth / (_phong.trang' in JS)
+kiem("js: gan nut ⛶ cho moi the", 'the-to-nut' in JS and "querySelectorAll('[data-the]')" in JS)
+kiem("js: Esc dong the dang to", "e.key === 'Escape'" in JS)
+kiem("js: chi gui muc vua doi, khong gui ca danh sach the",
+     "phong: { [ten]: NAC[j] }" in JS)
+kiem("js: bat to the KHONG luu (thao tac nhat thoi)",
+     'the-to' not in JS.split('async function phongDoi')[1].split('// ── Bật to từng thẻ')[0])
+
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
