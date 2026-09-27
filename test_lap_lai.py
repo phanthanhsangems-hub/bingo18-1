@@ -20,7 +20,7 @@ def kiem(ten, dk, ct=''):
     if dk: DAT += 1; print(f"  DAT  {ten}")
     else:  HONG += 1; print(f"  HONG {ten}" + (f"  -> {ct}" if ct else ''))
 
-def goi(ky, n=None):
+def goi(ky, n=None, combo=None):
     class C:
         def execute(s, q, *a): s.a = a[0] if a else ()
         def fetchall(s):
@@ -31,7 +31,10 @@ def goi(ky, n=None):
         def cursor(s): return C()
         def close(s): pass
     with mock.patch.object(A.db, 'get_connection', return_value=K()):
-        q = '/api/lap-lai' + (f'?n={n}' if n is not None else '')
+        qs = []
+        if n is not None:     qs.append(f'n={n}')
+        if combo is not None: qs.append(f'combo={combo}')
+        q = '/api/lap-lai' + ('?' + '&'.join(qs) if qs else '')
         return A.app.test_client().get(q).get_json()
 
 print("=== 1. CANH DUNG NHU VI DU NGUOI DUNG NEU ===")
@@ -126,7 +129,62 @@ print("\n=== 7. DA DANG KY VAO BO QUET ===")
 ds = open('scripts/endpoints_readonly.txt', encoding='utf-8').read().splitlines()
 kiem("/api/lap-lai co trong danh sach quet", '/api/lap-lai' in ds)
 
-print("\n=== 8. GIAO DIEN ===")
+print("\n=== 8. LOC THEO MOT BO (P230) ===")
+ky_l = [
+    (7000,[1,2,3]), (7001,[4,5,6]), (7002,[1,2,3]),   # 123 lap, cach 2
+    (7003,[3,3,3]), (7004,[4,5,6]), (7005,[1,1,2]),   # 456 lap, cach 3
+]
+j_all = goi(ky_l)
+kiem("khong loc -> 2 cap (123 va 456)", j_all['so_cap'] == 2, str(j_all['so_cap']))
+kiem("khong loc -> combo = None", j_all.get('combo') is None, str(j_all.get('combo')))
+kiem("khong loc -> so_bo_lap = 2", j_all['so_bo_lap'] == 2, str(j_all['so_bo_lap']))
+
+j_l = goi(ky_l, combo='123')
+kiem("loc 123 -> chi 1 cap", j_l['so_cap'] == 1, str(j_l['so_cap']))
+kiem("loc 123 -> dung bo do", all(c['combo'] == '123' for c in j_l['cap']),
+     str([c['combo'] for c in j_l['cap']]))
+kiem("loc 123 -> tra ve combo='123'", j_l.get('combo') == '123', str(j_l.get('combo')))
+kiem("loc 123 -> so_bo_lap = 1 (KHONG phai 2)", j_l['so_bo_lap'] == 1,
+     str(j_l['so_bo_lap']))
+# Day tong GOM CA ky ra lai (o cuoi, giao dien vien lai). #7001 tong 15,
+# #7002 tong 6 (chinh la 1-2-3 ra lai). Lan dau toi viet [15] va quen mat
+# quy uoc do chinh tay minh dat.
+kiem("loc 123 -> tong giua = [15, 6] (o cuoi la chinh ky ra lai)",
+     j_l['cap'][0]['tong_giua'] == [15, 6], str(j_l['cap'][0]['tong_giua']))
+kiem("  o cuoi = tong cua bo do (1+2+3 = 6)",
+     j_l['cap'][0]['tong_giua'][-1] == 6)
+
+j_k = goi(ky_l, combo='666')
+kiem("loc bo khong ra lai -> 0 cap", j_k['so_cap'] == 0, str(j_k['so_cap']))
+kiem("  van tra ve combo='666'", j_k.get('combo') == '666', str(j_k.get('combo')))
+kiem("  so_bo_lap = 0", j_k['so_bo_lap'] == 0, str(j_k['so_bo_lap']))
+
+for dv in ('1-2-3', '1,2,3', '123'):
+    kiem(f"nhan dinh dang {dv!r}", goi(ky_l, combo=dv).get('combo') == '123')
+for dv in ('abc', '999', '12', '', '0'):
+    jj = goi(ky_l, combo=dv)
+    kiem(f"combo={dv!r} xau -> khong loc, khong chet",
+         jj.get('combo') is None and jj['so_cap'] == 2, str(jj.get('combo')))
+
+print("\n=== 9. THE CU DA GO HAN ===")
+for f in ('templates/dashboard.html', 'static/js/dashboard.js',
+          'static/css/dashboard.css', 'scripts/endpoints_readonly.txt'):
+    t = open(f, encoding='utf-8').read()
+    kiem(f"{f}: khong con dau vet 'theo-sau'",
+         'theo-sau' not in t and 'ts-body' not in t and 'loadTheoSau' not in t)
+ap = open('app.py', encoding='utf-8').read()
+for ten in ("@app.route('/api/theo-sau')", "_SO_CACH_BO", "_p_chi2",
+            "_theo_sau_cua_so", "'theo_sau':"):
+    kiem(f"app.py: da go {ten}", ten not in ap)
+kiem("NHUNG /api/lap-lai VAN CON (lan dau toi cat nham ca no)",
+     "@app.route('/api/lap-lai')" in ap)
+kiem("va /api/pair-stats van con", "@app.route('/api/pair-stats')" in ap)
+kiem("CSS .sel duoc GIU (the 'ra lai' dung)",
+     '.sel {' in open('static/css/dashboard.css', encoding='utf-8').read())
+import os
+kiem("test_theo_sau.py da xoa", not os.path.exists('test_theo_sau.py'))
+
+print("\n=== 10. GIAO DIEN ===")
 html = open('templates/dashboard.html', encoding='utf-8').read()
 js   = open('static/js/dashboard.js',   encoding='utf-8').read()
 css  = open('static/css/dashboard.css', encoding='utf-8').read()
@@ -142,6 +200,10 @@ kiem("chu thich noi ro ~39/56 bo ra lai la BINH THUONG", '~39 trong 56' in js)
 kiem("chu thich neu muc TB cua tung loai bo", '36 kỳ' in js and '216 kỳ' in js)
 kiem("duoc goi trong vong tai", 'loadLapLai()' in js)
 kiem("CSS co .ll-t", '.ll-t {' in css)
+kiem("the co o chon bo", 'id="ll-bo"' in html)
+kiem("co muc 'tat ca bo'", 'tất cả bộ' in html)
+kiem("JS gui tham so combo", '&combo=' in js)
+kiem("JS dung ghi 'x/56' khi dang loc mot bo", 'd.combo' in js and '/56' in js)
 
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")

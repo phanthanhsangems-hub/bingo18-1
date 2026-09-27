@@ -95,7 +95,6 @@
 /api/sum-distribution
 /api/sum-rolling
 /api/lap-lai
-/api/theo-sau
 /api/pair-stats
 /api/sum-stats
 /api/sum-today
