@@ -685,6 +685,69 @@ async function loadTripleStats(d) {
   loadChuoiKhoangCachTrip(d.triples || []);
 }
 
+// ── P229: bộ ra lại trong n kỳ, sau đó đã ra tổng nào ───────
+// Người dùng phải sửa tôi hai lần mới ra đúng cái này, nên ghi rõ:
+//   trigger = một bộ LẶP LẠI trong cửa sổ (không phải tra cứu từng bộ)
+//   nội dung = TỔNG 3..18 (không phải bộ số)
+//   phạm vi  = n kỳ gần nhất (không phải toàn bộ lịch sử)
+//
+// "Lặp lại" KHÔNG hiếm: trong 160 kỳ có ~39 trong 56 bộ ra lại (70%), tổng
+// ~110 lần. Nên xếp khoảng cách ngắn nhất lên đầu và nói thẳng con số đó
+// trong chú thích — nếu không người đọc sẽ tưởng mỗi dòng là một phát hiện.
+let _llDangTai = false;
+async function loadLapLai() {
+  if (_llDangTai) return;
+  _llDangTai = true;
+  try {
+    const ws = $('ll-ws');
+    const n  = ws ? (ws.value || '160') : '160';
+    const d  = await J(`/api/lap-lai?n=${encodeURIComponent(n)}`);
+    if (!d || !d.cap) return;
+    const fmt = v => v == null ? '—' : v.toLocaleString('vi-VN');
+
+    if (ws && !ws.dataset.noi) {
+      ws.dataset.noi = '1';
+      ws.onchange = () => loadLapLai();
+    }
+
+    const cls = t => t <= 9 ? 'nho' : (t <= 11 ? 'hoa' : 'lon');
+    const oTong = (ds) => `<div class="ll-tong">` + ds.map((t, i) =>
+      // Ô CUỐI chính là kỳ ra lại — viền để người đọc không đếm nhầm nó
+      // thành một tổng "ở giữa".
+      `<span class="ll-t ${cls(t)}${i === ds.length - 1 ? ' dich' : ''}">${t}</span>`
+    ).join('') + `</div>`;
+
+    $('ll-body').innerHTML = d.cap.length
+      ? d.cap.map(c => `<tr>
+          <td>${miniDice(c.combo.split('').map(Number))}</td>
+          <td class="num ta-r"><b>${fmt(c.cach)}</b></td>
+          <td class="num">#${fmt(c.tu)} → #${fmt(c.den)}</td>
+          <td>${oTong(c.tong_giua)}${c.thieu_ky
+              ? `<div class="ll-thieu">⚠ khoảng này thiếu kỳ — dãy tổng chưa đủ</div>`
+              : ''}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="4">Không bộ nào ra lại trong phạm vi này.</td></tr>`;
+
+    $('ll-sub').innerHTML =
+      `<b class="num">${fmt(d.so_bo_lap)}</b>/56 bộ đã ra lại, `
+      + `tổng <b class="num">${fmt(d.so_cap)}</b> lần, `
+      + `trong ${fmt(d.draws)} kỳ (#${fmt(d.draw_min)} → #${fmt(d.draw_max)})`
+      + (d.so_cap > d.cap.length ? ` · hiện ${d.cap.length} lần gần khít nhất` : '');
+
+    $('ll-note').textContent =
+      'Ô cuối mỗi dãy có viền chính là kỳ bộ đó ra lại. Màu: xanh = NHO (3-9), '
+      + 'vàng = HOA (10-11), đỏ = LON (12-18). '
+      + 'Lưu ý về mức bình thường: trong 160 kỳ thì trung bình đã có ~39 trong 56 bộ '
+      + 'ra lại, tức ~70%. Một bộ 3 số khác nhau trung bình 36 kỳ ra một lần, bộ có đôi '
+      + '72 kỳ, bộ ba 216 kỳ — nên "ra lại" tự nó chưa nói lên điều gì; '
+      + 'chỉ khoảng cách NGẮN BẤT THƯỜNG so với các mức đó mới đáng nhìn.';
+  } catch (e) {
+    /* im lặng — thẻ khác vẫn phải chạy */
+  } finally {
+    _llDangTai = false;
+  }
+}
+
 // ── P227: bộ nào hay ra NGAY SAU bộ này ─────────────────────
 // Bảng này dễ bị đọc sai nhất trong cả dashboard, nên nó KHÔNG chỉ có cột
 // "số lần". Kỳ quay độc lập, vậy mà trên dữ liệu ngẫu nhiên thuần bộ đứng
@@ -1058,6 +1121,7 @@ function loadBangLichSu() {
     // đang tự chọn một bộ khác để xem thì đừng giật nó về kỳ mới nhất.
     const _sel = $('ts-chon');
     safe(() => loadTheoSau(_sel && _sel.value ? _sel.value : ''));
+    safe(() => loadLapLai());
   });
 }
 

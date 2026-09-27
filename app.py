@@ -3090,6 +3090,90 @@ def _p_chi2(chi2: float, df: int) -> float:
     return 0.5 * _m.erfc(z / _m.sqrt(2))
 
 
+@app.route('/api/lap-lai')
+@limiter.limit("30 per minute")
+def lap_lai_stats():
+    """P229: trong n kỳ gần nhất, bộ nào RA LẠI, và sau nó đã ra những TỔNG nào.
+
+    Khác /api/theo-sau ở hai chỗ, và chính hai chỗ đó là điều người dùng cần:
+      - trigger là một bộ LẶP LẠI trong cửa sổ, không phải tra cứu từng bộ
+      - nội dung là TỔNG (3..18) của các kỳ nằm giữa, không phải bộ số
+
+    "Lặp lại" KHÔNG hiếm: trong 160 kỳ có ~39 trong 56 bộ ra lại (70%), tổng
+    ~110 lần lặp. Nên sắp xếp theo khoảng cách NGẮN NHẤT trước — 235 ra lại
+    sau 3 kỳ mới đáng nhìn, còn ra lại sau 90 kỳ thì đúng bằng mức bình
+    thường (một bộ 3 số khác nhau trung bình 36 kỳ một lần).
+
+    Cờ 'thieu_ky': nếu khoảng giữa hai lần có kỳ bị thiếu thì danh sách tổng
+    KHÔNG đầy đủ. Dữ liệu từng thủng 11 kỳ hồi 22/09; im lặng ở đây là để
+    người đọc tưởng đã thấy hết.
+    """
+    import ast as _a
+    try:
+        try:
+            n = max(10, min(int(request.args.get('n', 160)), 5000))
+        except ValueError:
+            n = 160
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT draw_number, numbers FROM draw_history "
+                f"WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT {ph}",
+                (n,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        ky = []
+        for dn, raw in sorted(rows, key=lambda r: r[0]):     # cũ -> mới
+            try:
+                ns = [int(x) for x in (raw if isinstance(raw, list)
+                                       else _a.literal_eval(raw))]
+            except Exception:
+                continue
+            ky.append((int(dn), tuple(sorted(ns)), sum(ns)))
+
+        if len(ky) < 2:
+            return jsonify({'look_back': n, 'draws': len(ky), 'cap': [],
+                            'so_bo_lap': 0})
+
+        co = {d for d, _, _ in ky}
+        vi_tri: dict = {}
+        for i, (dn, bo, _) in enumerate(ky):
+            vi_tri.setdefault(bo, []).append(i)
+
+        cap = []
+        for bo, ids in vi_tri.items():
+            for a, b in zip(ids, ids[1:]):          # hai lần ra liền nhau
+                dn_a, dn_b = ky[a][0], ky[b][0]
+                giua = ky[a + 1:b + 1]              # sau lần đầu, tới lần lặp
+                cap.append({
+                    'combo':     ''.join(map(str, bo)),
+                    'tu':        dn_a,
+                    'den':       dn_b,
+                    'cach':      dn_b - dn_a,
+                    'tong_giua': [t for _, _, t in giua],
+                    # Khoảng cách theo SỐ KỲ phải khớp số kỳ thật sự có; lệch
+                    # nghĩa là giữa chừng thiếu kỳ và danh sách tổng bị hụt.
+                    'thieu_ky':  (dn_b - dn_a) != (b - a),
+                })
+        cap.sort(key=lambda x: (x['cach'], x['combo']))
+
+        return jsonify({
+            'look_back':  n,
+            'draws':      len(ky),
+            'draw_min':   ky[0][0],
+            'draw_max':   ky[-1][0],
+            'so_bo_lap':  sum(1 for v in vi_tri.values() if len(v) >= 2),
+            'so_cap':     len(cap),
+            'cap':        cap[:60],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/theo-sau')
 @limiter.limit("30 per minute")
 def theo_sau_stats():
