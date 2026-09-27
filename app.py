@@ -136,6 +136,30 @@ _SYNC_LAG_THRESHOLD_MIN    = 15    # alert nếu lag > 15 phút trong giờ game
 _GAP_ALERT_COOLDOWN_SEC = 1800   # nhắc lại tối đa 30 phút/lần nếu lỗ hổng chưa đổi
 _GAP_ALERT_WINDOW       = 300    # soi 300 kỳ gần nhất (~1,9 ngày)
 
+# ── P231: báo Telegram khi một BỘ RA LẠI trong khoảng cách ngắn ───────────
+# Thay cho thẻ "Bộ ra lại" trên dashboard (người dùng cho gỡ, chỉ giữ API).
+#
+# NGƯỠNG NÀY QUYẾT ĐỊNH ĐIỆN THOẠI KÊU BAO NHIÊU LẦN. Đo bằng mô phỏng
+# 2.000.000 kỳ độc lập (khớp lý thuyết Σp² = 996/46656 = 2,1348%):
+#       cách ≤ 1  →  2,15% số kỳ  →   3,4 tin/ngày
+#       cách ≤ 2  →  4,24%        →   6,8
+#       cách ≤ 3  →  6,27%        →  10,0
+#       cách ≤ 5  → 10,18%        →  16,3
+#       cách ≤ 10 → 19,16%        →  30,6   ← đang dùng
+#       mọi lần   → 93,63%        → ~150    (vô dụng: gần như kỳ nào cũng bắn)
+# Tôi đã khuyến nghị mức ≤ 3 và nói rõ ≤ 10 là quá rộng; người dùng chọn
+# ≤ 10 nên để ≤ 10. Đổi một số ở đây là đổi được ngưỡng, không cần sửa gì khác.
+_LAPLAI_ALERT_GAP     = 10
+# Sau khi app nguội máy lâu, đừng bù cả trăm kỳ rồi bắn một tràng tin. Chỉ
+# xét tối đa ngần này kỳ mới; cũ hơn thì bỏ qua im lặng.
+_LAPLAI_MAX_CATCHUP   = 40
+_LAPLAI_MAX_LIET_KE   = 8        # mỗi tin liệt kê tối đa 8 sự kiện
+# Mốc "đã xét tới kỳ nào" nằm trong system_config chứ KHÔNG phải biến RAM:
+# Cloud Run co về 0 instance, biến RAM mất sau mỗi lần nguội máy, mà
+# /api/predict thì 6 phút một lần — để trong RAM là cảnh báo gần như không
+# bao giờ bắn.
+_LAPLAI_STATE_KEY     = 'lap_lai_last_draw'
+
 # ── Size bias alert ───────────────────────────────────────────
 _last_bias_alert_ts: float = 0.0
 _BIAS_ALERT_COOLDOWN_SEC   = 7200  # max 1 alert/2 hours
@@ -436,6 +460,172 @@ def _check_draw_gap_alert():
             f"Bảng tổng và bảng trip đang tính SAI cho tới khi bù xong.\n"
             f"Chạy trên máy: <code>python sync_to_supabase.py --mode gaps</code>\n"
             f"Time: {vn_now.strftime('%H:%M %d/%m/%Y')} VN"
+        )
+    except Exception:
+        pass    # cảnh báo hỏng thì tuyệt đối không được làm chết vòng dự đoán
+
+
+def _laplai_doc_moc(cur):
+    """Đọc mốc 'đã xét tới kỳ nào' từ system_config. None = chưa từng chạy."""
+    ph = '%s' if USE_POSTGRES else '?'
+    cur.execute(
+        f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+        (_LAPLAI_STATE_KEY,))
+    r = cur.fetchone()
+    if not r or r[0] in (None, ''):
+        return None
+    try:
+        return int(r[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _laplai_ghi_moc(cur, dn: int):
+    """Ghi mốc. Upsert khác cú pháp giữa Postgres và SQLite nên tách hai nhánh."""
+    if USE_POSTGRES:
+        cur.execute("""
+            INSERT INTO system_config (config_key, config_value, description)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (config_key) DO UPDATE
+              SET config_value = EXCLUDED.config_value,
+                  updated_at   = NOW()
+        """, (_LAPLAI_STATE_KEY, str(dn), 'P231: ky cuoi da xet canh bao bo ra lai'))
+    else:
+        cur.execute(
+            "INSERT OR REPLACE INTO system_config "
+            "(config_key, config_value, description) VALUES (?,?,?)",
+            (_LAPLAI_STATE_KEY, str(dn), 'P231: ky cuoi da xet canh bao bo ra lai'))
+
+
+def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None) -> list:
+    """Các kỳ MỚI (draw_number > moc) mà bộ của nó đã ra trong 'gap' kỳ liền trước.
+
+    'ky' là list (draw_number, bo_sorted, tong) xếp CŨ -> MỚI.
+
+    Khoảng cách đo bằng HIỆU SỐ KỲ chứ không phải vị trí trong mảng: dữ liệu
+    có thể thủng (tháng 9 từng mất 11 kỳ liền), và "ra lại sau 3 kỳ" phải là
+    3 kỳ thật chứ không phải 3 dòng còn sót lại trong bảng.
+
+    'tong_giua' KHÔNG gồm kỳ ra lại — đó là chỗ tôi tự viết sai test ở P230
+    (viết [15] trong khi đúng là [15, 6] theo quy ước cũ của /api/lap-lai).
+    Lần này tách hẳn hai trường 'tong_giua' và 'tong_lap' để không ai — kể cả
+    tôi — phải đoán xem kỳ ra lại có nằm trong mảng hay không.
+    """
+    if gap is None:
+        gap = _LAPLAI_ALERT_GAP
+    theo_dn = {d: (b, t) for d, b, t in ky}
+    ra = []
+    for dn, bo, tong in ky:
+        if dn <= moc:
+            continue
+        for g in range(1, gap + 1):
+            truoc = theo_dn.get(dn - g)
+            if truoc is None:
+                continue            # kỳ đó thiếu trong DB -> không kết luận được
+            if truoc[0] != bo:
+                continue
+            giua = [(dn - g + k) for k in range(1, g)]
+            ra.append({
+                'combo':     ''.join(map(str, bo)),
+                'tu':        dn - g,
+                'den':       dn,
+                'cach':      g,
+                'tong_giua': [theo_dn[m][1] for m in giua if m in theo_dn],
+                'tong_lap':  tong,
+                # Thiếu kỳ ở giữa -> dãy tổng hụt. Im lặng chỗ này là để
+                # người đọc tưởng đã thấy đủ.
+                'thieu_ky':  any(m not in theo_dn for m in giua),
+            })
+            break                   # chỉ lấy lần ra lại GẦN NHẤT
+    return ra
+
+
+def _check_lap_lai_alert():
+    """P231: báo Telegram khi một bộ RA LẠI trong <= _LAPLAI_ALERT_GAP kỳ.
+
+    Thay cho thẻ "Bộ ra lại" trên dashboard. Khác thẻ đó ở một điểm quan
+    trọng: thẻ xếp khoảng cách ngắn lên đầu rồi CẮT còn 60 dòng, nên đọc
+    được dù có ~110 lần lặp trong 160 kỳ. Telegram không cắt được như vậy —
+    nên ở đây ngưỡng khoảng cách mới là thứ giữ cho tin nhắn còn đáng đọc.
+    Xem bảng tần suất ở _LAPLAI_ALERT_GAP.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        vn_now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+        if vn_now.hour < 6 or vn_now.hour >= 22:
+            return
+
+        import ast as _a
+        ph   = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            moc = _laplai_doc_moc(cur)
+            # Cần đủ kỳ để vừa bù được _LAPLAI_MAX_CATCHUP kỳ mới, vừa nhìn
+            # ngược _LAPLAI_ALERT_GAP kỳ cho kỳ mới nhất trong số đó.
+            lay = _LAPLAI_MAX_CATCHUP + _LAPLAI_ALERT_GAP + 5
+            cur.execute(
+                f"SELECT draw_number, numbers FROM draw_history "
+                f"WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT {ph}",
+                (lay,))
+            rows = cur.fetchall()
+
+            ky = []
+            for dn, raw in sorted(rows, key=lambda r: r[0]):     # cũ -> mới
+                try:
+                    ns = [int(x) for x in (raw if isinstance(raw, list)
+                                           else _a.literal_eval(raw))]
+                except Exception:
+                    continue
+                ky.append((int(dn), tuple(sorted(ns)), sum(ns)))
+            if len(ky) < 2:
+                return
+            moi_nhat = ky[-1][0]
+
+            # Lần đầu chạy (hoặc mất state): CHỐT MỐC, KHÔNG BẮN TIN. Nếu không,
+            # lần deploy đầu tiên sẽ bù cả cửa sổ và bắn một tràng.
+            if moc is None:
+                _laplai_ghi_moc(cur, moi_nhat)
+                conn.commit()
+                return
+            if moi_nhat <= moc:
+                return              # chưa có kỳ mới
+            # Nguội máy lâu -> bỏ qua phần quá cũ, đừng bù một tràng.
+            moc = max(moc, moi_nhat - _LAPLAI_MAX_CATCHUP)
+
+            su_kien = _tim_bo_ra_lai(ky, moc)
+            _laplai_ghi_moc(cur, moi_nhat)
+            conn.commit()
+        finally:
+            conn.close()
+
+        if not su_kien:
+            return
+
+        su_kien.sort(key=lambda x: (x['cach'], x['den']))
+        dong = []
+        for e in su_kien[:_LAPLAI_MAX_LIET_KE]:
+            bo = '-'.join(e['combo'])
+            dong.append(
+                f"🔁 <b>{bo}</b> ra lại sau <b>{e['cach']} kỳ</b>\n"
+                f"#{e['tu']:,} → #{e['den']:,}".replace(',', '.'))
+            if e['tong_giua']:
+                dong.append("Tổng các kỳ ở giữa: <b>"
+                            + " · ".join(str(t) for t in e['tong_giua']) + "</b>")
+            else:
+                dong.append("Không có kỳ nào ở giữa (hai kỳ liền nhau).")
+            dong.append(f"Tổng của chính kỳ ra lại: <b>{e['tong_lap']}</b>")
+            if e['thieu_ky']:
+                dong.append("⚠️ Giữa chừng thiếu kỳ — dãy tổng trên CHƯA ĐỦ.")
+            dong.append("")
+        if len(su_kien) > _LAPLAI_MAX_LIET_KE:
+            dong.append(f"(+{len(su_kien) - _LAPLAI_MAX_LIET_KE} lần nữa)")
+
+        from telegram_bot import TelegramBot
+        TelegramBot().send_message(
+            "\n".join(dong).rstrip()
+            + f"\n\n<i>Báo khi bộ ra lại trong ≤ {_LAPLAI_ALERT_GAP} kỳ · "
+              f"{vn_now.strftime('%H:%M %d/%m/%Y')} VN</i>"
         )
     except Exception:
         pass    # cảnh báo hỏng thì tuyệt đối không được làm chết vòng dự đoán
@@ -1031,6 +1221,7 @@ def auto_predict_cron():
         result = run_prediction_cycle()
         _check_sync_lag()
         _check_draw_gap_alert()
+        _check_lap_lai_alert()
         _check_lon_excess_alert(result)
         _check_checkpoint_alert(result.get('draw_number', 0))
         _check_triple_drought_alert()

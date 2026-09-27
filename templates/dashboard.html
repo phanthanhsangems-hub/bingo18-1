@@ -208,37 +208,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <p class="sub" id="dd-note"></p>
   </div>
 
-  <!-- ═══ BỘ RA LẠI TRONG n KỲ → SAU ĐÓ RA TỔNG NÀO (P229) ═══ -->
-  <div class="card" style="margin-top:16px">
-    <h2>Bộ ra lại — sau đó đã ra tổng nào</h2>
-    <p class="sub">Trong cửa sổ đang chọn, bộ nào ra rồi <b>ra lại</b>, và giữa hai lần đó đã ra những <b>tổng</b> nào. Xếp <b>khoảng cách ngắn nhất lên đầu</b>.</p>
-    <div style="margin:10px 0">
-      <label for="ll-bo" class="sub">Bộ:</label>
-      <select id="ll-bo" class="sel"><option value="">tất cả bộ</option></select>
-      <label for="ll-ws" class="sub" style="margin-left:12px">Trong:</label>
-      <select id="ll-ws" class="sel">
-        <option value="160" selected>160 kỳ</option>
-        <option value="100">100 kỳ</option>
-        <option value="300">300 kỳ</option>
-        <option value="500">500 kỳ</option>
-        <option value="1000">1.000 kỳ</option>
-      </select>
-    </div>
-    <p class="sub" id="ll-sub"><span class="skeleton">Đang tải...</span></p>
-    <div class="tbl-scroll">
-      <table class="log-table" id="ll-table">
-        <thead><tr>
-          <th>Bộ</th>
-          <th class="ta-r"><span class="lbl-lg">Cách mấy kỳ</span><span class="lbl-sm">Cách</span></th>
-          <th>Từ → đến</th>
-          <th>Các tổng đã ra sau đó</th>
-        </tr></thead>
-        <tbody id="ll-body"><tr><td colspan="4" class="skeleton">Đang tải...</td></tr></tbody>
-      </table>
-    </div>
-    <p class="sub" id="ll-note"></p>
-  </div>
-
   <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
   <div class="card" style="margin-top:16px">
     <h2>Thống kê theo tổng</h2>
