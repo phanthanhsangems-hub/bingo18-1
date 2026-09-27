@@ -7,6 +7,7 @@ Stateless: không giữ state giữa các request (Cloud Run)
 
 import json
 import logging
+import math
 import os
 import traceback
 import threading
@@ -212,31 +213,30 @@ def _get_models(db):
         return _model_cache
 
 # ── Ban-list diversity ────────────────────────────────────────
-# P184: 8 → 6. Sau _STRUCTURAL_BANS mỗi SIZE chỉ còn NHỎ 7 bộ, HÒA 6, LỚN 7.
-# Mà HÒA bị chặn vô điều kiện (P142) nên majority_size luôn là NHỎ hoặc LỚN
-# — tức luôn có đúng 7 bộ để chọn. Đặt cửa sổ ≤ 6 thì danh sách KHÔNG THỂ
-# cạn, vì 6 bộ bị cấm gần nhất vẫn chừa lại ít nhất 1.
+# P184: 8 → 6. Hồi đó _STRUCTURAL_BANS chỉ chừa mỗi SIZE NHỎ 7 bộ, LỚN 7 bộ,
+# nên cửa sổ ≤ 6 là để danh sách không thể cạn.
+# P237 gỡ _STRUCTURAL_BANS: giờ NHỎ và LỚN mỗi bên 22 bộ, cửa sổ 6 càng an toàn.
 #
 # Với 8 thì cạn được: đo mô phỏng 200.000 kỳ cho 0,491% số kỳ rơi vào cảnh
 # danh sách rỗng, lúc đó code bỏ qua kết quả bỏ phiếu mà quay về best_vote.
 #   window=8 → 0,491%    window=7 → 0,103%    window=6 → 0,000%
 BAN_WINDOW = 6    # số kỳ gần nhất không được lặp combo
 
-# P151/P152: Only predict from 20 distinct-number combos (3 different numbers).
-# Analysis of 67k draws: distinct=1.56× expected, pair=0.78×, triple=0.26×.
-# Machine structurally favors distinct combos — pairs/triples are permanently suppressed.
-# 20 distinct combos cover 55.6% of actual draws; cold score now works without structural bias.
-_STRUCTURAL_BANS: frozenset = frozenset({
-    # 6 triples
-    (1,1,1),(2,2,2),(3,3,3),(4,4,4),(5,5,5),(6,6,6),
-    # 30 pairs (one repeated digit + one different)
-    (1,1,2),(1,1,3),(1,1,4),(1,1,5),(1,1,6),
-    (1,2,2),(2,2,3),(2,2,4),(2,2,5),(2,2,6),
-    (1,3,3),(2,3,3),(3,3,4),(3,3,5),(3,3,6),
-    (1,4,4),(2,4,4),(3,4,4),(4,4,5),(4,4,6),
-    (1,5,5),(2,5,5),(3,5,5),(4,5,5),(5,5,6),
-    (1,6,6),(2,6,6),(3,6,6),(4,6,6),(5,6,6),
-})
+# P151/P152 từng cấm VĨNH VIỄN 36 bộ có số lặp (6 bộ ba + 30 bộ đôi), với lý do
+# "phân tích 67k kỳ: bộ khác nhau ra 1,56 lần kỳ vọng, bộ đôi 0,78, bộ ba 0,26 —
+# máy thiên về bộ khác nhau". P237 GỠ BỎ: đó là phép so SAI MỐC. Ba con số đó
+# đúng bằng những gì một máy quay CÔNG BẰNG TUYỆT ĐỐI tạo ra — bộ 1-2-3 có 6
+# cách ra, bộ 1-1-1 chỉ 1 cách, nên 56 bộ vốn không ra đều nhau:
+#     khác nhau 20 bộ -> 55,56% số kỳ -> /(20/56) = x1,56
+#     bộ đôi   30 bộ -> 41,67%        -> /(30/56) = x0,78
+#     bộ ba     6 bộ ->  2,78%        -> /(6/56)  = x0,26
+# Kỳ thật có số lặp 44,4% = đúng lý thuyết 96/216. Máy không thiên vị gì.
+# Hậu quả của lệnh cấm: tổng 3, 4, 5, 16, 17, 18 KHÔNG THỂ được dự đoán — mọi
+# cách ghép ra chúng đều có số lặp. Đo trên production: 0/200 dự đoán có số lặp.
+#
+# Lệnh cấm có thật một tác dụng: che đi lỗi của _cold_score, vốn đếm TRẦN nên bộ
+# hiếm lúc nào cũng "lạnh nhất". Gỡ cấm mà không sửa điểm thì mô phỏng cho 92,8%
+# dự đoán có số lặp (thật: 48,1%). Nên P237 sửa _cold_score cùng lúc — xem đó.
 
 def _get_banned_combos(db: DatabaseManager) -> set:
     """Trả về set các combo (tuple sorted) đã predict trong BAN_WINDOW kỳ gần nhất."""
@@ -249,7 +249,7 @@ def _get_banned_combos(db: DatabaseManager) -> set:
         rows = cur.fetchall()
     finally:
         conn.close()
-    banned = set(_STRUCTURAL_BANS)  # always ban pairs + triples (structural bias)
+    banned = set()   # P237: không còn cấm cấu trúc — chỉ cấm bộ vừa dự đoán gần đây
     for (nums,) in rows:
         parsed = json.loads(nums) if isinstance(nums, str) else nums
         banned.add(tuple(sorted(int(x) for x in parsed)))
@@ -259,32 +259,21 @@ def _get_banned_combos(db: DatabaseManager) -> set:
 def get_diverse_prediction(history: List[List[int]], banned: set,
                            window: int = 30) -> List[int]:
     """
-    Tìm combo lạnh nhất (số 1-6 chọn 3 có lặp) không nằm trong banned.
-    Score = tổng tần suất của 3 số trong window kỳ gần nhất (thấp = lạnh hơn).
+    Tìm combo lạnh nhất (56 bộ, kể cả bộ có số lặp) không nằm trong banned.
+
+    P237: dùng chung _cold_score. Bản cũ chấm điểm = tổng tần suất 3 SỐ, nên
+    bộ 1-1-1 lấy độ lạnh của số 1 ba lần — gỡ lệnh cấm bộ lặp mà giữ cách chấm
+    này thì cứ số nào lạnh là bộ ba của số đó thắng.
     """
-    freq: Counter = Counter()
-    for draw in history[-window:]:
-        for n in draw:
-            freq[n] += 1
+    recent = [tuple(sorted(int(x) for x in d)) for d in history[-window:]]
+    combo_freq = Counter(recent)
+    num_freq   = Counter(x for c in recent for x in c)
+    sum_freq   = Counter(sum(c) for c in recent)
 
-    all_combos = [
-        (i, j, k)
-        for i in range(1, 7)
-        for j in range(i, 7)
-        for k in range(j, 7)
-    ]  # 56 combos
-
-    # Primary: tổng frequency thấp = lạnh hơn
-    # Secondary: nhiều số khác nhau = any-match tốt hơn (unique > pair > triple)
-    scored = sorted(all_combos, key=lambda c: (
-        freq[c[0]] + freq[c[1]] + freq[c[2]],
-        -(len(set(c)))
-    ))
-
+    scored = sorted(_WAYS_COMBO, key=lambda c: _cold_score(c, combo_freq, num_freq, sum_freq))
     for combo in scored:
         if combo not in banned:
             return list(combo)
-
     # Tất cả đều bị ban (không thể xảy ra với BAN_WINDOW≤56) → trả coldest
     return list(scored[0])
 
@@ -305,6 +294,21 @@ def _build_recent_freq(df, window: int = 30):
     return combo_freq, num_freq, sum_freq
 
 
+# P237: xác suất THẬT của từng bộ và từng tổng (số cách ra / 216). _cold_score
+# so mọi thứ với KỲ VỌNG của chính nó thay vì so đếm trần — xem chú thích ở đó.
+from itertools import product as _product
+_WAYS_COMBO: Counter = Counter(tuple(sorted(_p)) for _p in _product(range(1, 7), repeat=3))
+_P_COMBO: dict = {_c: _n / 216.0 for _c, _n in _WAYS_COMBO.items()}
+_P_SUM: dict = {}
+for _c, _p in _P_COMBO.items():
+    _P_SUM[sum(_c)] = _P_SUM.get(sum(_c), 0.0) + _p
+
+
+def _z(quan_sat: float, ky_vong: float) -> float:
+    """Độ lệch chuẩn hoá Poisson: (quan sát − kỳ vọng) / √kỳ vọng."""
+    return (quan_sat - ky_vong) / math.sqrt(ky_vong) if ky_vong > 0 else 0.0
+
+
 def _cold_score(combo: tuple, combo_freq: Counter, num_freq: Counter,
                 sum_freq: Counter = None,
                 pred_num_freq: Counter = None,
@@ -313,20 +317,48 @@ def _cold_score(combo: tuple, combo_freq: Counter, num_freq: Counter,
     Blends combo-level, number-level, sum-level recency, plus prediction diversity penalty.
     multi_freq: {window: Counter} for B multi-window cold score.
     pred_num_freq: số lần mỗi number đã được predict gần đây — penalize over-predicted.
+
+    P237: MỌI thành phần so với KỲ VỌNG của chính nó. Bản cũ đếm trần nên bộ và
+    tổng hiếm (1-1-2, tổng 4, 17…) lúc nào cũng trông "lạnh nhất" — hồi đó phải
+    cấm hẳn bộ có số lặp mới che được. Đo bằng mô phỏng 30.000 kỳ độc lập:
+
+                                        có số lặp   lệch phân bố tổng
+        thật (lý thuyết)                  48,1%           —
+        cũ + cấm bộ lặp (P151)             0,0%        ~16%   tổng 3-5, 16-18 = 0
+        cũ, bỏ cấm                        92,8%        ~20%   ngập bộ ba
+        P237                              ~46%          ~6%
+
+      - bộ, tổng, cửa sổ dài: (quan sát − kỳ vọng)/√kỳ vọng
+      - số hạng SỐ và số hạng ĐA DẠNG: trừ trung bình rồi chia √(Σk²/3), k là
+        số lần mỗi số xuất hiện trong bộ. Bộ 1-1-1 dùng MỘT số ba lần nên giá
+        trị của nó dao động mạnh gấp √3, hay "thắng" min() hơn hẳn. Hệ số này
+        bằng 1 với bộ 3 số khác nhau, nên thang đo của chúng giữ nguyên.
     """
-    c = combo_freq.get(combo, 0)
-    n = sum(num_freq.get(x, 0) for x in combo) / 3.0
-    s = (sum_freq.get(sum(combo), 0) / 1.5) if sum_freq else 0.0
-    p = (sum(pred_num_freq.get(x, 0) for x in combo) / 3.0 * 0.40) if pred_num_freq else 0.0
+    W  = sum(combo_freq.values())
+    c  = _z(combo_freq.get(combo, 0), W * _P_COMBO[combo])
+
+    k  = Counter(combo)
+    hs = math.sqrt(sum(v * v for v in k.values()) / 3.0)
+    mu = sum(num_freq.values()) / 6.0
+    n  = (sum(num_freq.get(x, 0) for x in combo) / 3.0 - mu) / hs
+
+    s = 0.0
+    if sum_freq:
+        Ws = sum(sum_freq.values())
+        s  = _z(sum_freq.get(sum(combo), 0), Ws * _P_SUM[sum(combo)]) / 1.5
+
+    p = 0.0
+    if pred_num_freq:
+        mup = sum(pred_num_freq.values()) / 6.0
+        p   = (sum(pred_num_freq.get(x, 0) for x in combo) / 3.0 - mup) / hs * 0.40
 
     # B: multi-window cold — combo cold across 60+100 kỳ is "truly cold", not just noise
-    # Normalized by expected random freq (window/56). Small weight to not override recency signal.
     m = 0.0
     if multi_freq:
         for w, wt in ((60, 0.08), (100, 0.05)):
             freq_w = multi_freq.get(w)
             if freq_w is not None:
-                m += (freq_w.get(combo, 0) / (w / 56.0)) * wt
+                m += _z(freq_w.get(combo, 0), sum(freq_w.values()) * _P_COMBO[combo]) * wt
 
     return c + 0.25 * n + 0.10 * s + p + m
 
