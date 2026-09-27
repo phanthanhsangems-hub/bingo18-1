@@ -2559,6 +2559,16 @@ _WAYS = {3:1, 4:3, 5:6, 6:10, 7:15, 8:21, 9:25, 10:27,
 # tức hơn một ngày; với tổng 3/18 là gần như toàn bộ lịch sử của chúng.
 _KC_SO_LAN = 25
 
+# P227: 56 bộ đã sắp xếp -> số cách tạo ra bộ đó trong 216 kết quả có thứ tự.
+# 6 bộ ba (1 cách), 30 bộ có đôi (3 cách), 20 bộ ba số khác nhau (6 cách).
+# 6*1 + 30*3 + 20*6 = 216. Dùng để tính cột "lẽ ra" của bảng "theo sau".
+_SO_CACH_BO = {}
+for _i in range(1, 7):
+    for _j in range(_i, 7):
+        for _k in range(_j, 7):
+            _SO_CACH_BO[(_i, _j, _k)] = (1 if _i == _j == _k
+                                         else (3 if (_i == _j or _j == _k) else 6))
+
 
 def _chuoi_khoang_cach(dns: list) -> list:
     """Chuỗi khoảng cách giữa các lần về liên tiếp, CŨ -> MỚI.
@@ -2823,6 +2833,17 @@ def _tinh_thong_ke() -> dict:
     #
     # Ba so thi KHONG THE co hai so khac nhau cung lap (can 4 cho), nen sau
     # bien co cua 6 so la loai tru nhau — cong lai bang so ky co doc nao do.
+    # P227: ma tran "bo nao ra NGAY SAU bo nao". 56x56, dem trong cung vong
+    # quet nay nen khong ton them truy van.
+    #
+    # CHI dem khi hai ky LIEN TIEP THAT SU (dn == dn_truoc + 1). Du lieu tung
+    # thung nhieu lan trong thang 9 (#187690-#187700 mat 11 ky); neu bo qua
+    # dieu kien nay thi mot lo hong se noi lien hai ky cach nhau rat xa va
+    # bang "theo sau" nhan mot cap gia. Lo hong im lang lam hong thong ke im
+    # lang — dung kieu loi da sua bon lan trong du an nay.
+    theo_sau: dict = {}
+    bo_truoc, dn_truoc = None, None
+
     cnt_d  = {n: 0 for n in range(1, 7)}
     last_d = {n: None for n in range(1, 7)}
     prev_d = {n: None for n in range(1, 7)}
@@ -2836,6 +2857,13 @@ def _tinh_thong_ke() -> dict:
             a, b, c = int(ns[0]), int(ns[1]), int(ns[2])
         except Exception:
             continue
+        # P227: cap (ky truoc -> ky nay), chi khi lien tiep that su
+        _bo = (a, b, c) if a <= b <= c else tuple(sorted((a, b, c)))
+        if bo_truoc is not None and dn_truoc is not None and dn == dn_truoc + 1:
+            theo_sau.setdefault(bo_truoc, {})
+            theo_sau[bo_truoc][_bo] = theo_sau[bo_truoc].get(_bo, 0) + 1
+        bo_truoc, dn_truoc = _bo, dn
+
         if a == b == c and 1 <= a <= 6:
             cnt[a]  += 1
             if last[a] is not None:
@@ -2907,6 +2935,9 @@ def _tinh_thong_ke() -> dict:
         'total_draws': total_draws,
         'pairs':       doi_rows,
         'pair_any':    doi_any,
+        # P227: khoa nay NANG (toi 56x56 muc). /api/board-stats co y KHONG
+        # tra no ra — chi /api/theo-sau cat lay mot dong.
+        'theo_sau':    theo_sau,
         # P223: trả luôn MỐC KỲ của ảnh chụp này. Không có nó thì người gọi
         # không cách nào biết bảng đang nói về kỳ nào, nên không phân biệt
         # được "dữ liệu sai" với "ảnh chụp cũ hơn một kỳ".
@@ -2977,7 +3008,13 @@ def board_stats():
     /api/sum-stats và /api/triple-stats giữ nguyên cho thứ khác đang gọi.
     """
     try:
-        return jsonify(_thong_ke())
+        d = dict(_thong_ke())
+        # P227: bo ma tran "theo sau" (toi 56x56 muc) ra khoi phan hoi nay.
+        # Day la request dashboard goi moi 60 giay; nhet them vai nghin muc
+        # vao do la lam cham thu ma khong ai dung. /api/theo-sau cat lay dung
+        # mot dong khi can.
+        d.pop('theo_sau', None)
+        return jsonify(d)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2997,6 +3034,94 @@ def triple_stats():
                         'max_draw':    d.get('max_draw'),
                         'triples':     d['triples'],
                         'any':         d['any']})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def _p_chi2(chi2: float, df: int) -> float:
+    """P(X >= chi2) cho phan phoi chi binh phuong, xap xi Wilson-Hilferty.
+
+    Khong dung scipy: no chi den theo scikit-learn, nen nhap no trong duong
+    request la keo mot thu vien nang vao cho khong can. Wilson-Hilferty sai
+    duoi 0,003 o vung df >= 30 va p trong khoang 0,001-0,5 — da doi chieu
+    voi scipy trong test_theo_sau.py.
+    """
+    import math as _m
+    if df <= 0 or chi2 < 0:
+        return 1.0
+    z = ((chi2 / df) ** (1.0 / 3) - (1 - 2.0 / (9 * df))) / _m.sqrt(2.0 / (9 * df))
+    return 0.5 * _m.erfc(z / _m.sqrt(2))
+
+
+@app.route('/api/theo-sau')
+@limiter.limit("30 per minute")
+def theo_sau_stats():
+    """P227: bộ nào hay ra NGAY SAU một bộ cho trước, trên toàn bộ lịch sử.
+
+    Trả kèm cột "lẽ ra" và phép kiểm chi bình phương, vì nếu chỉ đưa cột "số
+    lần" thì người đọc chắc chắn hiểu nhầm. Kỳ quay độc lập nên phân bố bộ
+    theo sau PHẢI bám p = số cách/216; với ~2.574 lần xuất hiện của 2-3-5 thì
+    một bộ 3 số khác nhau lẽ ra ra ~71,5 lần, độ lệch chuẩn ~8,3 — tức đỉnh
+    cao nhất có thể lên ~92 lần THUẦN do ngẫu nhiên. Không nói rõ điều đó thì
+    bảng này thành cỗ máy sinh cầu giả.
+
+    ?combo=235 (hoặc 2-3-5, 2,3,5). Bỏ trống thì lấy bộ của kỳ mới nhất.
+    """
+    try:
+        raw = (request.args.get('combo') or '').strip()
+        so  = [int(c) for c in raw if c.isdigit()]
+        d   = _thong_ke()
+        ts  = d.get('theo_sau') or {}
+
+        if len(so) != 3 or not all(1 <= x <= 6 for x in so):
+            # Mặc định: bộ của kỳ mới nhất — câu người dùng hay hỏi nhất là
+            # "kỳ vừa ra bộ này, lịch sử sau nó ra gì".
+            _c = db.get_connection()
+            try:
+                _cur = _c.cursor()
+                _cur.execute("SELECT numbers FROM draw_history "
+                             "WHERE numbers IS NOT NULL "
+                             "ORDER BY draw_number DESC LIMIT 1")
+                _r = _cur.fetchone()
+            finally:
+                _c.close()
+            if not _r:
+                return jsonify({'error': 'khong co du lieu'}), 404
+            import ast as _a
+            _n = _r[0] if isinstance(_r[0], list) else _a.literal_eval(_r[0])
+            so = [int(x) for x in _n]
+
+        bo   = tuple(sorted(so))
+        dem  = ts.get(bo) or {}
+        tong = sum(dem.values())
+
+        rows, chi2 = [], 0.0
+        for c, w in sorted(_SO_CACH_BO.items()):
+            o = dem.get(c, 0)
+            e = tong * w / 216.0
+            if e > 0:
+                chi2 += (o - e) ** 2 / e
+            rows.append({'combo': ''.join(map(str, c)),
+                         'count': o,
+                         'expected': round(e, 1),
+                         'diff': round(o - e, 1)})
+        rows.sort(key=lambda r: (-r['count'], r['combo']))
+
+        df = len(_SO_CACH_BO) - 1
+        p  = _p_chi2(chi2, df) if tong else 1.0
+        return jsonify({
+            'combo':       ''.join(map(str, bo)),
+            'total_after': tong,
+            'total_draws': d['total_draws'],
+            'max_draw':    d.get('max_draw'),
+            'rows':        rows,
+            'chi2':        round(chi2, 1),
+            'df':          df,
+            'p':           round(p, 4),
+            # Ngưỡng 0,05 trên MỘT phép kiểm. Người dùng bấm xem nhiều bộ thì
+            # đây là nhiều phép kiểm — chú thích giao diện nói rõ chuyện đó.
+            'lech_co_y_nghia': bool(tong and p < 0.05),
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -525,3 +525,20 @@ svg text{font-family:inherit}
   width:100%;height:100%;min-height:32px;
 }
 .dg-c i{width:7px;height:7px;border-radius:50%;background:#fff;display:block}
+
+/* ── P227: ô chọn bộ của thẻ "bộ nào hay ra ngay sau bộ này" ── */
+.sel {
+  font: inherit;
+  padding: 6px 10px;
+  margin-left: 6px;
+  border: 1px solid var(--line, #d7dce5);
+  border-radius: 8px;
+  background: var(--card, #fff);
+  color: inherit;
+  min-width: 9em;
+}
+/* Chênh dương/âm: chỉ tô nhạt để đọc nhanh, KHÔNG tô rực như cảnh báo —
+   trên dữ liệu ngẫu nhiên đỉnh cao nhất vẫn vượt mức "lẽ ra" tới ~43%, nên
+   tô đậm là mời người đọc hiểu nhầm nhiễu thành cầu. */
+.ts-hon  { color: #b45309; }
+.ts-kem  { color: #64748b; }
