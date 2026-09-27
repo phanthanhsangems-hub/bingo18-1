@@ -215,6 +215,14 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <div style="margin:10px 0">
       <label for="ts-chon" class="sub">Bộ vừa ra:</label>
       <select id="ts-chon" class="sel"></select>
+      <label for="ts-ws" class="sub" style="margin-left:12px">Trong:</label>
+      <select id="ts-ws" class="sel">
+        <option value="0">toàn bộ lịch sử</option>
+        <option value="5000">5.000 kỳ</option>
+        <option value="1000">1.000 kỳ</option>
+        <option value="500">500 kỳ</option>
+        <option value="100">100 kỳ</option>
+      </select>
     </div>
     <p class="sub" id="ts-sub"><span class="skeleton">Đang tải...</span></p>
     <div class="tbl-scroll">
