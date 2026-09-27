@@ -11250,14 +11250,18 @@ def telegram_webhook():
                 "/health   — Tóm tắt sức khỏe hệ thống + voter + adaptive\n"
                 "/top [N]  — Top 5 high-conf wins + losses (mặc định 500 kỳ)\n"
                 "/recap [N] — Tóm tắt N kỳ: WR, SIZE dist, giờ tốt, voter dẫn đầu\n"
+                "/trend     — Xu hướng WR 200/100/50 kỳ + lệch SIZE + độ tự tin voter\n"
                 "/autotune  — Adaptive state hiện tại + xu hướng 3 lô × 25 kỳ\n"
                 "/alerts [N] — N alert gần nhất từ DB + tổng 24h/7d (mặc định 5)\n"
                 "/hourly [N] — Win rate theo từng giờ 6h-22h + tổng theo buổi (n mặc định 1000)\n"
+                "/dow [N]   — Win rate theo thứ trong tuần + tỉ lệ HÒA theo giờ (mặc định 500)\n"
                 "/wincal [N] — Lịch WR N ngày qua dạng lưới 7 cột (mặc định 28 ngày)\n"
                 "/next       — Preview N+1 (hiện tại) + N+2/N+3 theo Markov\n"
                 "/votertrend [n] [batch] — WR từng voter qua 5 batch gần nhất (mặc định n=500 batch=25)\n"
                 "/checkpoint  — Trạng thái validation checkpoint (X/200 kỳ, WR, z-score ML)\n"
-                "/new_checkpoint [N] — Reset checkpoint mới từ bây giờ (mặc định N=200)",
+                "/new_checkpoint [N] — ⚠️ ĐẶT LẠI checkpoint từ bây giờ, /checkpoint đếm lại từ 0 (mặc định N=200)\n"
+                "━━━━━━━━━━━━━━━━━━\n"
+                "💬 Gõ câu hỏi không có dấu / để hỏi AI (vd: \"hôm nay đoán đúng bao nhiêu?\")",
                 markup=_tg_main_keyboard()
             )
             return jsonify({"ok": True})
