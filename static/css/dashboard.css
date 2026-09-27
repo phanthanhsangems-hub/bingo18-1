@@ -542,3 +542,17 @@ svg text{font-family:inherit}
    tô đậm là mời người đọc hiểu nhầm nhiễu thành cầu. */
 .ts-hon  { color: #b45309; }
 .ts-kem  { color: #64748b; }
+
+/* ── P229: dãy tổng giữa hai lần một bộ ra lại ── */
+.ll-tong { display: flex; flex-wrap: wrap; gap: 4px; }
+.ll-t {
+  display: inline-block; min-width: 1.9em; padding: 1px 5px;
+  border-radius: 6px; text-align: center;
+  font-variant-numeric: tabular-nums; font-size: .92em;
+  background: var(--chip, #eef2f8);
+}
+.ll-t.nho { background: #dbeafe; }   /* NHO  3-9   */
+.ll-t.hoa { background: #fef3c7; }   /* HOA  10-11 */
+.ll-t.lon { background: #fee2e2; }   /* LON  12-18 */
+.ll-t.dich { outline: 2px solid #94a3b8; }  /* ô cuối = chính lần ra lại */
+.ll-thieu { color: #b45309; font-size: .92em; }
