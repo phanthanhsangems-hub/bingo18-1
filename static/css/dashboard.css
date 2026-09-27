@@ -537,11 +537,6 @@ svg text{font-family:inherit}
   color: inherit;
   min-width: 9em;
 }
-/* Chênh dương/âm: chỉ tô nhạt để đọc nhanh, KHÔNG tô rực như cảnh báo —
-   trên dữ liệu ngẫu nhiên đỉnh cao nhất vẫn vượt mức "lẽ ra" tới ~43%, nên
-   tô đậm là mời người đọc hiểu nhầm nhiễu thành cầu. */
-.ts-hon  { color: #b45309; }
-.ts-kem  { color: #64748b; }
 
 /* ── P229: dãy tổng giữa hai lần một bộ ra lại ── */
 .ll-tong { display: flex; flex-wrap: wrap; gap: 4px; }

@@ -213,7 +213,9 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <h2>Bộ ra lại — sau đó đã ra tổng nào</h2>
     <p class="sub">Trong cửa sổ đang chọn, bộ nào ra rồi <b>ra lại</b>, và giữa hai lần đó đã ra những <b>tổng</b> nào. Xếp <b>khoảng cách ngắn nhất lên đầu</b>.</p>
     <div style="margin:10px 0">
-      <label for="ll-ws" class="sub">Trong:</label>
+      <label for="ll-bo" class="sub">Bộ:</label>
+      <select id="ll-bo" class="sel"><option value="">tất cả bộ</option></select>
+      <label for="ll-ws" class="sub" style="margin-left:12px">Trong:</label>
       <select id="ll-ws" class="sel">
         <option value="160" selected>160 kỳ</option>
         <option value="100">100 kỳ</option>
@@ -235,38 +237,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
       </table>
     </div>
     <p class="sub" id="ll-note"></p>
-  </div>
-
-  <!-- ═══ BỘ NÀO HAY RA NGAY SAU BỘ NÀY (P227) ═══ -->
-  <div class="card" style="margin-top:16px">
-    <h2>Bộ nào hay ra ngay sau bộ này</h2>
-    <p class="sub">Chọn một bộ, xem trên toàn bộ lịch sử: mỗi lần bộ đó ra thì <b>kỳ kế tiếp</b> đã ra những bộ nào.</p>
-    <div style="margin:10px 0">
-      <label for="ts-chon" class="sub">Bộ vừa ra:</label>
-      <select id="ts-chon" class="sel"></select>
-      <label for="ts-ws" class="sub" style="margin-left:12px">Trong:</label>
-      <select id="ts-ws" class="sel">
-        <option value="0">toàn bộ lịch sử</option>
-        <option value="5000">5.000 kỳ</option>
-        <option value="1000">1.000 kỳ</option>
-        <option value="500">500 kỳ</option>
-        <option value="100">100 kỳ</option>
-      </select>
-    </div>
-    <p class="sub" id="ts-sub"><span class="skeleton">Đang tải...</span></p>
-    <div class="tbl-scroll">
-      <table class="log-table" id="ts-table">
-        <thead><tr>
-          <th>Bộ theo sau</th>
-          <th class="ta-r"><span class="lbl-lg">Số lần</span><span class="lbl-sm">Lần</span></th>
-          <th class="ta-r"><span class="lbl-lg">Lẽ ra</span><span class="lbl-sm">Lẽ ra</span></th>
-          <th class="ta-r"><span class="lbl-lg">Chênh</span><span class="lbl-sm">Chênh</span></th>
-        </tr></thead>
-        <tbody id="ts-body"><tr><td colspan="4" class="skeleton">Đang tải...</td></tr></tbody>
-      </table>
-    </div>
-    <p class="sub" id="ts-verdict"></p>
-    <p class="sub" id="ts-note"></p>
   </div>
 
   <!-- ═══ THỐNG KÊ THEO TỔNG ═══ -->
