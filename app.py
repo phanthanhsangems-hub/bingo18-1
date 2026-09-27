@@ -3193,6 +3193,87 @@ def triple_stats():
         return jsonify({'error': str(e)}), 500
 
 
+# ── P232: bật/tắt từng thẻ trên dashboard ────────────────────────────────
+# Danh sách TRẮNG. Khoá phải khớp data-the="..." trong dashboard.html.
+# Có whitelist vì người dùng gửi thẳng danh sách khoá lên: không lọc thì
+# system_config thành chỗ chứa rác tuỳ ý.
+# Khoá phải ỔN ĐỊNH — đổi tiêu đề thẻ trên màn hình không được làm mất lựa
+# chọn đã lưu, nên đừng bao giờ đổi khoá theo tiêu đề.
+_THE_DASHBOARD = (
+    'winrate', 'size-today', 'nong-lanh', 'bo-hom-nay', 'luoi',
+    'trip', 'doi', 'tong', 'con-bao-nhieu', 'kc-tong', 'kc-trip',
+    'cau', 'canh-bao', 'nhat-ky',
+)
+_THE_STATE_KEY = 'dashboard_the_an'
+
+
+def _doc_the_an():
+    """Danh sách khoá thẻ đang ẩn. Lỗi gì cũng trả [] — không hiện được
+    trang cài đặt thì thà hiện đủ mọi thẻ còn hơn giấu mất của người dùng."""
+    try:
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                (_THE_STATE_KEY,))
+            r = cur.fetchone()
+        finally:
+            conn.close()
+        if not r or not r[0]:
+            return []
+        # Lọc lại lúc ĐỌC chứ không chỉ lúc ghi: khoá cũ của thẻ đã gỡ
+        # (ll-*, ts-*) còn sót trong DB thì bỏ qua, đừng trả ra.
+        return [k for k in str(r[0]).split(',') if k in _THE_DASHBOARD]
+    except Exception:
+        return []
+
+
+@app.route('/api/cai-dat/the')
+@limiter.limit("60 per minute")
+def cai_dat_the_doc():
+    """P232: thẻ nào đang ẩn. Nằm sau cổng đăng nhập như mọi endpoint khác."""
+    return jsonify({'tat_ca': list(_THE_DASHBOARD), 'an': _doc_the_an()})
+
+
+@app.route('/api/cai-dat/the', methods=['POST'])
+@limiter.limit("60 per minute")
+def cai_dat_the_ghi():
+    """P232: lưu danh sách thẻ ẩn."""
+    try:
+        du = request.get_json(silent=True) or {}
+        xin = du.get('an')
+        if not isinstance(xin, list):
+            return jsonify({'error': "can truong 'an' la mang"}), 400
+        an = sorted({k for k in xin if isinstance(k, str) and k in _THE_DASHBOARD})
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            gt  = ','.join(an)
+            mo  = 'P232: cac the dashboard dang an'
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO system_config (config_key, config_value, description)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (config_key) DO UPDATE
+                      SET config_value = EXCLUDED.config_value,
+                          updated_at   = NOW()
+                """, (_THE_STATE_KEY, gt, mo))
+            else:
+                cur.execute(
+                    "INSERT OR REPLACE INTO system_config "
+                    "(config_key, config_value, description) VALUES (?,?,?)",
+                    (_THE_STATE_KEY, gt, mo))
+            conn.commit()
+        finally:
+            conn.close()
+        # Trả lại đúng cái đã lưu, để giao diện biết khoá nào bị loại.
+        return jsonify({'an': an, 'bo_qua': sorted(set(map(str, xin)) - set(an))})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/lap-lai')
 @limiter.limit("30 per minute")
 def lap_lai_stats():
