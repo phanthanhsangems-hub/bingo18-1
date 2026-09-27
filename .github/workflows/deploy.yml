@@ -81,18 +81,47 @@ jobs:
       # giờ tới container — smoke test đầu tiên vì thế báo động giả trong
       # khi app hoàn toàn khoẻ. /api/health đi đúng vào Flask.
       - name: Smoke test — app phải thật sự phục vụ được
+        # P235: bản cũ chỉ hỏi "có phải JSON không", nên deploy #161 báo ĐẠT
+        # trong khi /api/health trả HTTP 503 với database.connected=false.
+        # Nay đòi DB PHẢI kết nối. Chỉ DB thôi — KHÔNG đòi status tổng = "ok",
+        # vì status tổng thành "error" khi sync lag > 60 phút (ban đêm, hoặc
+        # watcher trên máy người dùng đang tắt); chặn deploy vì thế là sai.
+        # Vẫn thử lại 10 lần x 15s: revision mới vừa lên thì kết nối DB đầu
+        # tiên có thể trượt (#161 bị đúng lúc 2 giây sau khi lên, 3 phút sau
+        # diagnose #39 thấy DB bình thường).
+        # Một lần curl duy nhất cho cả thân lẫn mã HTTP: bản cũ gọi hai lần
+        # riêng nên mã và thân có thể đến từ hai phản hồi khác nhau.
         run: |
           URL="https://bingo18-633959711537.asia-southeast1.run.app/api/health"
           for i in $(seq 1 10); do
-            BODY=$(curl -s --max-time 30 "$URL" || echo '')
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo 000)
-            if echo "$BODY" | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if "status" in d else 1)' 2>/dev/null; then
-              echo "OK [$i/10] HTTP $CODE — Flask đã chạy, thân phản hồi: $BODY"
-              exit 0
-            fi
-            echo "  [$i/10] HTTP $CODE — chưa phải JSON của app: $(echo "$BODY" | head -c 80)"
+            RAW=$(curl -s --max-time 30 -w '\n%{http_code}' "$URL" || printf '\n000')
+            CODE=$(printf '%s' "$RAW" | tail -n1)
+            BODY=$(printf '%s' "$RAW" | sed '$d')
+            KQ=$(printf '%s' "$BODY" | python3 -c '
+          import sys, json
+          try:
+              d = json.load(sys.stdin)
+          except Exception:
+              print("khong_json"); sys.exit()
+          db = (d.get("components") or {}).get("database") or {}
+          print("db_ok" if db.get("connected") is True else "db_mat")
+          ' 2>/dev/null || echo khong_json)
+            case "$KQ" in
+              db_ok)
+                echo "OK [$i/10] HTTP $CODE — Flask chạy VÀ DB kết nối: $BODY"
+                exit 0 ;;
+              db_mat)
+                echo "  [$i/10] HTTP $CODE — Flask chạy nhưng DB CHƯA kết nối: $(printf '%s' "$BODY" | head -c 200)" ;;
+              *)
+                echo "  [$i/10] HTTP $CODE — chưa phải JSON của app: $(printf '%s' "$BODY" | head -c 80)" ;;
+            esac
             sleep 15
           done
-          echo "THẤT BẠI: sau 10 lần thử app vẫn không trả JSON hợp lệ."
-          echo "Container nhiều khả năng không import được — xem log Cloud Run."
+          echo "THẤT BẠI: sau 10 lần thử (~2,5 phút) app vẫn không kết nối được DB."
+          if [ "$KQ" = "db_mat" ]; then
+            echo "Flask CÓ chạy, nhưng không tới được DB: kiểm DATABASE_URL trên Cloud Run"
+            echo "(nhớ dùng --update-env-vars, KHÔNG dùng --set-env-vars) và tình trạng Supabase."
+          else
+            echo "Container nhiều khả năng không import được — xem log Cloud Run."
+          fi
           exit 1
