@@ -298,13 +298,36 @@ tin, moc_moi = chay_canh_bao(ky, moc=102)
 kiem("co gui tin", tin is not None)
 kiem("tin neu ten bo dang 2-3-5", '2-3-5' in (tin or ''))
 kiem("tin noi ro cach may ky", 'ra lại sau <b>3 kỳ</b>' in (tin or ''))
-kiem("tin co ca hai moc ky", '#100' in (tin or '') and '#103' in (tin or ''))
-kiem("tin liet ke TONG o giua (6, 18)",
-     'Tổng các kỳ ở giữa' in (tin or '') and '6 · 18' in (tin or ''))
-kiem("tin TACH RIENG tong cua ky ra lai",
-     'Tổng của chính kỳ ra lại: <b>10</b>' in (tin or ''))
-kiem("tin ghi ro nguong dang dung", '≤ 10 kỳ' in (tin or ''))
+# P234: nguoi dung chi can "bo nao ra lai" + "cac tong da ra ke tu lan truoc".
+kiem("tin liet ke cac TONG da ra (6, 18)",
+     'Tổng đã ra: <b>6 · 18</b>' in (tin or ''), tin)
+kiem("P234: BO dong so ky (#100 -> #103)",
+     '#100' not in (tin or '') and '→' not in (tin or ''))
+kiem("P234: BO dong 'tong cua chinh ky ra lai' (thua: 2-3-5 luc nao cung = 10)",
+     'chính kỳ ra lại' not in (tin or ''))
+kiem("P234: tin chi con 2 dong noi dung + gio",
+     len([l for l in (tin or '').split('\n') if l.strip()]) == 3, repr(tin))
 kiem("da ghi moc moi = ky moi nhat", moc_moi == 103, str(moc_moi))
+
+print("\n=== 15b. MOI BO DEU DUOC BAO, KHONG CHI RIENG 235 (P234) ===")
+# Ba bo khac nhau cung ra lai trong cung mot lan chay.
+nhieu = [(300, (2,3,5), 10), (301, (1,1,4), 6), (302, (6,6,6), 18),
+         (303, (1,1,4), 6),                    # 1-1-4 ra lai sau 2 ky
+         (304, (6,6,6), 18),                   # 6-6-6 ra lai sau 2 ky
+         (305, (2,3,5), 10),                   # 2-3-5 ra lai sau 5 ky
+         (306, (3,4,6), 13)]
+tin, _ = chay_canh_bao(nhieu, moc=302)
+for bo in ('2-3-5', '1-1-4', '6-6-6'):
+    kiem(f"bo {bo} co trong tin", f'<b>{bo}</b> ra lại' in (tin or ''), tin)
+kiem("bo 3-4-6 (khong ra lai) KHONG co trong tin", '3-4-6' not in (tin or ''))
+kiem("1-1-4: tong da ra = 18 (ky 302)",
+     '<b>1-1-4</b> ra lại sau <b>2 kỳ</b>\nTổng đã ra: <b>18</b>' in (tin or ''))
+kiem("2-3-5: tong da ra = 6 · 18 · 6 · 18",
+     '<b>2-3-5</b> ra lại sau <b>5 kỳ</b>\nTổng đã ra: <b>6 · 18 · 6 · 18</b>' in (tin or ''))
+lien = [(400, (1,2,3), 6), (401, (1,2,3), 6)]
+tin, _ = chay_canh_bao(lien, moc=400)
+kiem("ra lai ngay ky ke tiep -> noi ro khong co tong xen giua",
+     'chưa có tổng nào ra xen giữa' in (tin or ''), tin)
 
 print("\n=== 16. KHONG DUOC SPAM ===")
 tin, moc_moi = chay_canh_bao(ky, moc=103)
