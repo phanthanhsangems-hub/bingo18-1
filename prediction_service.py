@@ -1624,6 +1624,14 @@ def _apply_filter(numbers: List[int], confidence: float, df) -> Optional[Tuple]:
 _HOT_ADJUST_STREAK_THRESHOLD = 3  # kích hoạt khi thua liên tiếp >= N kỳ
 _HOT_WINDOW = 20                  # cửa sổ để tính hot numbers
 _REGIME_WINDOW = 200               # cửa sổ lịch sử SIZE cho BOCPD regime voter
+# P240: hệ số nhân CỐ ĐỊNH lên trọng số phiếu SIZE của từng voter (sau mọi hệ số
+# khác, kể cả sàn 0,3). Người dùng thấy 16/16 dự đoán sáng 28/09 đều NHỎ; nhật ký
+# bỏ phiếu (diagnose #40) cho thấy regime_bocpd bầu NHỎ 16/16 — BOCPD được chỉnh
+# "dai" (trung bình ~120 kỳ mới đổi chế độ) nên một khi nghiêng là nghiêng rất
+# lâu. Người dùng chọn giảm trọng số nó. 1,0 = như cũ.
+# Diagnose (bước nhật ký phiếu) tính lại 600 lượt bầu gần nhất ở 1,0/0,5/0,25/0
+# để thấy mức này có đủ không — chỉnh số ở đây là đổi được.
+_VOTER_SCALE: dict = {'regime_bocpd': 0.5}
 
 def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
                      banned: set) -> tuple:
@@ -2156,7 +2164,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
             hour_adj   = _VOTER_HOUR_MULT.get(v['name'], {}).get(_vn_hour, 1.0)
             eff = max(0.3, wr_mult * decay_mult * hour_adj)
         _eff_mults[v['name']] = eff
-        size_weights[v['size']] += v['conf'] * eff
+        size_weights[v['size']] += v['conf'] * eff * _VOTER_SCALE.get(v['name'], 1.0)
     size_tally = Counter(v['size'] for v in votes)  # kept for logging
 
     # ── EMA Smoother (#31): blend normalized size_weights with running EMA ──
@@ -2184,7 +2192,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # Anomaly guard: single voter dominates with >60% of weight = confidence scale bug
     # Threshold is 60% (not 40%) because with 3 active voters ~42% per voter is normal.
     for _v in votes:
-        _vw = _v['conf'] * _eff_mults.get(_v['name'], 1.0)
+        _vw = _v['conf'] * _eff_mults.get(_v['name'], 1.0) * _VOTER_SCALE.get(_v['name'], 1.0)
         if _vw / total_weight > 0.60:
             logger.warning("WEIGHT_ANOMALY voter='%s' conf=%.4f share=%.0f%% "
                            "(>60%% of total weight — possible conf scale bug)", _v['name'], _v['conf'], _vw / total_weight * 100)
@@ -2256,12 +2264,14 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     # Build per-voter detail for dashboard display (P46/P47)
     _detail = {}
     for v in votes:
-        _eff = v['conf'] * _eff_mults.get(v['name'], 1.0)
+        _sc  = _VOTER_SCALE.get(v['name'], 1.0)
+        _eff = v['conf'] * _eff_mults.get(v['name'], 1.0) * _sc
         _dk  = _decay.get(v['name'], {})
         _detail[v['name']] = {
             'size':       v['size'],
             'conf':       round(v['conf'], 3),
-            'mult':       round(_eff_mults.get(v['name'], 1.0), 3),
+            'mult':       round(_eff_mults.get(v['name'], 1.0), 3),   # CHƯA gồm scale
+            'scale':      _sc,                                         # P240
             'eff_w_pct':  round(_eff / total_weight * 100, 1),
             'winner':     v['size'] == majority_size,
             'streak':     _dk.get('streak', 0),

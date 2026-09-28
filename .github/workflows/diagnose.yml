@@ -1115,6 +1115,45 @@ jobs:
               print(f"  co so lap: {lap}/{len(sau)} = {lap*100/len(sau):.1f}%   bo ba: {ba}/{len(sau)}")
               print(f"  bo hay dung: {Counter(tuple(sorted(x['numbers'])) for x in sau).most_common(6)}")
           print("")
+          print("=== TINH LAI LUOT BAU O CAC MUC TRONG SO regime_bocpd (P240) ===")
+          # Tai hien dung luat trong _run_majority_vote: trong so = conf*mult*scale,
+          # EMA alpha 0.35 qua cac ky, HOA bi chan, NHO phai chiem >= nho_share_min.
+          ALPHA = 0.35
+          seq = sorted([x for x in P if x.get('detail')], key=lambda x: x['draw_number'])
+          def bau(ty_le_bocpd, dung_scale_da_luu=False):
+              ema = None; ra = []
+              for x in seq:
+                  w = {'NHO': 0.0, 'HOA': 0.0, 'LON': 0.0}
+                  for ten, d in x['detail'].items():
+                      if d.get('size') not in w or d.get('conf') is None or d.get('mult') is None:
+                          continue
+                      sc = (d.get('scale') or 1.0) if dung_scale_da_luu else \
+                           (ty_le_bocpd if ten == 'regime_bocpd' else (d.get('scale') or 1.0))
+                      w[d['size']] += d['conf'] * d['mult'] * sc
+                  tot = sum(w.values()) or 1.0
+                  fr = {k: v / tot for k, v in w.items()}
+                  ema = fr if ema is None else {k: ALPHA * fr[k] + (1 - ALPHA) * ema[k] for k in fr}
+                  m = max(ema, key=ema.get)
+                  if m == 'HOA':
+                      m = 'LON' if ema['LON'] >= ema['NHO'] else 'NHO'
+                  elif m == 'NHO' and ema['LON'] > 0 and ema['NHO'] < (x.get('nho_share_min') or 0.45):
+                      m = 'LON'
+                  ra.append((x, m))
+              return ra
+          goc = bau(None, dung_scale_da_luu=True)
+          khop = sum(1 for x, m in goc if m == x.get('majority_size'))
+          print(f"  Kiem tra tai hien: tinh lai voi dung trong so da luu -> khop {khop}/{len(goc)}"
+                f" = {khop*100/max(len(goc),1):.1f}% so voi SIZE that da chon")
+          if len(goc) and khop / len(goc) < 0.9:
+              print("  >>> TAI HIEN KHONG DU KHOP — cac con so duoi day CHI de tham khao.")
+          for k in (1.0, 0.5, 0.25, 0.0):
+              r = bau(k)
+              def ti(ds):
+                  n = len(ds) or 1
+                  return f"NHO {sum(1 for _, m in ds if m=='NHO')*100/n:5.1f}%  LON {sum(1 for _, m in ds if m=='LON')*100/n:5.1f}%"
+              s_ = [(x, m) for x, m in r if (x.get('created_at') or '')[:16] >= MOC]
+              print(f"  bocpd x{k:<4}: toan bo n={len(r):3} {ti(r)}   |  sau P237 n={len(s_):2} {ti(s_)}")
+          print("")
           print("=== 15 KY GAN NHAT ===")
           for x in P[:15]:
               w = x.get('size_weights') or {}

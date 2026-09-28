@@ -12090,6 +12090,13 @@ def vote_log():
                 'size_flipped':  v.get('size_flipped'),
                 'size_weights':  v.get('size_weights'),
                 'all_votes':     v.get('all_votes'),
+                # P240: conf và mult của từng voter, để diagnose tính lại lượt
+                # bầu ở các mức trọng số khác mà không phải đoán.
+                'detail': {k: {'size': d.get('size'), 'conf': d.get('conf'),
+                               'mult': d.get('mult'), 'scale': d.get('scale', 1.0)}
+                           for k, d in (v.get('all_votes_detail') or {}).items()},
+                'nho_share_min': (v.get('adaptive') or {}).get('nho_share_min'),
+                'bocpd_dist':    v.get('bocpd_dist'),
             })
         return jsonify({'n': len(ra), 'predictions': ra})
     except Exception as e:
