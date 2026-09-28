@@ -1225,6 +1225,70 @@ jobs:
           PYEOF
           echo "vang_tong" >> /tmp/da_chay
 
+      - name: Đối chiếu bộ đã báo với bộ lẽ ra phải báo (P245)
+        # Nguoi dung: "thieu bo khac". Tinh lai tu 200 ky that nhung lan bo ra
+        # lai trong <= nguong ky, roi so voi nhat ky tung bo da bao.
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 30 -H "$H" "$BASE/api/canh-bao/lap-lai?cb=$TS" > /tmp/cb2.json
+          curl -s --max-time 30 -H "$H" "$BASE/api/draw-grid?n=200&cb=$TS" > /tmp/g3.json
+          python3 - <<'PYEOF'
+          import json
+          cb = json.load(open('/tmp/cb2.json')); g = json.load(open('/tmp/g3.json'))['draws']
+          nguong = cb.get('nguong_cach', 10)
+          ky = {x['draw_number']: (tuple(x['numbers']), x['time']) for x in g}
+          def vn(t):
+              try:
+                  h, m = map(int, t.split(':')); return f"{(h + 7) % 24:02d}:{m:02d}"
+              except Exception:
+                  return t
+          le_ra = {}; xa = 0; tong_lap = 0
+          for dn in sorted(ky):
+              bo = ky[dn][0]
+              for gg in range(1, 161):
+                  t = ky.get(dn - gg)
+                  if t and t[0] == bo:
+                      tong_lap += 1
+                      if gg <= nguong:
+                          le_ra[(dn, ''.join(map(str, bo)))] = gg
+                      else:
+                          xa += 1
+                      break
+          print(f"=== TRONG {len(ky)} KY GAN NHAT (#{min(ky)} -> #{max(ky)}) ===")
+          print(f"  bo ra lai (so voi lan ra truoc do trong 160 ky): {tong_lap}")
+          print(f"    trong <= {nguong} ky -> CO BAO : {len(le_ra)}")
+          print(f"    cach  > {nguong} ky -> KHONG bao (theo nguong): {xa}")
+          print()
+          print(f"=== 30 LAN GAN NHAT LE RA PHAI BAO (gio VN) ===")
+          for (dn, c), gg in sorted(le_ra.items())[-30:]:
+              print(f"  #{dn} {vn(ky[dn][1])}  {'-'.join(c)}  ra lai sau {gg} ky")
+          nk = [m for m in cb.get('nhat_ky', []) if 'combo' in m]
+          bq = [m for m in cb.get('nhat_ky', []) if 'bo_qua_tu' in m]
+          print()
+          print(f"=== NHAT KY DA BAO: {len(nk)} muc ===")
+          for m in bq:
+              print(f"  >>> BO QUA ky #{m['bo_qua_tu']}..#{m['bo_qua_den']} (nguoi may qua lau) luc {m['luc']}")
+          if not nk:
+              print("  (chua co — nhat ky moi bat dau tu P245; chay lai sau vai gio)")
+          else:
+              tu = min(m['den'] for m in nk)
+              da = {(m['den'], m['combo']) for m in nk}
+              can = {k for k in le_ra if k[0] >= tu}
+              thieu = sorted(can - da); thua = sorted(k for k in da - set(le_ra) if k[0] in ky)
+              hong = [m for m in nk if not m['ok']]
+              print(f"  tu ky #{tu}: le ra {len(can)}, da bao {len(da & can)}")
+              print(f"  THIEU (le ra bao ma khong co): {thieu or 'khong'}")
+              print(f"  THUA  (bao ma khong dung)    : {thua or 'khong'}")
+              print(f"  gui Telegram HONG            : {len(hong)}")
+              if thieu or thua or hong:
+                  open('/tmp/job_failed', 'a').write(f"P245: thieu {len(thieu)}, thua {len(thua)}, hong {len(hong)}\n")
+          PYEOF
+          echo "doi_chieu_lap_lai" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -1245,7 +1309,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai vang_tong"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai vang_tong doi_chieu_lap_lai"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
