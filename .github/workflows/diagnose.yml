@@ -1187,6 +1187,10 @@ jobs:
           print("  ky moi nhat trong DB :", d.get('ky_moi_nhat'))
           print("  moc da xet           :", d.get('moc_da_xet'))
           print("  lan chay gan nhat    :", json.dumps(d.get('lan_chay_gan_nhat'), ensure_ascii=False))
+          print("  lan GUI DUOC gan nhat:", json.dumps(d.get('gui_duoc_cuoi'), ensure_ascii=False))
+          print("  lan HONG gan nhat    :", json.dumps(d.get('hong_cuoi'), ensure_ascii=False))
+          if d.get('hong_cuoi'):
+              print("  >>> CO LAN GUI HONG:", d['hong_cuoi'].get('ket_qua'), d['hong_cuoi'].get('loi', ''))
           tt = d.get('lan_chay_gan_nhat') or {}
           if not tt:
               print("  >>> CHUA CO LAN CHAY NAO duoc ghi — canh bao chua tung chay tu khi co P242.")

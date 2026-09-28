@@ -503,6 +503,16 @@ def _laplai_ghi_moc(cur, dn: int):
 _LAPLAI_TT_KEY = 'lap_lai_trang_thai'
 
 
+# P243: chỉ lưu "lần chạy gần nhất" là không đủ — một lần gửi hỏng bị lần
+# "không có bộ nào ra lại" 6 phút sau ghi đè mất. Lưu RIÊNG lần gửi được và lần
+# hỏng gần nhất; mỗi khoá chỉ bị ghi khi đúng loại sự kiện đó xảy ra.
+_LAPLAI_KHOA_RIENG = {
+    'da_gui':                'lap_lai_gui_duoc_cuoi',
+    'gui_telegram_THAT_BAI': 'lap_lai_hong_cuoi',
+    'LOI':                   'lap_lai_hong_cuoi',
+}
+
+
 def _laplai_ghi_trang_thai(ket_qua: str, **them):
     """P242: ghi lại lần chạy gần nhất của cảnh báo 'bộ ra lại'.
 
@@ -529,6 +539,19 @@ def _laplai_ghi_trang_thai(ket_qua: str, **them):
                 cur.execute("INSERT OR REPLACE INTO system_config "
                             "(config_key, config_value, description) VALUES (?,?,?)",
                             (_LAPLAI_TT_KEY, gt, 'P242'))
+            rieng = _LAPLAI_KHOA_RIENG.get(ket_qua)
+            if rieng:
+                if USE_POSTGRES:
+                    cur.execute("""
+                        INSERT INTO system_config (config_key, config_value, description)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (config_key) DO UPDATE
+                          SET config_value = EXCLUDED.config_value, updated_at = NOW()
+                    """, (rieng, gt, 'P243'))
+                else:
+                    cur.execute("INSERT OR REPLACE INTO system_config "
+                                "(config_key, config_value, description) VALUES (?,?,?)",
+                                (rieng, gt, 'P243'))
             conn.commit()
         finally:
             conn.close()
@@ -12188,7 +12211,8 @@ def canh_bao_lap_lai_trang_thai():
         try:
             cur = conn.cursor()
             ra = {}
-            for khoa in (_LAPLAI_STATE_KEY, _LAPLAI_TT_KEY):
+            for khoa in (_LAPLAI_STATE_KEY, _LAPLAI_TT_KEY,
+                         'lap_lai_gui_duoc_cuoi', 'lap_lai_hong_cuoi'):
                 cur.execute(f"SELECT config_value, updated_at FROM system_config "
                             f"WHERE config_key = {ph}", (khoa,))
                 r = cur.fetchone()
@@ -12203,7 +12227,17 @@ def canh_bao_lap_lai_trang_thai():
                 tt = json.loads(ra[_LAPLAI_TT_KEY]['gia_tri'])
             except Exception:
                 tt = ra[_LAPLAI_TT_KEY]['gia_tri']
+        def _giai(k):
+            v = ra.get(k)
+            if not v or not v.get('gia_tri'):
+                return None
+            try:
+                return json.loads(v['gia_tri'])
+            except Exception:
+                return v['gia_tri']
         return jsonify({
+            'gui_duoc_cuoi': _giai('lap_lai_gui_duoc_cuoi'),
+            'hong_cuoi':     _giai('lap_lai_hong_cuoi'),
             'moc_da_xet':  ra.get(_LAPLAI_STATE_KEY),
             'ky_moi_nhat': r[0] if r else None,
             'lan_chay_gan_nhat': tt,
