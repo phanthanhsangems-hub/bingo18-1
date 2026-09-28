@@ -1200,6 +1200,31 @@ jobs:
           PYEOF
           echo "canh_bao_lap_lai" >> /tmp/da_chay
 
+      - name: Tổng vắng lâu nhất (P244)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 60 -H "$H" "$BASE/api/tong/vang-lau-nhat?top=5&cb=$TS" > /tmp/vt.json
+          python3 - <<'PYEOF'
+          import json
+          d = json.load(open('/tmp/vt.json'))
+          print(f"=== TONG VANG LAU NHAT — {d['tong_so_ky']} ky (#{d['tu_ky']} -> #{d['den_ky']}) ===")
+          print("  tong  so_lan  TB_khoang  VANG_LAU_NHAT  (theo so ky)  tu -> den            dang_vang")
+          for t in range(3, 19):
+              x = d['tong'][str(t)]; v = x['vang_lau_nhat'] or {}
+              lech = '' if v.get('so_ky') == v.get('theo_so_ky') else '  <-- thieu ky trong khoang'
+              print(f"  {t:>4}  {x['so_lan']:>6}  {x['tb_khoang']!s:>9}  {v.get('so_ky')!s:>13}  {v.get('theo_so_ky')!s:>12}"
+                    f"  {v.get('tu_luc','')} -> {v.get('den_luc','')}  {x['dang_vang']:>5}{lech}")
+          print()
+          print("=== TONG 4: 5 lan vang lau nhat ===")
+          for k in d['tong']['4']['top']:
+              print(f"  {k['so_ky']:>5} ky (theo so ky {k['theo_so_ky']})  #{k['tu_ky']} {k['tu_luc']} -> #{k['den_ky']} {k['den_luc']}")
+          PYEOF
+          echo "vang_tong" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -1220,7 +1245,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai vang_tong"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"

@@ -12199,6 +12199,77 @@ def vote_log():
         return jsonify({'error': str(e)}), 500
 
 
+def _vang_theo_tong(rows, top=3):
+    """P244: moi tong 3..18 vang LAU NHAT bao nhieu ky.
+
+    rows: [(draw_number, tong, draw_time)] da sap theo draw_number tang dần.
+    Khoang vang dem SO KY THAT CO TRONG DB nam giua hai lan ra (khong tinh
+    hai dau). Kem 'theo_so_ky' = hieu so ky - 1: hai con so lech nhau nghia
+    la trong khoang do DB thieu ky (hoac Vietlott nhay so) — khi do con so
+    that chua chac, phai noi ra chu khong im.
+    """
+    vt = {}                        # tong -> [(chi so trong rows)]
+    for i, (_, t, _) in enumerate(rows):
+        vt.setdefault(t, []).append(i)
+    n = len(rows)
+    out = {}
+    for t in range(3, 19):
+        cs = vt.get(t, [])
+        khoang = []
+        for a, b in zip(cs, cs[1:]):
+            khoang.append({
+                'so_ky': b - a - 1,
+                'theo_so_ky': rows[b][0] - rows[a][0] - 1,
+                'tu_ky': rows[a][0], 'den_ky': rows[b][0],
+                'tu_luc': str(rows[a][2] or '')[:16],
+                'den_luc': str(rows[b][2] or '')[:16],
+            })
+        khoang.sort(key=lambda k: -k['so_ky'])
+        dang = (n - 1 - cs[-1]) if cs else n
+        out[str(t)] = {
+            'so_lan': len(cs),
+            'vang_lau_nhat': khoang[0] if khoang else None,
+            'top': khoang[:top],
+            'dang_vang': dang,
+            'lan_cuoi_ky': rows[cs[-1]][0] if cs else None,
+            'tb_khoang': round(sum(k['so_ky'] for k in khoang) / len(khoang), 1) if khoang else None,
+        }
+    return out
+
+
+@app.route('/api/tong/vang-lau-nhat')
+@limiter.limit("10 per minute")
+@cache_resp(ttl=300)
+def tong_vang_lau_nhat():
+    """P244: tong nao vang lau nhat bao nhieu ky, tren TOAN BO lich su."""
+    import ast as _ast
+    try:
+        top = max(1, min(int(request.args.get('top', 3)), 10))
+        conn = db.get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT draw_number, sum_value, numbers, draw_time FROM draw_history "
+                    "WHERE numbers IS NOT NULL ORDER BY draw_number")
+        raw = cur.fetchall()
+        conn.close()
+        rows = []
+        for dn, sv, ns, dt in raw:
+            if sv is None:
+                try:
+                    ns = ns if isinstance(ns, list) else _ast.literal_eval(ns)
+                    sv = sum(int(x) for x in ns)
+                except Exception:
+                    continue
+            rows.append((int(dn), int(sv), dt))
+        return jsonify({
+            'tong_so_ky': len(rows),
+            'tu_ky': rows[0][0] if rows else None,
+            'den_ky': rows[-1][0] if rows else None,
+            'tong': _vang_theo_tong(rows, top),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/canh-bao/lap-lai')
 @limiter.limit("30 per minute")
 def canh_bao_lap_lai_trang_thai():
