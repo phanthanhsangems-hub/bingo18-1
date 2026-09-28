@@ -1631,7 +1631,17 @@ _REGIME_WINDOW = 200               # cửa sổ lịch sử SIZE cho BOCPD regim
 # lâu. Người dùng chọn giảm trọng số nó. 1,0 = như cũ.
 # Diagnose (bước nhật ký phiếu) tính lại 600 lượt bầu gần nhất ở 1,0/0,5/0,25/0
 # để thấy mức này có đủ không — chỉnh số ở đây là đổi được.
-_VOTER_SCALE: dict = {'regime_bocpd': 0.5}
+#
+# P241: TRẢ VỀ 1,0. Đo thật trên production (diagnose #41, tái hiện khớp 99,6%):
+#                         toàn bộ 533 kỳ          sáng 28/09 (22 kỳ)
+#   bocpd x1,0             NHỎ 51,8%  LỚN 48,2%     NHỎ 100%
+#   bocpd x0,5 (P240)      NHỎ 59,1%  LỚN 40,9%     NHỎ 100%
+#   bocpd x0 (bỏ hẳn)      NHỎ 66,0%  LỚN 34,0%     NHỎ 95,5%
+# Giảm bocpd làm NHỎ NHIỀU HƠN: tính trên cả lịch sử nó hay bầu LỚN, tức nó
+# là đối trọng. Và sáng 28/09 bỏ hẳn nó vẫn NHỎ 95,5% — nó KHÔNG phải nguyên
+# nhân. Tôi chẩn đoán sai ở P240 vì chỉ nhìn "bocpd bầu NHỎ 16/16" mà không đo
+# phản thực tế trước khi đổi.
+_VOTER_SCALE: dict = {}
 
 def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
                      banned: set) -> tuple:

@@ -18,8 +18,10 @@ def kiem(ten, dk, ct=''):
     else:  HONG += 1; print(f"  HONG {ten}" + (f"  -> {ct}" if ct else ''))
 
 print("=== 1. HE SO ===")
-kiem("regime_bocpd x0.5", PS._VOTER_SCALE.get('regime_bocpd') == 0.5, str(PS._VOTER_SCALE))
-kiem("voter khac khong bi doi", all(k == 'regime_bocpd' for k in PS._VOTER_SCALE))
+# P241: tra ve 1,0 — do that tren production cho thay giam bocpd lam NHO NHIEU
+# hon (51,8% -> 59,1%), nguoc voi muc tieu. Co che _VOTER_SCALE van giu.
+kiem("P241: khong voter nao bi nhan he so (bocpd tro ve 1,0)", PS._VOTER_SCALE == {}, str(PS._VOTER_SCALE))
+kiem("co che _VOTER_SCALE van con", isinstance(PS._VOTER_SCALE, dict))
 
 def chuoi(scale, n=120, seed=3):
     rnd = random.Random(seed)
@@ -67,6 +69,8 @@ st = [x for j in w['jobs'].values() for x in j['steps'] if 'P239' in x.get('name
 py = st['run'].split("<<'PYEOF'\n", 1)[1].split("\nPYEOF", 1)[0]
 r = subprocess.run([sys.executable, '-c', py], capture_output=True, text=True)
 kiem("buoc diagnose chay khong loi", r.returncode == 0, r.stderr[-300:])
+for v in ('regime_bocpd', 'prior_nho', 'prior_lon', 'pair_cooc'):
+    kiem(f"P241: tinh lai ca voi {v}", f"-- {v} --" in r.stdout)
 kiem("tai hien khop 100%", 'khop 120/120 = 100.0%' in r.stdout,
      [l for l in r.stdout.split('\n') if 'khop' in l][:1])
 kiem(f"tinh lai o x0.5 = dung SIZE that da chon ({nho(b)}/120 NHO)",
