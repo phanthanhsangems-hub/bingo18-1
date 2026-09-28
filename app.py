@@ -513,6 +513,51 @@ _LAPLAI_KHOA_RIENG = {
 }
 
 
+# P245: nguoi dung bao "thieu bo khac" — trang thai chi giu MOT lan chay nen
+# khong doi chieu duoc da bao NHUNG BO NAO. Nay ghi tung su kien (ky, bo, cach,
+# gui duoc hay khong) vao mot danh sach xoay vong; diagnose so voi danh sach
+# LE RA phai bao tinh lai tu ket qua that.
+_LAPLAI_NK_KEY = 'lap_lai_nhat_ky'
+_LAPLAI_NK_MAX = 300
+
+
+def _laplai_ghi_nhat_ky(muc: list):
+    """Noi `muc` vao nhat ky (giu _LAPLAI_NK_MAX muc moi nhat). Khong nem loi."""
+    if not muc:
+        return
+    try:
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                        (_LAPLAI_NK_KEY,))
+            r = cur.fetchone()
+            try:
+                cu = json.loads(r[0]) if r and r[0] else []
+                if not isinstance(cu, list):
+                    cu = []
+            except Exception:
+                cu = []
+            gt = json.dumps((cu + list(muc))[-_LAPLAI_NK_MAX:], ensure_ascii=False)
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO system_config (config_key, config_value, description)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (config_key) DO UPDATE
+                      SET config_value = EXCLUDED.config_value, updated_at = NOW()
+                """, (_LAPLAI_NK_KEY, gt, 'P245: nhat ky tung bo da bao'))
+            else:
+                cur.execute("INSERT OR REPLACE INTO system_config "
+                            "(config_key, config_value, description) VALUES (?,?,?)",
+                            (_LAPLAI_NK_KEY, gt, 'P245'))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
 def _laplai_ghi_trang_thai(ket_qua: str, **them):
     """P242: ghi lại lần chạy gần nhất của cảnh báo 'bộ ra lại'.
 
@@ -699,6 +744,7 @@ def _check_lap_lai_alert(nguon: str = '?'):
                 return
             # Nguội máy lâu -> bỏ qua phần quá cũ, đừng bù một tràng.
             xet_tu = max(moc, moi_nhat - _LAPLAI_MAX_CATCHUP)
+            bo_qua = xet_tu - moc          # P245: so ky bi bo vi nguoi may qua lau
 
             su_kien = _tim_bo_ra_lai(ky, xet_tu)
             # Ai đổi được mốc thì người đó gửi (P242, chống gửi trùng).
@@ -710,6 +756,10 @@ def _check_lap_lai_alert(nguon: str = '?'):
         finally:
             conn.close()
 
+        luc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        if bo_qua > 0:
+            _laplai_ghi_nhat_ky([{'luc': luc, 'bo_qua_tu': moc + 1,
+                                  'bo_qua_den': xet_tu, 'nguon': nguon}])
         if not su_kien:
             _laplai_ghi_trang_thai('khong_bo_nao_ra_lai', nguon=nguon,
                                    tu=xet_tu + 1, den=moi_nhat, hong=hong)
@@ -743,6 +793,10 @@ def _check_lap_lai_alert(nguon: str = '?'):
         )
         _laplai_ghi_trang_thai('da_gui' if ok else 'gui_telegram_THAT_BAI', nguon=nguon,
                                so_bo=len(su_kien), den=moi_nhat)
+        _laplai_ghi_nhat_ky([{'luc': luc, 'den': e['den'], 'combo': e['combo'],
+                              'cach': e['cach'], 'ok': bool(ok), 'nguon': nguon,
+                              'liet_ke': i < _LAPLAI_MAX_LIET_KE}
+                             for i, e in enumerate(su_kien)])
     except Exception as e:
         # Không được làm chết vòng dự đoán — nhưng cũng KHÔNG được im lặng nữa.
         import traceback as _tb
@@ -12283,7 +12337,7 @@ def canh_bao_lap_lai_trang_thai():
             cur = conn.cursor()
             ra = {}
             for khoa in (_LAPLAI_STATE_KEY, _LAPLAI_TT_KEY,
-                         'lap_lai_gui_duoc_cuoi', 'lap_lai_hong_cuoi'):
+                         'lap_lai_gui_duoc_cuoi', 'lap_lai_hong_cuoi', _LAPLAI_NK_KEY):
                 cur.execute(f"SELECT config_value, updated_at FROM system_config "
                             f"WHERE config_key = {ph}", (khoa,))
                 r = cur.fetchone()
@@ -12309,6 +12363,7 @@ def canh_bao_lap_lai_trang_thai():
         return jsonify({
             'gui_duoc_cuoi': _giai('lap_lai_gui_duoc_cuoi'),
             'hong_cuoi':     _giai('lap_lai_hong_cuoi'),
+            'nhat_ky':       _giai(_LAPLAI_NK_KEY) or [],
             'moc_da_xet':  ra.get(_LAPLAI_STATE_KEY),
             'ky_moi_nhat': r[0] if r else None,
             'lan_chay_gan_nhat': tt,

@@ -541,6 +541,36 @@ with mock.patch.object(A.db, 'get_connection', return_value=K3()):
 kiem("endpoint tra 'gui_duoc_cuoi'", (dd.get('gui_duoc_cuoi') or {}).get('ket_qua') == 'da_gui', str(dd.get('gui_duoc_cuoi')))
 kiem("endpoint tra 'hong_cuoi'", (dd.get('hong_cuoi') or {}).get('ket_qua') == 'LOI', str(dd.get('hong_cuoi')))
 
+print("\n=== 19e. P245: NHAT KY TUNG BO DA BAO ===")
+kho = {}
+chay_canh_bao(d, moc=102, kho=kho)
+nk = _js.loads(kho.get('lap_lai_nhat_ky', '[]'))
+kiem("gui xong -> nhat ky co 1 muc", len(nk) == 1, nk)
+kiem("muc ghi dung ky / bo / cach / ok", nk and (nk[0]['den'], nk[0]['combo'], nk[0]['cach'], nk[0]['ok']) == (103, '235', 3, True), nk)
+d2 = d + [(104, (1,1,4), 6)]
+kho['lap_lai_last_draw'] = '103'
+chay_canh_bao(d2, moc=None, kho=kho)
+nk = _js.loads(kho['lap_lai_nhat_ky'])
+kiem("lan sau NOI THEM, khong ghi de", [m['combo'] for m in nk] == ['235', '114'], nk)
+kho = {}
+chay_canh_bao(d, moc=102, kho=kho, bot_tra=False)
+nk = _js.loads(kho.get('lap_lai_nhat_ky', '[]'))
+kiem("gui hong -> van ghi, ok=False", nk and nk[0]['ok'] is False, nk)
+# nhieu bo cung luc: ca nhung bo vuot _LAPLAI_MAX_LIET_KE cung phai co trong nhat ky
+nen = [(1,2,3),(1,2,4),(1,2,5),(1,2,6),(1,3,4),(1,3,5),(1,3,6),(1,4,5),(1,4,6),(1,5,6)]
+dai = [(200 + i, b, sum(b)) for i, b in enumerate(nen)] + [(210 + i, b, sum(b)) for i, b in enumerate(nen)]
+kho = {}
+chay_canh_bao(dai, moc=209, kho=kho)
+nk = [m for m in _js.loads(kho.get('lap_lai_nhat_ky', '[]')) if 'combo' in m]
+kiem("10 bo ra lai -> nhat ky du 10 (ke ca bo khong liet ke trong tin)", len(nk) == 10, len(nk))
+kiem("... bo thu 9, 10 danh dau liet_ke=False", sum(1 for m in nk if not m['liet_ke']) == 2)
+# nguoi may qua lau -> ghi so ky bi bo qua
+lau = [(300 + i, nen[i % 10], 0) for i in range(60)]
+kho = {}
+chay_canh_bao(lau, moc=300, kho=kho)
+bq = [m for m in _js.loads(kho.get('lap_lai_nhat_ky', '[]')) if 'bo_qua_tu' in m]
+kiem("bo qua vi nguoi may -> ghi ro khoang bi bo", bq and (bq[0]['bo_qua_tu'], bq[0]['bo_qua_den']) == (301, 319), bq)
+
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
