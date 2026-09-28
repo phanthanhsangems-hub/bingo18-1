@@ -4017,7 +4017,10 @@ def get_predictions_history():
             SELECT p.draw_number,
                    p.predicted_numbers,
                    p.model_name,
-                   COALESCE(p.win_prob, p.confidence) AS confidence,
+                   -- predictions_vn la VIEW, khong co cot win_prob (P247: lan dau
+                   -- doc thang p.win_prob -> 500) -> lay tu bang goc.
+                   COALESCE((SELECT x.win_prob FROM predictions x WHERE x.id = p.id),
+                            p.confidence) AS confidence,
                    p.full_time_vietnam,
                    pr.actual_numbers,
                    pr.match_count,

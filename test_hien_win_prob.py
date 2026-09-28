@@ -51,5 +51,37 @@ kiem("win_prob ~ WR -> KHONG canh bao", not gui, gui)
 sql, gui = chay([(0.60, i % 5 < 2) for i in range(20)])   # lech that 20 diem
 kiem("lech that > 15% -> VAN canh bao", len(gui) == 1, gui)
 
+print("\n=== 4. /api/predictions CHAY THAT tren VIEW cu (khong co win_prob) ===")
+# Loi that sau deploy P247: predictions_vn tao bang SELECT p.* TRUOC khi co
+# cot win_prob -> Postgres co dinh danh sach cot -> view khong co cot do -> 500.
+# SQLite tu mo rong p.* moi lan nen phai liet ke cot de dung lai dung canh do.
+import sqlite3, app as A
+k = sqlite3.connect(':memory:')
+k.executescript("""
+  CREATE TABLE predictions (id INTEGER PRIMARY KEY, draw_number INT, model_name TEXT,
+      predicted_numbers TEXT, confidence REAL, prediction_time TEXT);
+  CREATE VIEW predictions_vn AS SELECT p.id, p.draw_number, p.model_name, p.predicted_numbers,
+      p.confidence, p.prediction_time, p.prediction_time AS full_time_vietnam FROM predictions p;
+  ALTER TABLE predictions ADD COLUMN win_prob REAL;
+  CREATE TABLE prediction_results (prediction_id INT, actual_numbers TEXT, match_count INT,
+      is_win INT, is_win_size INT);
+  INSERT INTO predictions VALUES (1, 100, 'majority_vote', '[1,2,3]', 0.61, '2026-09-28', 0.39);
+  INSERT INTO predictions VALUES (2, 101, 'majority_vote', '[4,5,6]', 0.60, '2026-09-28', NULL);
+""")
+kiem("view that su KHONG co win_prob (dung canh loi)",
+     'win_prob' not in [r[1] for r in k.execute("PRAGMA table_info(predictions_vn)")])
+class KK:
+    def cursor(s): return k.cursor()
+    def close(s): pass
+with mock.patch.object(A.db, 'get_connection', return_value=KK()), \
+     mock.patch.object(A.db, '_ph', return_value='?'):
+    r = A.app.test_client().get('/api/predictions?limit=5')
+d = r.get_json()
+kiem("/api/predictions tra 200", r.status_code == 200, (r.status_code, d))
+if r.status_code == 200:
+    c = {x['draw_number']: x['confidence'] for x in d}
+    kiem("co win_prob -> hien 0.39 (khong phai 0.61)", c.get(100) == 0.39, c)
+    kiem("chua co win_prob -> lui ve confidence", c.get(101) == 0.60, c)
+
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
