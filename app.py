@@ -4017,7 +4017,7 @@ def get_predictions_history():
             SELECT p.draw_number,
                    p.predicted_numbers,
                    p.model_name,
-                   p.confidence,
+                   COALESCE(p.win_prob, p.confidence) AS confidence,
                    p.full_time_vietnam,
                    pr.actual_numbers,
                    pr.match_count,
@@ -5382,7 +5382,7 @@ def daily_card():
                         ELSE 'LON'
                     END AS pred_size,
                     COALESCE(pr.is_win_size, pr.is_win, FALSE) AS is_win,
-                    p.confidence
+                    COALESCE(p.win_prob, p.confidence) AS confidence
                 FROM predictions p
                 JOIN prediction_results pr ON pr.prediction_id = p.id
                 WHERE (pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
@@ -5452,7 +5452,7 @@ def prediction_timeline():
         cur  = conn.cursor()
         if USE_POSTGRES:
             cur.execute("""
-                SELECT p.draw_number, p.confidence,
+                SELECT p.draw_number, COALESCE(p.win_prob, p.confidence) AS confidence,
                     CASE
                         WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
                         WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
@@ -7077,10 +7077,10 @@ def daily_summary():
         avg_conf_today = None
         if _USE_PG:
             cur.execute(f"""
-                SELECT AVG(p.confidence)
+                SELECT AVG(COALESCE(p.win_prob, p.confidence))
                 FROM prediction_results pr
                 JOIN predictions p ON p.id = pr.prediction_id
-                WHERE {_TODAY_FILTER} AND p.confidence IS NOT NULL
+                WHERE {_TODAY_FILTER} AND COALESCE(p.win_prob, p.confidence) IS NOT NULL
             """)
             cr = cur.fetchone()
             if cr and cr[0]: avg_conf_today = float(cr[0])
@@ -8295,7 +8295,7 @@ def weekly_leaderboard():
             SELECT p.model_name,
                    COUNT(*) AS total,
                    SUM(CASE WHEN pr.is_win_size THEN 1 ELSE 0 END) AS wins,
-                   ROUND(AVG(p.confidence)::numeric, 3) AS avg_conf
+                   ROUND(AVG(COALESCE(p.win_prob, p.confidence))::numeric, 3) AS avg_conf
             FROM predictions p
             JOIN prediction_results pr ON pr.prediction_id = p.id
             JOIN draw_history dh ON dh.draw_number = p.draw_number
@@ -8940,7 +8940,7 @@ def _tg_cmd_predict(conn, reply):
     import ast as _ast, json as _json
     cur = conn.cursor()
     cur.execute("""
-        SELECT p.draw_number, p.predicted_numbers, p.model_name, p.confidence,
+        SELECT p.draw_number, p.predicted_numbers, p.model_name, COALESCE(p.win_prob, p.confidence) AS confidence,
                p.created_at, pr.is_win, pr.actual_numbers, p.vote_breakdown
         FROM predictions p
         LEFT JOIN prediction_results pr ON p.draw_number = pr.draw_number
@@ -10012,7 +10012,7 @@ def _tg_cmd_explain(conn, reply):
     import json as _json, ast as _ast
     cur = conn.cursor()
     cur.execute("""
-        SELECT p.draw_number, p.predicted_numbers, p.confidence,
+        SELECT p.draw_number, p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence,
                p.vote_breakdown, pr.is_win, pr.actual_numbers
         FROM predictions p
         LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
@@ -10446,7 +10446,7 @@ def _tg_cmd_recap(conn, reply, n: int = 100):
                 ELSE 'LON'
             END AS act_size,
             EXTRACT(HOUR FROM dh.draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::int AS vn_hour,
-            p.confidence
+            COALESCE(p.win_prob, p.confidence) AS confidence
         FROM predictions p
         JOIN prediction_results pr ON pr.prediction_id = p.id
         JOIN draw_history dh        ON dh.draw_number  = pr.draw_number
@@ -11237,7 +11237,7 @@ def _tg_ai_chat(conn, user_message: str, reply):
 
     # Dự đoán mới nhất
     cur.execute("""
-        SELECT draw_number, predicted_numbers, model_name, confidence
+        SELECT draw_number, predicted_numbers, model_name, COALESCE(win_prob, confidence) AS confidence
         FROM predictions ORDER BY draw_number DESC LIMIT 1
     """)
     pr = cur.fetchone()
@@ -11738,7 +11738,7 @@ def recent_outcomes():
                        d.sum_value,
                        d.draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh' AS draw_vn,
                        p.predicted_numbers,
-                       p.confidence,
+                       COALESCE(p.win_prob, p.confidence) AS confidence,
                        pr.is_win_size,
                        pr.match_count
                 FROM draw_history d
@@ -11750,7 +11750,7 @@ def recent_outcomes():
         else:
             cur.execute("""
                 SELECT d.draw_number, d.numbers, d.size_category, d.sum_value,
-                       d.draw_time, p.predicted_numbers, p.confidence,
+                       d.draw_time, p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence,
                        pr.is_win_size, pr.match_count
                 FROM draw_history d
                 LEFT JOIN predictions p
@@ -11861,7 +11861,7 @@ def today_draws():
                        d.size_category,
                        d.draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh' AS draw_vn,
                        p.predicted_numbers,
-                       p.confidence,
+                       COALESCE(p.win_prob, p.confidence) AS confidence,
                        pr.is_win_size,
                        pr.match_count
                 FROM draw_history d
@@ -11875,7 +11875,7 @@ def today_draws():
         else:
             cur.execute("""
                 SELECT d.draw_number, d.numbers, d.size_category, d.draw_time,
-                       p.predicted_numbers, p.confidence, pr.is_win_size, pr.match_count
+                       p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence, pr.is_win_size, pr.match_count
                 FROM draw_history d
                 LEFT JOIN predictions p
                   ON p.draw_number = d.draw_number AND p.model_name = 'majority_vote'

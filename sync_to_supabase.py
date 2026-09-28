@@ -710,16 +710,21 @@ def check_system_health_alert(conn, sh_alerted: dict):
 
 
 def check_confidence_gap(conn, gap_alerted: dict):
-    """#47 Alert khi avg confidence - actual WR > 15% trong 20 kỳ đã đánh giá."""
+    """#47 Alert khi avg confidence - actual WR > 15% trong 20 kỳ đã đánh giá.
+
+    P247: đo con số ĐÃ HIỆU CHỈNH (win_prob) — cái người dùng thật sự thấy —
+    không phải cột confidence (điểm thô của model, luôn ~60% vì model không
+    có tín hiệu thật). Đo điểm thô thì cảnh báo bật gần như thường trực.
+    """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
         return
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT p.confidence, pr.is_win_size
+            SELECT p.win_prob, pr.is_win_size
             FROM predictions p
             JOIN prediction_results pr ON pr.prediction_id = p.id
-            WHERE pr.is_win_size IS NOT NULL AND p.confidence IS NOT NULL
+            WHERE pr.is_win_size IS NOT NULL AND p.win_prob IS NOT NULL
             ORDER BY p.draw_number DESC
             LIMIT 20
         """)

@@ -2319,7 +2319,7 @@ def _send_explain_breakdown(db, telegram, draw_number: int):
         cur  = conn.cursor()
         ph = '%s' if USE_POSTGRES else '?'
         cur.execute(f"""
-            SELECT p.draw_number, p.predicted_numbers, p.confidence,
+            SELECT p.draw_number, p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence,
                    p.vote_breakdown, pr.is_win, pr.actual_numbers
             FROM predictions p
             LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
