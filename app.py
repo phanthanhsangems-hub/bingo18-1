@@ -12038,6 +12038,64 @@ def bet_signal():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/vote-log')
+@limiter.limit("30 per minute")
+def vote_log():
+    """P239: nhật ký bỏ phiếu SIZE của n dự đoán gần nhất.
+
+    Người dùng thấy 10/10 dự đoán sáng 28/09 đều NHỎ. /api/voter-current chỉ
+    cho kỳ mới nhất, /api/predictions không có phiếu — không có chỗ nào trả
+    lời được "NHỎ đến từ bước nào". Endpoint này tách ba mốc:
+      majority_size : kết quả bỏ phiếu
+      final_size    : sau _apply_size_prediction + _hot_adjust_size
+      pred_size     : tính lại từ bộ số đã lưu (phải khớp final_size)
+    kèm size_weights và phiếu từng voter.
+    """
+    try:
+        n = max(1, min(int(request.args.get('n', 100)), 1000))
+    except ValueError:
+        n = 100
+    try:
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"""
+                SELECT draw_number, predicted_numbers, vote_breakdown, created_at
+                FROM predictions
+                ORDER BY draw_number DESC LIMIT {ph}
+            """, (n,))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+        ra = []
+        for dn, pn, vb, ca in rows:
+            try:
+                nums = json.loads(pn) if isinstance(pn, str) else (pn or [])
+                nums = [int(x) for x in nums]
+            except Exception:
+                nums = []
+            try:
+                v = json.loads(vb) if isinstance(vb, str) else (vb or {})
+            except Exception:
+                v = {}
+            s_ = sum(nums)
+            ra.append({
+                'draw_number':   dn,
+                'created_at':    str(ca) if ca else None,
+                'numbers':       nums,
+                'pred_size':     ('NHO' if s_ <= 9 else ('HOA' if s_ <= 11 else 'LON')) if nums else None,
+                'majority_size': v.get('majority_size'),
+                'final_size':    v.get('final_size'),
+                'size_flipped':  v.get('size_flipped'),
+                'size_weights':  v.get('size_weights'),
+                'all_votes':     v.get('all_votes'),
+            })
+        return jsonify({'n': len(ra), 'predictions': ra})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/voter-current')
 @limiter.limit("60 per minute")
 def voter_current():

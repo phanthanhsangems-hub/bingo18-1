@@ -1063,6 +1063,67 @@ jobs:
           fi
           echo "cong_dang_nhap" >> /tmp/da_chay
 
+      - name: Nhật ký bỏ phiếu SIZE (P239) — NHỎ đến từ bước nào
+        # Nguoi dung thay 10/10 du doan sang 28/09 deu NHO, ngay sau P237.
+        # Buoc nay tach: ket qua BO PHIEU (majority) vs SIZE CUOI (sau hai buoc
+        # chinh), va so sanh TRUOC / SAU moc deploy P237.
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 40 -H "$H" "$BASE/api/vote-log?n=600&cb=$TS" > /tmp/vl.json
+          python3 -c "import json;json.load(open('/tmp/vl.json'))" 2>/dev/null || {
+            echo "LOI: /api/vote-log khong tra JSON:"; head -c 300 /tmp/vl.json; echo; exit 1; }
+          python3 - <<'PYEOF'
+          import json
+          from collections import Counter
+          d = json.load(open('/tmp/vl.json'))
+          if 'predictions' not in d:
+              print("HONG:", json.dumps(d)[:300]); raise SystemExit(1)
+          P = [x for x in d['predictions'] if x.get('created_at')]
+          MOC = '2026-09-27 21:32'          # deploy #165 (P237), UTC
+          truoc = [x for x in P if x['created_at'][:16] <  MOC]
+          sau   = [x for x in P if x['created_at'][:16] >= MOC]
+          def ty(ds, k):
+              c = Counter(x.get(k) for x in ds); n = len(ds) or 1
+              return ", ".join(f"{s} {c.get(s,0)*100/n:4.1f}%" for s in ('NHO','HOA','LON'))
+          print("=== SIZE: TRUOC vs SAU P237 ===")
+          for ten, ds in (("TRUOC P237", truoc), ("SAU   P237", sau)):
+              print(f"  {ten}: n={len(ds):3}  bo phieu: {ty(ds,'majority_size')}")
+              print(f"  {'':10}         SIZE cuoi: {ty(ds,'final_size')}")
+          print("")
+          print("=== DOI SIZE SAU BO PHIEU (majority -> final) ===")
+          for ten, ds in (("TRUOC", truoc), ("SAU", sau)):
+              f = Counter(x['size_flipped'] for x in ds if x.get('size_flipped'))
+              print(f"  {ten}: {sum(f.values())}/{len(ds)} ky bi doi  {dict(f) if f else ''}")
+          print("")
+          print("=== PHIEU TUNG VOTER (SAU P237) ===")
+          vt = {}
+          for x in sau:
+              for ten, sz in (x.get('all_votes') or {}).items():
+                  vt.setdefault(ten, Counter())[sz] += 1
+          for ten in sorted(vt, key=lambda t: -sum(vt[t].values())):
+              c = vt[ten]; n = sum(c.values())
+              print(f"  {ten:16} n={n:3}  NHO {c['NHO']*100/n:5.1f}%  LON {c['LON']*100/n:5.1f}%  HOA {c['HOA']*100/n:5.1f}%")
+          print("")
+          print("=== BO SO (SAU P237) ===")
+          if sau:
+              lap = sum(1 for x in sau if x['numbers'] and len(set(x['numbers'])) < 3)
+              ba  = sum(1 for x in sau if x['numbers'] and len(set(x['numbers'])) == 1)
+              print(f"  co so lap: {lap}/{len(sau)} = {lap*100/len(sau):.1f}%   bo ba: {ba}/{len(sau)}")
+              print(f"  bo hay dung: {Counter(tuple(sorted(x['numbers'])) for x in sau).most_common(6)}")
+          print("")
+          print("=== 15 KY GAN NHAT ===")
+          for x in P[:15]:
+              w = x.get('size_weights') or {}
+              print(f"  #{x['draw_number']} {x['created_at'][11:16]}  {x['numbers']}  "
+                    f"phieu={x.get('majority_size')} cuoi={x.get('final_size')}  "
+                    f"w_NHO={w.get('NHO')} w_LON={w.get('LON')}")
+          PYEOF
+          echo "nhat_ky_phieu" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -1083,7 +1144,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
