@@ -297,37 +297,75 @@ ky = [(100, (2,3,5), 10), (101, (1,1,4), 6), (102, (6,6,6), 18),
 tin, moc_moi = chay_canh_bao(ky, moc=102)
 kiem("co gui tin", tin is not None)
 kiem("tin neu ten bo dang 2-3-5", '2-3-5' in (tin or ''))
-kiem("tin noi ro cach may ky", 'ra lại sau <b>3 kỳ</b>' in (tin or ''))
-# P234: nguoi dung chi can "bo nao ra lai" + "cac tong da ra ke tu lan truoc".
-kiem("tin liet ke cac TONG da ra (6, 18)",
-     'Tổng đã ra: <b>6 · 18</b>' in (tin or ''), tin)
-kiem("P234: BO dong so ky (#100 -> #103)",
-     '#100' not in (tin or '') and '→' not in (tin or ''))
-kiem("P234: BO dong 'tong cua chinh ky ra lai' (thua: 2-3-5 luc nao cung = 10)",
-     'chính kỳ ra lại' not in (tin or ''))
-kiem("P234: tin chi con 2 dong noi dung + gio",
-     len([l for l in (tin or '').split('\n') if l.strip()]) == 3, repr(tin))
+# P238: noi dung = TONG cua ky NGAY SAU moi lan bo do ra (160 ky), khong phai
+# cac tong nam giua, khong can khoang cach. ky: 235@100 -> #101 tong 6.
+kiem("tin bao bo vua ra lai", '<b>2-3-5</b> vừa ra lại' in (tin or ''), tin)
+kiem("P238: liet ke tong cua ky NGAY SAU lan truoc (#101 = 6)",
+     'kỳ ngay sau 2-3-5 ra tổng:\n<b>6</b>' in (tin or ''), tin)
+kiem("P238: KHONG con 'ra lai sau N ky' (khong can khoang cach)",
+     'ra lại sau' not in (tin or ''))
+kiem("P238: KHONG con 'Tong da ra' (cac tong nam giua)",
+     'Tổng đã ra' not in (tin or '') and '6 · 18' not in (tin or ''))
+kiem("P238: KHONG con so ky #100", '#100' not in (tin or ''))
 kiem("da ghi moc moi = ky moi nhat", moc_moi == 103, str(moc_moi))
 
-print("\n=== 15b. MOI BO DEU DUOC BAO, KHONG CHI RIENG 235 (P234) ===")
-# Ba bo khac nhau cung ra lai trong cung mot lan chay.
-nhieu = [(300, (2,3,5), 10), (301, (1,1,4), 6), (302, (6,6,6), 18),
-         (303, (1,1,4), 6),                    # 1-1-4 ra lai sau 2 ky
-         (304, (6,6,6), 18),                   # 6-6-6 ra lai sau 2 ky
-         (305, (2,3,5), 10),                   # 2-3-5 ra lai sau 5 ky
-         (306, (3,4,6), 13)]
+print("\n=== 15b. TONG CUA KY NGAY SAU MOI LAN (P238) ===")
+# 1-2-3 ra o #300, #303, #306, #309. Ky ngay sau: #301 t=9, #304 t=15, #307 t=12.
+# Lan #309 la lan ra lai -> liet ke 3 lan truoc: 9 · 15 · 12 (cu -> moi).
+d = [(300,(1,2,3),6),(301,(1,2,6),9),(302,(4,5,6),15),
+     (303,(1,2,3),6),(304,(4,5,6),15),(305,(3,3,3),9),
+     (306,(1,2,3),6),(307,(2,4,6),12),(308,(1,1,4),6),
+     (309,(1,2,3),6)]
+tin, _ = chay_canh_bao(d, moc=308)
+kiem("1-2-3 vua ra lai", '<b>1-2-3</b> vừa ra lại' in (tin or ''), tin)
+kiem("liet ke dung tong ky ngay sau cac lan truoc: 9 · 15 · 12",
+     '<b>9 · 15 · 12</b>' in (tin or ''), tin)
+kiem("ghi ro thu tu cu -> moi va pham vi 160 ky",
+     'cũ → mới' in (tin or '') and '160 kỳ' in (tin or ''))
+
+print("\n--- ham _tong_sau_cac_lan ---")
+kiem("tra (ky bo ra, tong ky sau)",
+     A._tong_sau_cac_lan(d, (1,2,3), 309) == [(300,9),(303,15),(306,12)],
+     str(A._tong_sau_cac_lan(d, (1,2,3), 309)))
+kiem("KHONG tinh lan ra lai hien tai", all(k < 309 for k, _ in A._tong_sau_cac_lan(d, (1,2,3), 309)))
+kiem("chi trong cua so 160 ky",
+     A._tong_sau_cac_lan([(1,(1,2,3),6),(2,(1,2,6),9),(500,(1,2,3),6)], (1,2,3), 500) == [])
+kiem("cua so dung 160 (nguoi dung chon)", A._LAPLAI_CUA_SO_SAU == 160)
+lien = [(400,(1,2,3),6),(401,(1,2,3),6)]
+kiem("ra lai ngay ky ke tiep: ky sau lan truoc CHINH la ky nay (tong 6)",
+     A._tong_sau_cac_lan(lien, (1,2,3), 401) == [(400,6)])
+thung = [(500,(1,2,3),6),(502,(4,5,6),15),(503,(1,2,3),6)]    # thieu #501
+kiem("ky ngay sau bi thieu -> None, KHONG lay ky ke tiep ma doan",
+     A._tong_sau_cac_lan(thung, (1,2,3), 503) == [(500, None)])
+tin, _ = chay_canh_bao(thung, moc=502)
+kiem("tin hien '?' va giai thich khi thieu", '<b>?</b>' in (tin or '') and 'thiếu' in (tin or ''), tin)
+
+print("\n--- phai LAY DU 160 ky (ban cu chi lay 55) ---")
+# 1-2-3 o #1001 (ky sau #1002 tong 17), roi ra lai o #1150 va #1158.
+# #1001 cach #1158 la 157 ky: nam trong 160 -> PHAI co tong 17 trong tin.
+# Nen: 12 bo khac nhau xoay vong -> khong bo nen nao ra lai trong <= 10 ky
+# (lan dau toi dung toan 4-5-6, no "ra lai" moi ky va chiem het tin nhan).
+nen = [c for c in A._WAYS_COMBO if len(set(c)) == 3 and c != (1,2,3)][:12] \
+      if hasattr(A, '_WAYS_COMBO') else [(1,2,4),(1,2,5),(1,2,6),(1,3,4),(1,3,5),(1,3,6),
+                                          (1,4,5),(1,4,6),(1,5,6),(2,3,4),(2,3,5),(2,3,6)]
+dai = [(1000 + i, nen[i % 12], sum(nen[i % 12])) for i in range(0, 170)]
+dai = [x for x in dai if x[0] not in (1001, 1002, 1150, 1158)]
+dai += [(1001,(1,2,3),6), (1002,(5,6,6),17), (1150,(1,2,3),6), (1158,(1,2,3),6)]
+dai.sort()
+sau_1150 = dict((d, t) for d, _, t in dai)[1151]
+tin, _ = chay_canh_bao(dai, moc=1157)
+kiem("lan ra cach 157 ky van duoc tinh (tong 17 ngay sau #1001)",
+     f'<b>17 · {sau_1150}</b>' in (tin or ''), tin)
+
+print("\n--- nhieu bo cung ra lai ---")
+nhieu = [(300,(2,3,5),10),(301,(1,1,4),6),(302,(6,6,6),18),
+         (303,(1,1,4),6),(304,(6,6,6),18),(305,(2,3,5),10),(306,(3,4,6),13)]
 tin, _ = chay_canh_bao(nhieu, moc=302)
-for bo in ('2-3-5', '1-1-4', '6-6-6'):
-    kiem(f"bo {bo} co trong tin", f'<b>{bo}</b> ra lại' in (tin or ''), tin)
-kiem("bo 3-4-6 (khong ra lai) KHONG co trong tin", '3-4-6' not in (tin or ''))
-kiem("1-1-4: tong da ra = 18 (ky 302)",
-     '<b>1-1-4</b> ra lại sau <b>2 kỳ</b>\nTổng đã ra: <b>18</b>' in (tin or ''))
-kiem("2-3-5: tong da ra = 6 · 18 · 6 · 18",
-     '<b>2-3-5</b> ra lại sau <b>5 kỳ</b>\nTổng đã ra: <b>6 · 18 · 6 · 18</b>' in (tin or ''))
-lien = [(400, (1,2,3), 6), (401, (1,2,3), 6)]
-tin, _ = chay_canh_bao(lien, moc=400)
-kiem("ra lai ngay ky ke tiep -> noi ro khong co tong xen giua",
-     'chưa có tổng nào ra xen giữa' in (tin or ''), tin)
+for bo in ('2-3-5','1-1-4','6-6-6'):
+    kiem(f"bo {bo} co trong tin", f'<b>{bo}</b> vừa ra lại' in (tin or ''), tin)
+kiem("bo 3-4-6 (khong ra lai) KHONG co", '3-4-6' not in (tin or ''))
+kiem("1-1-4 @301 -> ky #302 tong 18", 'kỳ ngay sau 1-1-4 ra tổng:\n<b>18</b>' in (tin or ''))
+kiem("2-3-5 @300 -> ky #301 tong 6",  'kỳ ngay sau 2-3-5 ra tổng:\n<b>6</b>' in (tin or ''))
 
 print("\n=== 16. KHONG DUOC SPAM ===")
 tin, moc_moi = chay_canh_bao(ky, moc=103)
@@ -354,8 +392,8 @@ tin, moc_moi = chay_canh_bao(dai, moc=500)
 kiem("van chot moc len ky moi nhat", moc_moi == 799, str(moc_moi))
 kiem("CO gui tin (khong duoc im lang)", tin is not None)
 kiem(f"chi liet ke toi da {A._LAPLAI_MAX_LIET_KE} su kien",
-     tin.count('ra lại sau') == A._LAPLAI_MAX_LIET_KE,
-     str(tin.count('ra lại sau')))
+     tin.count('vừa ra lại') == A._LAPLAI_MAX_LIET_KE,
+     str(tin.count('vừa ra lại')))
 kiem("co ghi chu '+N lan nua'", 'lần nữa)' in tin)
 # Chan bu: chi xet _LAPLAI_MAX_CATCHUP ky gan nhat, nen su kien cu nhat
 # khong duoc som hon moc nay.

@@ -154,6 +154,9 @@ _LAPLAI_ALERT_GAP     = 10
 # xét tối đa ngần này kỳ mới; cũ hơn thì bỏ qua im lặng.
 _LAPLAI_MAX_CATCHUP   = 40
 _LAPLAI_MAX_LIET_KE   = 8        # mỗi tin liệt kê tối đa 8 sự kiện
+# P238: với mỗi bộ vừa ra lại, liệt kê TỔNG của kỳ NGAY SAU mỗi lần bộ đó ra
+# trong ngần này kỳ gần nhất (người dùng chọn 160 ≈ 1 ngày).
+_LAPLAI_CUA_SO_SAU    = 160
 # Mốc "đã xét tới kỳ nào" nằm trong system_config chứ KHÔNG phải biến RAM:
 # Cloud Run co về 0 instance, biến RAM mất sau mỗi lần nguội máy, mà
 # /api/predict thì 6 phút một lần — để trong RAM là cảnh báo gần như không
@@ -497,6 +500,29 @@ def _laplai_ghi_moc(cur, dn: int):
             (_LAPLAI_STATE_KEY, str(dn), 'P231: ky cuoi da xet canh bao bo ra lai'))
 
 
+def _tong_sau_cac_lan(ky: list, bo: tuple, den: int, cua_so: int = None) -> list:
+    """P238: mỗi lần `bo` ra TRƯỚC kỳ `den` (trong `cua_so` kỳ gần nhất), kỳ
+    NGAY SAU lần đó ra tổng mấy. Trả [(kỳ bộ ra, tổng kỳ sau hoặc None)], cũ -> mới.
+
+    Người dùng muốn cái này — KHÔNG phải các tổng nằm giữa hai lần ra (P229-P234
+    tôi hiểu sai, người dùng phải sửa lại):
+      "sau 1 2 3 ra tổng gì và những lần sau 1 2 3 đã ra tổng gì,
+       không cần báo khoảng cách giữa hai lần ra số đó"
+
+    None = kỳ ngay sau bị thiếu trong DB: nói thẳng là không biết, không lấy
+    kỳ kế tiếp nữa mà đoán — "kỳ ngay sau" phải đúng là kỳ +1.
+    """
+    if cua_so is None:
+        cua_so = _LAPLAI_CUA_SO_SAU
+    theo_dn = {d: (b, t) for d, b, t in ky}
+    ra = []
+    for d, b, _ in ky:
+        if b == bo and den - cua_so <= d < den:
+            sau = theo_dn.get(d + 1)
+            ra.append((d, sau[1] if sau else None))
+    return ra
+
+
 def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None) -> list:
     """Các kỳ MỚI (draw_number > moc) mà bộ của nó đã ra trong 'gap' kỳ liền trước.
 
@@ -563,7 +589,7 @@ def _check_lap_lai_alert():
             moc = _laplai_doc_moc(cur)
             # Cần đủ kỳ để vừa bù được _LAPLAI_MAX_CATCHUP kỳ mới, vừa nhìn
             # ngược _LAPLAI_ALERT_GAP kỳ cho kỳ mới nhất trong số đó.
-            lay = _LAPLAI_MAX_CATCHUP + _LAPLAI_ALERT_GAP + 5
+            lay = _LAPLAI_MAX_CATCHUP + max(_LAPLAI_ALERT_GAP, _LAPLAI_CUA_SO_SAU) + 5
             cur.execute(
                 f"SELECT draw_number, numbers FROM draw_history "
                 f"WHERE numbers IS NOT NULL ORDER BY draw_number DESC LIMIT {ph}",
@@ -604,21 +630,21 @@ def _check_lap_lai_alert():
 
         su_kien.sort(key=lambda x: (x['cach'], x['den']))
         dong = []
-        # P234: người dùng chỉ cần "bộ nào ra lại" + "các tổng đã ra kể từ lần
-        # trước". Bỏ dòng số kỳ (#188.572 → #188.578) và bỏ dòng "tổng của chính
-        # kỳ ra lại" — dòng đó thừa: tổng của 2-3-5 lúc nào cũng là 10.
-        # GIỮ cảnh báo thiếu kỳ: thiếu dữ liệu mà im lặng là để người đọc tưởng
-        # đã thấy đủ dãy tổng.
+        # P238: người dùng sửa lần nữa — cái cần là TỔNG CỦA KỲ NGAY SAU mỗi lần
+        # bộ đó ra (trong 160 kỳ), KHÔNG phải các tổng nằm giữa hai lần ra, và
+        # không cần khoảng cách. Báo ngay lúc bộ ra lại để tham khảo TRƯỚC khi
+        # kỳ kế tiếp ra.
         for e in su_kien[:_LAPLAI_MAX_LIET_KE]:
-            bo = '-'.join(e['combo'])
-            dong.append(f"🔁 <b>{bo}</b> ra lại sau <b>{e['cach']} kỳ</b>")
-            if e['tong_giua']:
-                dong.append("Tổng đã ra: <b>"
-                            + " · ".join(str(t) for t in e['tong_giua']) + "</b>")
-            else:
-                dong.append("Ra lại ngay kỳ kế tiếp — chưa có tổng nào ra xen giữa.")
-            if e['thieu_ky']:
-                dong.append("⚠️ Giữa chừng thiếu kỳ — dãy tổng trên CHƯA ĐỦ.")
+            bo  = tuple(int(x) for x in e['combo'])
+            ten = '-'.join(e['combo'])
+            cac = _tong_sau_cac_lan(ky, bo, e['den'])
+            dong.append(f"🔁 <b>{ten}</b> vừa ra lại")
+            dong.append(f"Những lần trước ({_LAPLAI_CUA_SO_SAU} kỳ gần nhất, cũ → mới), "
+                        f"kỳ ngay sau {ten} ra tổng:")
+            dong.append("<b>" + " · ".join('?' if t is None else str(t)
+                                            for _, t in cac) + "</b>")
+            if any(t is None for _, t in cac):
+                dong.append("⚠️ '?' = kỳ ngay sau bị thiếu trong dữ liệu.")
             dong.append("")
         if len(su_kien) > _LAPLAI_MAX_LIET_KE:
             dong.append(f"(+{len(su_kien) - _LAPLAI_MAX_LIET_KE} lần nữa)")
