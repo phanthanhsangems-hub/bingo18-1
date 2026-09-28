@@ -255,20 +255,40 @@ kiem("khong co gi lap -> rong",
 kiem("danh sach rong -> khong chet", A._tim_bo_ra_lai([], moc=0) == [])
 
 print("\n=== 15. TIN TELEGRAM ===")
-def chay_canh_bao(ky, moc, gio=12):
-    """Chay _check_lap_lai_alert, tra ve (tin da gui hoac None, moc da ghi)."""
+CHAY_CUOI = {}
+def chay_canh_bao(ky, moc, gio=12, thua_cas=False, kho=None, bot_tra=True):
+    """Chay _check_lap_lai_alert, tra ve (tin da gui hoac None, moc da ghi).
+
+    P242: con tro gia la mot KHO khoa-gia tri nho dung ngu nghia that:
+    SELECT doc, INSERT/UPSERT ghi, UPDATE ... WHERE value = cu chi doi khi
+    gia tri van la `cu` (rowcount 1/0). thua_cas=True gia lap duong kia
+    (trigger/predict) vua doi moc truoc.
+    """
+    if kho is None:
+        kho = {}
+    if moc is not None:
+        kho.setdefault('lap_lai_last_draw', str(moc))
     ghi = {}
     class C:
+        rowcount = 0
         def execute(s, q, *a):
             s.q = q; s.a = a[0] if a else ()
-            if 'system_config' in q and q.strip().upper().startswith('SELECT'):
-                s.mode = 'moc'
-            elif 'system_config' in q:
-                ghi['moc'] = int(s.a[1]); s.mode = 'ghi'
+            Q = q.strip().upper()
+            if 'SYSTEM_CONFIG' in Q and Q.startswith('SELECT'):
+                s.mode = 'doc'; s.khoa = s.a[0]
+            elif 'SYSTEM_CONFIG' in Q and Q.startswith('UPDATE'):
+                moi_, khoa, cu = s.a
+                if not thua_cas and kho.get(khoa) == cu:
+                    kho[khoa] = moi_; s.rowcount = 1
+                else:
+                    s.rowcount = 0
+            elif 'SYSTEM_CONFIG' in Q:
+                kho[s.a[0]] = s.a[1]; s.rowcount = 1
             else:
                 s.mode = 'ky'
         def fetchone(s):
-            return None if moc is None else (str(moc),)
+            v = kho.get(getattr(s, 'khoa', None))
+            return None if v is None else (v,)
         def fetchall(s):
             k = s.a[0] if s.a else len(ky)
             return [(d, str(list(b))) for d, b, _ in sorted(ky, key=lambda r: -r[0])[:k]]
@@ -276,6 +296,7 @@ def chay_canh_bao(ky, moc, gio=12):
     class K:
         def cursor(s): return C()
         def commit(s): pass
+        def rollback(s): pass
         def close(s): pass
     import datetime as _dt
     from zoneinfo import ZoneInfo
@@ -285,12 +306,19 @@ def chay_canh_bao(ky, moc, gio=12):
         def now(cls, tz=None): return that
     gui = []
     bot = mock.MagicMock()
-    bot.return_value.send_message.side_effect = lambda m, *a, **k: gui.append(m)
+    def _gui(m, *a, **k):
+        gui.append(m)
+        if isinstance(bot_tra, Exception):
+            raise bot_tra
+        return bot_tra
+    bot.return_value.send_message.side_effect = _gui
     with mock.patch.object(A.db, 'get_connection', return_value=K()), \
          mock.patch.object(A, 'datetime', FakeDT), \
          mock.patch.dict('sys.modules', {'telegram_bot': mock.MagicMock(TelegramBot=bot)}):
         A._check_lap_lai_alert()
-    return (gui[0] if gui else None), ghi.get('moc')
+    v = kho.get('lap_lai_last_draw')
+    CHAY_CUOI.clear(); CHAY_CUOI.update(kho)
+    return (gui[0] if gui else None), (int(v) if v is not None else None)
 
 ky = [(100, (2,3,5), 10), (101, (1,1,4), 6), (102, (6,6,6), 18),
       (103, (2,3,5), 10)]
@@ -412,9 +440,74 @@ with mock.patch.object(A.db, 'get_connection', side_effect=RuntimeError('DB die'
         kiem("DB chet -> nuot loi, khong nem ra ngoai", True)
     except Exception as ex:
         kiem("DB chet -> nuot loi, khong nem ra ngoai", False, repr(ex))
-kiem("da duoc goi trong /api/predict", '_check_lap_lai_alert()' in ap)
+kiem("da duoc goi trong /api/predict", "_check_lap_lai_alert('predict')" in ap)
 kiem("moc luu o system_config (song qua nguoi may), khong phai bien RAM",
      "_LAPLAI_STATE_KEY" in ap and "system_config" in ap)
+
+print("\n=== 19. P242: GHI TRANG THAI + CHONG GUI TRUNG + GOI TU HAI DUONG ===")
+import json as _js
+d = [(100,(2,3,5),10),(101,(1,1,4),6),(102,(6,6,6),18),(103,(2,3,5),10)]
+def tt(): return _js.loads(CHAY_CUOI.get('lap_lai_trang_thai', '{}'))
+
+tin, m = chay_canh_bao(d, moc=102)
+kiem("gui xong -> ghi 'da_gui'", tt().get('ket_qua') == 'da_gui', str(tt()))
+kiem("ghi so bo va ky", tt().get('so_bo') == 1 and tt().get('den') == 103)
+
+tin, m = chay_canh_bao(d, moc=102, thua_cas=True)
+kiem("duong kia doi moc truoc -> KHONG gui (chong trung)", tin is None, tin)
+kiem("ghi 'duong_khac_da_xu_ly'", tt().get('ket_qua') == 'duong_khac_da_xu_ly', str(tt()))
+
+tin, m = chay_canh_bao(d, moc=103)
+kiem("khong co ky moi -> ghi 'chua_co_ky_moi'", tt().get('ket_qua') == 'chua_co_ky_moi', str(tt()))
+
+tin, m = chay_canh_bao(d, moc=None)
+kiem("lan dau -> ghi 'chot_moc'", tt().get('ket_qua') == 'chot_moc', str(tt()))
+
+yen = [(100,(1,2,3),6),(101,(4,5,6),15),(102,(1,2,4),7),(103,(3,5,6),14)]
+tin, m = chay_canh_bao(yen, moc=102)
+kiem("co ky moi nhung khong bo nao ra lai -> ghi ro", tt().get('ket_qua') == 'khong_bo_nao_ra_lai', str(tt()))
+kiem("... va VAN day moc len (khong xet lai lan sau)", m == 103, str(m))
+
+# Telegram tra False / nem loi -> ghi ro, KHONG im lang
+tin, m = chay_canh_bao(d, moc=102, bot_tra=False)
+kiem("Telegram tra False -> ghi 'gui_telegram_THAT_BAI'",
+     tt().get('ket_qua') == 'gui_telegram_THAT_BAI', str(tt()))
+tin, m = chay_canh_bao(d, moc=102, bot_tra=RuntimeError('mat mang'))
+kiem("Telegram nem loi -> ghi 'LOI' kem noi dung loi",
+     tt().get('ket_qua') == 'LOI' and 'mat mang' in tt().get('loi', ''), str(tt()))
+kiem("... kem vi tri loi (traceback)", bool(tt().get('cho')))
+
+print("\n=== 19b. LOI PHAI DUOC GHI, KHONG NUOT IM ===")
+src = open('app.py', encoding='utf-8').read()
+than = src[src.index('def _check_lap_lai_alert('):src.index('def _check_lon_excess_alert(')]
+kiem("khong con 'except Exception: pass' nuot loi trong ham canh bao",
+     'except Exception:\n        pass' not in than)
+kiem("loi duoc ghi 'LOI' kem traceback", "_laplai_ghi_trang_thai('LOI'" in than and 'format_exc' in than)
+kiem("ket qua send_message duoc ghi (da_gui / THAT_BAI)", "'gui_telegram_THAT_BAI'" in than)
+kiem("/api/trigger-prediction cung goi canh bao", "_check_lap_lai_alert('trigger')" in src)
+kiem("doi moc co dieu kien (chong gui trung)", '_laplai_doi_moc(cur, moc, moi_nhat)' in than)
+
+print("\n=== 19c. /api/canh-bao/lap-lai ===")
+class C2:
+    def execute(s, q, *a): s.q = q; s.a = a[0] if a else ()
+    def fetchone(s):
+        if 'MAX(draw_number)' in s.q: return (188630,)
+        if s.a and s.a[0] == 'lap_lai_last_draw': return ('188629', '2026-09-28 03:10:00')
+        if s.a and s.a[0] == 'lap_lai_trang_thai':
+            return (_js.dumps({'ket_qua': 'da_gui', 'nguon': 'trigger'}), '2026-09-28 03:10:00')
+        return None
+    def close(s): pass
+class K2:
+    def cursor(s): return C2()
+    def close(s): pass
+with mock.patch.object(A.db, 'get_connection', return_value=K2()):
+    r = A.app.test_client().get('/api/canh-bao/lap-lai')
+dd = r.get_json()
+kiem("tra 200", r.status_code == 200, str(r.status_code))
+kiem("co moc da xet", dd['moc_da_xet']['gia_tri'] == '188629')
+kiem("co ky moi nhat", dd['ky_moi_nhat'] == 188630)
+kiem("co lan chay gan nhat (da giai JSON)", dd['lan_chay_gan_nhat'] == {'ket_qua': 'da_gui', 'nguon': 'trigger'})
+kiem("dang ky vao bo quet", '/api/canh-bao/lap-lai' in open('scripts/endpoints_readonly.txt', encoding='utf-8').read())
 
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
