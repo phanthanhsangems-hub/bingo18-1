@@ -509,6 +509,38 @@ kiem("co ky moi nhat", dd['ky_moi_nhat'] == 188630)
 kiem("co lan chay gan nhat (da giai JSON)", dd['lan_chay_gan_nhat'] == {'ket_qua': 'da_gui', 'nguon': 'trigger'})
 kiem("dang ky vao bo quet", '/api/canh-bao/lap-lai' in open('scripts/endpoints_readonly.txt', encoding='utf-8').read())
 
+print("\n=== 19d. P243: LUU RIENG LAN GUI DUOC / LAN HONG GAN NHAT ===")
+kho = {}
+chay_canh_bao(d, moc=102, kho=kho, bot_tra=False)
+hong = _js.loads(kho.get('lap_lai_hong_cuoi', '{}'))
+kiem("gui hong -> ghi khoa rieng 'lap_lai_hong_cuoi'", hong.get('ket_qua') == 'gui_telegram_THAT_BAI', str(hong))
+kiem("gui hong -> KHONG ghi 'lap_lai_gui_duoc_cuoi'", 'lap_lai_gui_duoc_cuoi' not in kho)
+kho['lap_lai_last_draw'] = '103'
+chay_canh_bao(d + [(104,(1,2,4),7)], moc=None, kho=kho)
+kiem("lan chay sau (khong_bo_nao_ra_lai) de len trang_thai",
+     _js.loads(kho['lap_lai_trang_thai']).get('ket_qua') == 'khong_bo_nao_ra_lai', kho.get('lap_lai_trang_thai'))
+kiem("... nhung lan HONG van con giu lai", _js.loads(kho.get('lap_lai_hong_cuoi', '{}')).get('ket_qua') == 'gui_telegram_THAT_BAI')
+kho2 = {}
+chay_canh_bao(d, moc=102, kho=kho2)
+kiem("gui duoc -> ghi 'lap_lai_gui_duoc_cuoi'", _js.loads(kho2.get('lap_lai_gui_duoc_cuoi', '{}')).get('ket_qua') == 'da_gui')
+kho3 = {}
+chay_canh_bao(d, moc=102, kho=kho3, bot_tra=RuntimeError('x'))
+kiem("LOI -> cung ghi 'lap_lai_hong_cuoi'", _js.loads(kho3.get('lap_lai_hong_cuoi', '{}')).get('ket_qua') == 'LOI')
+
+class C3(C2):
+    def fetchone(s):
+        if s.a and s.a[0] == 'lap_lai_gui_duoc_cuoi':
+            return (_js.dumps({'ket_qua': 'da_gui'}), '2026-09-28 03:00:00')
+        if s.a and s.a[0] == 'lap_lai_hong_cuoi':
+            return (_js.dumps({'ket_qua': 'LOI'}), '2026-09-28 02:00:00')
+        return C2.fetchone(s)
+class K3(K2):
+    def cursor(s): return C3()
+with mock.patch.object(A.db, 'get_connection', return_value=K3()):
+    dd = A.app.test_client().get('/api/canh-bao/lap-lai').get_json()
+kiem("endpoint tra 'gui_duoc_cuoi'", (dd.get('gui_duoc_cuoi') or {}).get('ket_qua') == 'da_gui', str(dd.get('gui_duoc_cuoi')))
+kiem("endpoint tra 'hong_cuoi'", (dd.get('hong_cuoi') or {}).get('ket_qua') == 'LOI', str(dd.get('hong_cuoi')))
+
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
