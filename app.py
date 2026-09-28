@@ -149,7 +149,10 @@ _GAP_ALERT_WINDOW       = 300    # soi 300 kỳ gần nhất (~1,9 ngày)
 #       mọi lần   → 93,63%        → ~150    (vô dụng: gần như kỳ nào cũng bắn)
 # Tôi đã khuyến nghị mức ≤ 3 và nói rõ ≤ 10 là quá rộng; người dùng chọn
 # ≤ 10 nên để ≤ 10. Đổi một số ở đây là đổi được ngưỡng, không cần sửa gì khác.
-_LAPLAI_ALERT_GAP     = 10
+# P246: người dùng chọn "mọi lần ra" (diagnose #47: 200 kỳ có 150 lần ra lại,
+# ≤ 10 chỉ bắt 37). "Mọi lần" = lần ra trước nằm trong cửa sổ 160 kỳ — cùng cửa
+# sổ với dãy tổng trong tin, xa hơn thì tin cũng chẳng có tổng nào để liệt kê.
+_LAPLAI_ALERT_GAP     = 160
 # Sau khi app nguội máy lâu, đừng bù cả trăm kỳ rồi bắn một tràng tin. Chỉ
 # xét tối đa ngần này kỳ mới; cũ hơn thì bỏ qua im lặng.
 _LAPLAI_MAX_CATCHUP   = 40

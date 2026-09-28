@@ -231,7 +231,16 @@ kiem("cach 12 ky: CO bao o nguong 15",
 kiem("nguong mac dinh dung _LAPLAI_ALERT_GAP",
      A._tim_bo_ra_lai(xa, moc=211) == A._tim_bo_ra_lai(xa, moc=211,
                                                        gap=A._LAPLAI_ALERT_GAP))
-kiem("nguong dang dat la 10 (nguoi dung chon)", A._LAPLAI_ALERT_GAP == 10)
+# P246: nguoi dung chon "moi lan ra" = trong cua so 160 ky cua day tong.
+kiem("nguong dang dat la 160 = cua so day tong (P246: moi lan ra)",
+     A._LAPLAI_ALERT_GAP == 160 == A._LAPLAI_CUA_SO_SAU)
+kiem("cach 12 ky: CO bao o nguong mac dinh (P246)",
+     any(e['combo'] == '235' for e in A._tim_bo_ra_lai(xa, moc=211)))
+xa2 = [(1000, (2,3,5), 10)] + [(1000+i, (1,1,i%6+1), 5) for i in range(1, 158)] \
+      + [(1158, (2,3,5), 10)]
+kiem("cach 158 ky: van bao", any(e['combo'] == '235' for e in A._tim_bo_ra_lai(xa2, moc=1157)))
+kiem("fetch du ky cho nguong 160 + bu 40",
+     A._LAPLAI_MAX_CATCHUP + max(A._LAPLAI_ALERT_GAP, A._LAPLAI_CUA_SO_SAU) + 5 >= 205)
 
 print("\n=== 13. LO HONG DU LIEU ===")
 # Thieu #102 -> day tong giua bi hut, phai gan co.
