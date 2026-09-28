@@ -126,6 +126,7 @@
 /api/today-wr
 /api/transition-stats
 /api/triple-stats
+/api/vote-log
 /api/voter-conf-trend
 /api/voter-current
 /api/voter-health

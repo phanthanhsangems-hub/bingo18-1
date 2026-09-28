@@ -222,6 +222,12 @@ def _get_models(db):
 #   window=8 → 0,491%    window=7 → 0,103%    window=6 → 0,000%
 BAN_WINDOW = 6    # số kỳ gần nhất không được lặp combo
 
+# P239: voter chỉ bầu SIZE — 'nums' của chúng là bộ đánh dấu, KHÔNG phải lựa chọn.
+# Không được tính vào đồng thuận bộ số (xem _run_majority_vote).
+_PLACEHOLDER_VOTERS = frozenset({
+    'sum_transition', 'regime_bocpd', 'anti_streak', 'prior_lon', 'prior_nho',
+})
+
 # P151/P152 từng cấm VĨNH VIỄN 36 bộ có số lặp (6 bộ ba + 30 bộ đôi), với lý do
 # "phân tích 67k kỳ: bộ khác nhau ra 1,56 lần kỳ vọng, bộ đôi 0,78, bộ ba 0,26 —
 # máy thiên về bộ khác nhau". P237 GỠ BỎ: đó là phép so SAI MỐC. Ba con số đó
@@ -1665,7 +1671,9 @@ def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
         ]
         if not target:
             return numbers, None
-        best = min(target, key=lambda c: combo_freq.get(c, 0))
+        # P239: đếm TRẦN thì mọi bộ vắng 30 kỳ đều hoà 0 và min() lấy bộ ĐẦU
+        # danh sách — với NHỎ là (1,1,1). Trước P237 lệnh cấm bộ lặp che lỗi này.
+        best = min(target, key=lambda c: _cold_score(c, combo_freq, num_freq, sum_freq))
         new_numbers = list(best)
         note = (f"streak={loss_streak} window={streak_window} NHO={size_count['NHO']} HOA={size_count['HOA']} LON={size_count['LON']}"
                 f" dominant={hot_size}({size_count[dominant]/total*100:.0f}%) {current_size}→{hot_size}")
@@ -2203,7 +2211,14 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
     majority_votes = [v for v in votes if v['size'] == majority_size]
 
     # Combo được nhiều model đồng ý nhất trong majority SIZE
-    combo_tally = Counter(tuple(sorted(v['nums'])) for v in majority_votes)
+    # P239: CHỈ đếm phiếu có bộ số THẬT. Các voter trong _PLACEHOLDER_VOTERS
+    # chỉ chọn SIZE; 'nums' của chúng là bộ ĐÁNH DẤU cố định ([1,1,1], [1,1,2],
+    # [4,5,6], [1,2,6]). Hai voter cùng bầu NHỎ là "đồng thuận" trên [1,1,1] ->
+    # dự đoán 1-1-1. Trước P237, _STRUCTURAL_BANS vô tình che lỗi này (1-1-1 và
+    # 1-1-2 bị cấm nên luôn bị thay); gỡ cấm là nó lộ ra ngay: người dùng chụp
+    # được dự đoán 1-1-1 lúc 07:00 ngày 28/09.
+    _that = [v for v in majority_votes if v['name'] not in _PLACEHOLDER_VOTERS]
+    combo_tally = Counter(tuple(sorted(v['nums'])) for v in _that)
     _top = combo_tally.most_common(1)
     best_combo, best_count = _top[0] if _top else (None, 0)
 
@@ -2224,7 +2239,7 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
             numbers = list(min(all_size_combos,
                                key=lambda c: _cold_score(c, combo_freq, num_freq, sum_freq, _pnf, _mfreq)))
         else:
-            best_vote = max(majority_votes, key=lambda v: v['conf'])
+            best_vote = max(_that or majority_votes, key=lambda v: v['conf'])
             numbers = best_vote['nums']
 
     # Kiểm tra ban-list; nếu bị ban → coldest combo trong majority SIZE
