@@ -500,6 +500,56 @@ def _laplai_ghi_moc(cur, dn: int):
             (_LAPLAI_STATE_KEY, str(dn), 'P231: ky cuoi da xet canh bao bo ra lai'))
 
 
+_LAPLAI_TT_KEY = 'lap_lai_trang_thai'
+
+
+def _laplai_ghi_trang_thai(ket_qua: str, **them):
+    """P242: ghi lại lần chạy gần nhất của cảnh báo 'bộ ra lại'.
+
+    Trước P242 hàm cảnh báo nuốt MỌI lỗi bằng `except: pass`. Người dùng báo
+    "không thấy thông báo" và không có cách nào biết nó hỏng ở đâu: diagnose
+    không có quyền đọc log Cloud Run, còn code thì im lặng. Nay mỗi lần chạy
+    ghi một dòng JSON vào system_config; /api/canh-bao/lap-lai đọc ra.
+    Tự nó cũng không được làm chết vòng dự đoán — lỗi ở đây thì bỏ qua.
+    """
+    try:
+        gt = json.dumps({'luc': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                         'ket_qua': ket_qua, **them}, ensure_ascii=False)[:1000]
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO system_config (config_key, config_value, description)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (config_key) DO UPDATE
+                      SET config_value = EXCLUDED.config_value, updated_at = NOW()
+                """, (_LAPLAI_TT_KEY, gt, 'P242: lan chay gan nhat canh bao bo ra lai'))
+            else:
+                cur.execute("INSERT OR REPLACE INTO system_config "
+                            "(config_key, config_value, description) VALUES (?,?,?)",
+                            (_LAPLAI_TT_KEY, gt, 'P242'))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+def _laplai_doi_moc(cur, cu: int, moi: int) -> bool:
+    """P242: đổi mốc cu -> moi CHỈ KHI mốc trong DB vẫn đúng là `cu`.
+
+    Cảnh báo nay chạy từ HAI đường (/api/predict của Cloud Scheduler và
+    /api/trigger-prediction của watcher), có thể trùng lúc. Ai đổi được mốc
+    thì người đó gửi; người kia thấy rowcount = 0 và thôi — không gửi trùng.
+    """
+    ph = '%s' if USE_POSTGRES else '?'
+    cur.execute(f"UPDATE system_config SET config_value = {ph} "
+                f"WHERE config_key = {ph} AND config_value = {ph}",
+                (str(moi), _LAPLAI_STATE_KEY, str(cu)))
+    return (cur.rowcount or 0) > 0
+
+
 def _tong_sau_cac_lan(ky: list, bo: tuple, den: int, cua_so: int = None) -> list:
     """P238: mỗi lần `bo` ra TRƯỚC kỳ `den` (trong `cua_so` kỳ gần nhất), kỳ
     NGAY SAU lần đó ra tổng mấy. Trả [(kỳ bộ ra, tổng kỳ sau hoặc None)], cũ -> mới.
@@ -566,7 +616,7 @@ def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None) -> list:
     return ra
 
 
-def _check_lap_lai_alert():
+def _check_lap_lai_alert(nguon: str = '?'):
     """P231: báo Telegram khi một bộ RA LẠI trong <= _LAPLAI_ALERT_GAP kỳ.
 
     Thay cho thẻ "Bộ ra lại" trên dashboard. Khác thẻ đó ở một điểm quan
@@ -574,6 +624,9 @@ def _check_lap_lai_alert():
     được dù có ~110 lần lặp trong 160 kỳ. Telegram không cắt được như vậy —
     nên ở đây ngưỡng khoảng cách mới là thứ giữ cho tin nhắn còn đáng đọc.
     Xem bảng tần suất ở _LAPLAI_ALERT_GAP.
+
+    P242: `nguon` = đường gọi ('predict' | 'trigger'); mọi kết quả, kể cả lỗi,
+    được ghi bằng _laplai_ghi_trang_thai thay vì bị nuốt im lặng.
     """
     try:
         from zoneinfo import ZoneInfo
@@ -588,7 +641,7 @@ def _check_lap_lai_alert():
             cur = conn.cursor()
             moc = _laplai_doc_moc(cur)
             # Cần đủ kỳ để vừa bù được _LAPLAI_MAX_CATCHUP kỳ mới, vừa nhìn
-            # ngược _LAPLAI_ALERT_GAP kỳ cho kỳ mới nhất trong số đó.
+            # ngược _LAPLAI_CUA_SO_SAU kỳ cho kỳ mới nhất trong số đó.
             lay = _LAPLAI_MAX_CATCHUP + max(_LAPLAI_ALERT_GAP, _LAPLAI_CUA_SO_SAU) + 5
             cur.execute(
                 f"SELECT draw_number, numbers FROM draw_history "
@@ -597,14 +650,17 @@ def _check_lap_lai_alert():
             rows = cur.fetchall()
 
             ky = []
+            hong = 0
             for dn, raw in sorted(rows, key=lambda r: r[0]):     # cũ -> mới
                 try:
                     ns = [int(x) for x in (raw if isinstance(raw, list)
                                            else _a.literal_eval(raw))]
                 except Exception:
+                    hong += 1
                     continue
                 ky.append((int(dn), tuple(sorted(ns)), sum(ns)))
             if len(ky) < 2:
+                _laplai_ghi_trang_thai('it_du_lieu', nguon=nguon, doc=len(rows), hong=hong)
                 return
             moi_nhat = ky[-1][0]
 
@@ -613,19 +669,27 @@ def _check_lap_lai_alert():
             if moc is None:
                 _laplai_ghi_moc(cur, moi_nhat)
                 conn.commit()
+                _laplai_ghi_trang_thai('chot_moc', nguon=nguon, moc=moi_nhat)
                 return
             if moi_nhat <= moc:
-                return              # chưa có kỳ mới
+                _laplai_ghi_trang_thai('chua_co_ky_moi', nguon=nguon, moc=moc)
+                return
             # Nguội máy lâu -> bỏ qua phần quá cũ, đừng bù một tràng.
-            moc = max(moc, moi_nhat - _LAPLAI_MAX_CATCHUP)
+            xet_tu = max(moc, moi_nhat - _LAPLAI_MAX_CATCHUP)
 
-            su_kien = _tim_bo_ra_lai(ky, moc)
-            _laplai_ghi_moc(cur, moi_nhat)
+            su_kien = _tim_bo_ra_lai(ky, xet_tu)
+            # Ai đổi được mốc thì người đó gửi (P242, chống gửi trùng).
+            if not _laplai_doi_moc(cur, moc, moi_nhat):
+                conn.rollback()
+                _laplai_ghi_trang_thai('duong_khac_da_xu_ly', nguon=nguon, moc=moc)
+                return
             conn.commit()
         finally:
             conn.close()
 
         if not su_kien:
+            _laplai_ghi_trang_thai('khong_bo_nao_ra_lai', nguon=nguon,
+                                   tu=xet_tu + 1, den=moi_nhat, hong=hong)
             return
 
         su_kien.sort(key=lambda x: (x['cach'], x['den']))
@@ -650,12 +714,17 @@ def _check_lap_lai_alert():
             dong.append(f"(+{len(su_kien) - _LAPLAI_MAX_LIET_KE} lần nữa)")
 
         from telegram_bot import TelegramBot
-        TelegramBot().send_message(
+        ok = TelegramBot().send_message(
             "\n".join(dong).rstrip()
             + f"\n\n<i>{vn_now.strftime('%H:%M %d/%m')}</i>"
         )
-    except Exception:
-        pass    # cảnh báo hỏng thì tuyệt đối không được làm chết vòng dự đoán
+        _laplai_ghi_trang_thai('da_gui' if ok else 'gui_telegram_THAT_BAI', nguon=nguon,
+                               so_bo=len(su_kien), den=moi_nhat)
+    except Exception as e:
+        # Không được làm chết vòng dự đoán — nhưng cũng KHÔNG được im lặng nữa.
+        import traceback as _tb
+        _laplai_ghi_trang_thai('LOI', nguon=nguon, loi=repr(e)[:300],
+                               cho=_tb.format_exc().strip().split('\n')[-3:])
 
 
 def _check_lon_excess_alert(prediction_result: dict):
@@ -1248,7 +1317,7 @@ def auto_predict_cron():
         result = run_prediction_cycle()
         _check_sync_lag()
         _check_draw_gap_alert()
-        _check_lap_lai_alert()
+        _check_lap_lai_alert('predict')
         _check_lon_excess_alert(result)
         _check_checkpoint_alert(result.get('draw_number', 0))
         _check_triple_drought_alert()
@@ -1270,6 +1339,10 @@ def trigger_prediction():
     try:
         from prediction_service import run_prediction_cycle
         result = run_prediction_cycle()
+        # P242: watcher trên máy người dùng gọi đường này NGAY khi có kỳ mới.
+        # Trước đây chỉ /api/predict mới chạy cảnh báo "bộ ra lại"; chạy thêm ở
+        # đây — _laplai_doi_moc bảo đảm không gửi trùng khi hai đường cùng chạy.
+        _check_lap_lai_alert('trigger')
         return jsonify({"success": True, "prediction": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -12099,6 +12172,43 @@ def vote_log():
                 'bocpd_dist':    v.get('bocpd_dist'),
             })
         return jsonify({'n': len(ra), 'predictions': ra})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/canh-bao/lap-lai')
+@limiter.limit("30 per minute")
+def canh_bao_lap_lai_trang_thai():
+    """P242: cảnh báo "bộ ra lại" đang ở đâu — mốc đã xét, kỳ mới nhất, và
+    kết quả lần chạy gần nhất (kể cả lỗi). Người dùng báo không nhận được tin
+    mà không có chỗ nào để xem vì sao."""
+    try:
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            ra = {}
+            for khoa in (_LAPLAI_STATE_KEY, _LAPLAI_TT_KEY):
+                cur.execute(f"SELECT config_value, updated_at FROM system_config "
+                            f"WHERE config_key = {ph}", (khoa,))
+                r = cur.fetchone()
+                ra[khoa] = {'gia_tri': r[0], 'cap_nhat': str(r[1]) if r[1] else None} if r else None
+            cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+            r = cur.fetchone()
+        finally:
+            conn.close()
+        tt = None
+        if ra.get(_LAPLAI_TT_KEY) and ra[_LAPLAI_TT_KEY]['gia_tri']:
+            try:
+                tt = json.loads(ra[_LAPLAI_TT_KEY]['gia_tri'])
+            except Exception:
+                tt = ra[_LAPLAI_TT_KEY]['gia_tri']
+        return jsonify({
+            'moc_da_xet':  ra.get(_LAPLAI_STATE_KEY),
+            'ky_moi_nhat': r[0] if r else None,
+            'lan_chay_gan_nhat': tt,
+            'nguong_cach': _LAPLAI_ALERT_GAP,
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

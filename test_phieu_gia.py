@@ -94,7 +94,7 @@ kiem("da dang ky vao bo quet endpoint",
      '/api/vote-log' in open('scripts/endpoints_readonly.txt', encoding='utf-8').read())
 dg = open('.github/workflows/diagnose.yml', encoding='utf-8').read()
 kiem("diagnose co buoc nhat ky phieu", '/api/vote-log' in dg and 'nhat_ky_phieu' in dg)
-kiem("buoc chot bat buoc co moc nhat_ky_phieu", 'cong_dang_nhap nhat_ky_phieu"' in dg)
+kiem("buoc chot bat buoc co moc nhat_ky_phieu", ' nhat_ky_phieu' in dg.split('CAN="')[1].split('"')[0])
 
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")

@@ -35,6 +35,7 @@
 /api/calibration-by-size
 /api/calibration-chart
 /api/calibration-report
+/api/canh-bao/lap-lai
 /api/checkpoint
 /api/cold-streaks
 /api/combo-comeback

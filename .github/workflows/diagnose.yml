@@ -1165,6 +1165,37 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Cảnh báo "bộ ra lại" (P242) — lần chạy gần nhất
+        # Nguoi dung bao khong nhan duoc tin 'bo ra lai'. Ham canh bao tung nuot
+        # moi loi bang except: pass nen khong co dau vet. Nay no ghi lan chay gan
+        # nhat vao system_config; buoc nay doc ra.
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 30 -H "$H" "$BASE/api/canh-bao/lap-lai?cb=$TS" > /tmp/cb.json
+          python3 - <<'PYEOF'
+          import json
+          try:
+              d = json.load(open('/tmp/cb.json'))
+          except Exception:
+              print("LOI: /api/canh-bao/lap-lai khong tra JSON:", open('/tmp/cb.json').read()[:300])
+              raise SystemExit(1)
+          print("=== CANH BAO 'BO RA LAI' ===")
+          print("  ky moi nhat trong DB :", d.get('ky_moi_nhat'))
+          print("  moc da xet           :", d.get('moc_da_xet'))
+          print("  lan chay gan nhat    :", json.dumps(d.get('lan_chay_gan_nhat'), ensure_ascii=False))
+          tt = d.get('lan_chay_gan_nhat') or {}
+          if not tt:
+              print("  >>> CHUA CO LAN CHAY NAO duoc ghi — canh bao chua tung chay tu khi co P242.")
+          elif tt.get('ket_qua') in ('LOI', 'gui_telegram_THAT_BAI'):
+              print("  >>> CANH BAO DANG HONG:", tt.get('ket_qua'), tt.get('loi', ''))
+              open('/tmp/job_failed', 'a').write(f"canh bao bo ra lai: {tt.get('ket_qua')}\n")
+          PYEOF
+          echo "canh_bao_lap_lai" >> /tmp/da_chay
+
       - name: Chốt kết quả
         if: always()
         run: |
@@ -1185,7 +1216,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
