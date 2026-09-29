@@ -607,6 +607,25 @@ def _laplai_ghi_trang_thai(ket_qua: str, **them):
         pass
 
 
+_LAPLAI_DX_KEY = 'lap_lai_da_xet'     # P249: tập kỳ đã xét (JSON list)
+
+
+def _laplai_ghi_cfg(cur, khoa: str, gia_tri: str, chi_khi_chua_co: bool = False) -> bool:
+    """Upsert một khoá system_config. chi_khi_chua_co=True: chỉ chèn nếu chưa có
+    (đường kia chèn trước thì trả False — dùng làm khoá chống gửi trùng)."""
+    if USE_POSTGRES:
+        cur.execute("INSERT INTO system_config (config_key, config_value, description) "
+                    "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO "
+                    + ("NOTHING" if chi_khi_chua_co else
+                       "UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()"),
+                    (khoa, gia_tri, 'P249'))
+    else:
+        cur.execute(("INSERT OR IGNORE" if chi_khi_chua_co else "INSERT OR REPLACE")
+                    + " INTO system_config (config_key, config_value, description) VALUES (?,?,?)",
+                    (khoa, gia_tri, 'P249'))
+    return (cur.rowcount or 0) > 0
+
+
 def _laplai_doi_moc(cur, cu: int, moi: int) -> bool:
     """P242: đổi mốc cu -> moi CHỈ KHI mốc trong DB vẫn đúng là `cu`.
 
@@ -644,7 +663,7 @@ def _tong_sau_cac_lan(ky: list, bo: tuple, den: int, cua_so: int = None) -> list
     return ra
 
 
-def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None) -> list:
+def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None, chi_xet: set = None) -> list:
     """Các kỳ MỚI (draw_number > moc) mà bộ của nó đã ra trong 'gap' kỳ liền trước.
 
     'ky' là list (draw_number, bo_sorted, tong) xếp CŨ -> MỚI.
@@ -664,6 +683,8 @@ def _tim_bo_ra_lai(ky: list, moc: int, gap: int = None) -> list:
     ra = []
     for dn, bo, tong in ky:
         if dn <= moc:
+            continue
+        if chi_xet is not None and dn not in chi_xet:    # P249
             continue
         for g in range(1, gap + 1):
             truoc = theo_dn.get(dn - g)
@@ -735,23 +756,59 @@ def _check_lap_lai_alert(nguon: str = '?'):
                 return
             moi_nhat = ky[-1][0]
 
+            # P249: mốc "đã xét tới kỳ X" SÓT kỳ chèn vào DB MUỘN (watcher bật
+            # lại rồi bù các kỳ lỗ hổng sau khi đã đẩy kỳ mới nhất): diagnose #51
+            # thấy 19 kỳ liền 06:06–08:00 không có tin, không có dòng "bỏ qua".
+            # Nay nhớ TẬP các kỳ đã xét; kỳ nào chưa xét thì xét, dù chèn muộn.
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                        (_LAPLAI_DX_KEY,))
+            r = cur.fetchone()
+            dx_cu = r[0] if r and r[0] else None
+            try:
+                dx = set(json.loads(dx_cu)) if dx_cu else None
+            except Exception:
+                dx = None
+            tat_ca = [d for d, _, _ in ky]
+
             # Lần đầu chạy (hoặc mất state): CHỐT MỐC, KHÔNG BẮN TIN. Nếu không,
             # lần deploy đầu tiên sẽ bù cả cửa sổ và bắn một tràng.
-            if moc is None:
+            if moc is None and dx is None:
                 _laplai_ghi_moc(cur, moi_nhat)
+                _laplai_ghi_cfg(cur, _LAPLAI_DX_KEY, json.dumps(tat_ca))
                 conn.commit()
                 _laplai_ghi_trang_thai('chot_moc', nguon=nguon, moc=moi_nhat)
                 return
-            if moi_nhat <= moc:
+            if dx is None:                 # chuyển từ cơ chế mốc cũ
+                dx = {d for d in tat_ca if d <= moc}
+            nguong_bu = moi_nhat - _LAPLAI_MAX_CATCHUP
+            day = min(dx) if dx else 0
+            chua = [d for d in tat_ca if d not in dx and d > day]
+            chua_xet = [d for d in chua if d > nguong_bu]
+            # Nguội máy lâu -> bỏ qua phần quá cũ, đừng bù một tràng.
+            bo_qua_ds = [d for d in chua if d <= nguong_bu]
+            bo_qua = len(bo_qua_ds)
+            if not chua:
                 _laplai_ghi_trang_thai('chua_co_ky_moi', nguon=nguon, moc=moc)
                 return
-            # Nguội máy lâu -> bỏ qua phần quá cũ, đừng bù một tràng.
-            xet_tu = max(moc, moi_nhat - _LAPLAI_MAX_CATCHUP)
-            bo_qua = xet_tu - moc          # P245: so ky bi bo vi nguoi may qua lau
+            xet_tu = min(chua_xet) - 1 if chua_xet else moi_nhat
 
-            su_kien = _tim_bo_ra_lai(ky, xet_tu)
-            # Ai đổi được mốc thì người đó gửi (P242, chống gửi trùng).
-            if not _laplai_doi_moc(cur, moc, moi_nhat):
+            su_kien = _tim_bo_ra_lai(ky, 0, chi_xet=set(chua_xet))
+            # Ai đổi được trạng thái thì người đó gửi (P242, chống gửi trùng).
+            if moc is not None and moi_nhat != moc and not _laplai_doi_moc(cur, moc, moi_nhat):
+                conn.rollback()
+                _laplai_ghi_trang_thai('duong_khac_da_xu_ly', nguon=nguon, moc=moc)
+                return
+            if moc is None:
+                _laplai_ghi_moc(cur, moi_nhat)
+            dx_moi = json.dumps(sorted(d for d in dx | set(chua) if d > moi_nhat - 400))
+            if dx_cu is None:
+                ok_dx = _laplai_ghi_cfg(cur, _LAPLAI_DX_KEY, dx_moi, chi_khi_chua_co=True)
+            else:
+                cur.execute(f"UPDATE system_config SET config_value = {ph} "
+                            f"WHERE config_key = {ph} AND config_value = {ph}",
+                            (dx_moi, _LAPLAI_DX_KEY, dx_cu))
+                ok_dx = (cur.rowcount or 0) > 0
+            if not ok_dx:
                 conn.rollback()
                 _laplai_ghi_trang_thai('duong_khac_da_xu_ly', nguon=nguon, moc=moc)
                 return
@@ -761,8 +818,9 @@ def _check_lap_lai_alert(nguon: str = '?'):
 
         luc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
         if bo_qua > 0:
-            _laplai_ghi_nhat_ky([{'luc': luc, 'bo_qua_tu': moc + 1,
-                                  'bo_qua_den': xet_tu, 'nguon': nguon}])
+            _laplai_ghi_nhat_ky([{'luc': luc, 'bo_qua_tu': min(bo_qua_ds),
+                                  'bo_qua_den': max(bo_qua_ds), 'so_ky': bo_qua,
+                                  'nguon': nguon}])
         if not su_kien:
             _laplai_ghi_trang_thai('khong_bo_nao_ra_lai', nguon=nguon,
                                    tu=xet_tu + 1, den=moi_nhat, hong=hong)
