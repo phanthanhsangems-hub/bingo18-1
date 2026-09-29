@@ -1281,8 +1281,10 @@ jobs:
           if not nk:
               print("  (chua co — nhat ky moi bat dau tu P245; chay lai sau vai gio)")
           else:
-              tu = min(m['den'] for m in nk)
-              da = {(m['den'], m['combo']) for m in nk}
+              # Chi doi chieu ky co DU 160 ky phia truoc trong cua so 200 ky: ky dau
+              # cua so khong thay lan ra truoc -> tung bao 'thua' gia (diagnose #51).
+              tu = max(min(m['den'] for m in nk), min(ky) + 160)
+              da = {(m['den'], m['combo']) for m in nk if m['den'] >= tu}
               can = {k for k in le_ra if k[0] >= tu}
               thieu = sorted(can - da); thua = sorted(k for k in da - set(le_ra) if k[0] in ky)
               hong = [m for m in nk if not m['ok']]

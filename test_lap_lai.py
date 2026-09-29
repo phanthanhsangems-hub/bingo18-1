@@ -580,6 +580,22 @@ chay_canh_bao(lau, moc=300, kho=kho)
 bq = [m for m in _js.loads(kho.get('lap_lai_nhat_ky', '[]')) if 'bo_qua_tu' in m]
 kiem("bo qua vi nguoi may -> ghi ro khoang bi bo", bq and (bq[0]['bo_qua_tu'], bq[0]['bo_qua_den']) == (301, 319), bq)
 
+print("\n=== 19f. P249: KY CHEN VAO DB MUON VAN DUOC XET ===")
+# #102 (2-3-5, ra lai sau 2 ky so voi #100) chen vao SAU khi moc da toi #104.
+d9 = [(100,(2,3,5),10),(101,(1,1,4),6),(102,(2,3,5),10),(103,(6,6,6),18),(104,(1,2,4),7)]
+kho = {'lap_lai_last_draw': '104', 'lap_lai_da_xet': _js.dumps([100, 101, 103, 104])}
+tin, m = chay_canh_bao(d9, moc=None, kho=kho)
+kiem("ky #102 chen muon -> VAN bao 2-3-5", tin is not None and '2-3-5' in tin, tin)
+kiem("... #102 vao tap da xet", 102 in _js.loads(kho['lap_lai_da_xet']), kho.get('lap_lai_da_xet'))
+tin, m = chay_canh_bao(d9, moc=None, kho=kho)
+kiem("chay lai -> KHONG bao trung", tin is None, tin)
+kho = {'lap_lai_last_draw': '104', 'lap_lai_da_xet': _js.dumps([100, 101, 103, 104])}
+tin, m = chay_canh_bao(d9, moc=None, kho=kho, thua_cas=True)
+kiem("chi co ky chen muon + duong kia xu ly truoc -> KHONG gui trung", tin is None, tin)
+kho = {'lap_lai_last_draw': '102'}                     # chuyen tu co che moc cu
+tin, m = chay_canh_bao(d9, moc=None, kho=kho)
+kiem("chuyen tu moc cu: chi xet ky > moc", tin is None and 'lap_lai_da_xet' in kho, (tin, kho))
+
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
