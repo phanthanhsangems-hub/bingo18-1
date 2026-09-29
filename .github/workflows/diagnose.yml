@@ -1212,12 +1212,18 @@ jobs:
           import json
           d = json.load(open('/tmp/vt.json'))
           print(f"=== TONG VANG LAU NHAT — {d['tong_so_ky']} ky (#{d['tu_ky']} -> #{d['den_ky']}) ===")
-          print("  tong  so_lan  TB_khoang  VANG_LAU_NHAT  (theo so ky)  tu -> den            dang_vang")
+          print("  tong  so_lan  trung_vi  TB_sach  P90  ky_luc_sach  VANG_LAU_NHAT (theo so ky)  dang_vang  bo_khoang_thung")
           for t in range(3, 19):
               x = d['tong'][str(t)]; v = x['vang_lau_nhat'] or {}
               lech = '' if v.get('so_ky') == v.get('theo_so_ky') else '  <-- thieu ky trong khoang'
-              print(f"  {t:>4}  {x['so_lan']:>6}  {x['tb_khoang']!s:>9}  {v.get('so_ky')!s:>13}  {v.get('theo_so_ky')!s:>12}"
-                    f"  {v.get('tu_luc','')} -> {v.get('den_luc','')}  {x['dang_vang']:>5}{lech}")
+              print(f"  {t:>4}  {x['so_lan']:>6}  {x.get('trung_vi')!s:>8}  {x.get('tb_sach')!s:>7}  {x.get('p90')!s:>4}"
+                    f"  {x.get('ky_luc')!s:>11}  {v.get('so_ky')!s:>13} ({v.get('theo_so_ky')!s:>5})  {x['dang_vang']:>9}"
+                    f"  {x.get('so_khoang_bo')!s:>6}{lech}")
+          print()
+          print(f"=== CANH BAO VANG TONG (P248) — theo doi {d.get('theo_doi')} ===")
+          cb = d.get('canh_bao') or {}
+          print(f"  trang thai : {cb.get('vang_tong_trang_thai')}")
+          print(f"  loi gan nhat: {cb.get('vang_tong_loi')}")
           print()
           print("=== TONG 4: 5 lan vang lau nhat ===")
           for k in d['tong']['4']['top']:
