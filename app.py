@@ -807,6 +807,181 @@ def _check_lap_lai_alert(nguon: str = '?'):
                                cho=_tb.format_exc().strip().split('\n')[-3:])
 
 
+# ── P248: cảnh báo tổng hiếm VẮNG LÂU / VỪA RA (sớm hay trễ) ─────────────
+# Người dùng hỏi trung vị / TB khoảng cách giữa các lần ra của tổng 4 và 17,
+# rồi báo "có thể ra sớm hay trễ". Mỗi kỳ ĐỘC LẬP: vắng lâu KHÔNG làm tổng đó dễ
+# ra hơn — tin nhắn phải nói thẳng điều này, chỉ báo mốc thống kê, không "sắp ra".
+_VANG_TONG_THEO_DOI = (4, 17)
+_VANG_TT_KEY  = 'vang_tong_trang_thai'
+_VANG_LOI_KEY = 'vang_tong_loi'
+_VANG_TK_TTL  = 6 * 3600              # thống kê toàn lịch sử: tính lại mỗi 6 giờ
+_vang_tk_cache = {'luc': 0.0, 'tk': None}
+_WAYS_TONG = {}
+for _a in range(1, 7):
+    for _b in range(1, 7):
+        for _c in range(1, 7):
+            _WAYS_TONG[_a + _b + _c] = _WAYS_TONG.get(_a + _b + _c, 0) + 1
+
+
+def _vang_thong_ke(cur) -> dict:
+    """Thống kê khoảng vắng toàn lịch sử (~90k kỳ) — cache _VANG_TK_TTL giây."""
+    now = _time.monotonic()
+    if _vang_tk_cache['tk'] is None or now - _vang_tk_cache['luc'] > _VANG_TK_TTL:
+        _vang_tk_cache['tk'] = _vang_theo_tong(_doc_ky_tong(cur), top=1)
+        _vang_tk_cache['luc'] = now
+    return _vang_tk_cache['tk']
+
+
+def _vang_hien_tai(cur, tong: int):
+    """(lần ra cuối, lần ra trước đó, số kỳ giữa hai lần, số kỳ đang vắng).
+    Số kỳ = kỳ THẬT có trong DB, cùng cách đếm với _vang_theo_tong."""
+    ph = '%s' if USE_POSTGRES else '?'
+    cur.execute(f"SELECT draw_number FROM draw_history WHERE sum_value = {ph} "
+                f"AND numbers IS NOT NULL ORDER BY draw_number DESC LIMIT 2", (tong,))
+    r = [x[0] for x in cur.fetchall()]
+    if not r:
+        return None, None, None, None
+    def _dem(a, b=None):
+        if b is None:
+            cur.execute(f"SELECT COUNT(*) FROM draw_history WHERE draw_number > {ph} "
+                        f"AND numbers IS NOT NULL", (a,))
+        else:
+            cur.execute(f"SELECT COUNT(*) FROM draw_history WHERE draw_number > {ph} "
+                        f"AND draw_number < {ph} AND numbers IS NOT NULL", (a, b))
+        return int(cur.fetchone()[0])
+    cuoi = r[0]
+    truoc = r[1] if len(r) > 1 else None
+    return cuoi, truoc, (_dem(truoc, cuoi) if truoc else None), _dem(cuoi)
+
+
+def _vang_moc(tk: dict) -> list:
+    """Các mốc báo khi đang vắng, tăng dần: [(khoá, nhãn, số kỳ)]."""
+    m = [('trung_vi', 'trung vị', tk.get('trung_vi')),
+         ('tb',       'trung bình', tk.get('tb_sach')),
+         ('p90',      'P90 (chỉ 10% lần vắng dài hơn)', tk.get('p90')),
+         ('ky_luc',   'KỶ LỤC', tk.get('ky_luc'))]
+    return [(k, n, int(math.ceil(v))) for k, n, v in m if v]
+
+
+def _vang_xep_loai(n: int, tk: dict) -> str:
+    if tk.get('ky_luc') and n > tk['ky_luc']:
+        return 'PHÁ KỶ LỤC'
+    if tk.get('p90') and n >= tk['p90']:
+        return 'RẤT TRỄ'
+    if tk.get('p75') and n > tk['p75']:
+        return 'TRỄ'
+    if tk.get('p25') is not None and n < tk['p25']:
+        return 'SỚM'
+    return 'BÌNH THƯỜNG'
+
+
+def _vang_dong_tk(tk: dict) -> str:
+    return (f"Lịch sử: trung vị <b>{tk.get('trung_vi')}</b> · TB <b>{tk.get('tb_sach')}</b> · "
+            f"P90 <b>{tk.get('p90')}</b> · kỷ lục <b>{tk.get('ky_luc')}</b> kỳ")
+
+
+def _check_vang_tong_alert(nguon: str = '?'):
+    """P248: với mỗi tổng trong _VANG_TONG_THEO_DOI:
+      - VỪA RA: báo ra sau bao nhiêu kỳ, sớm / bình thường / trễ so với lịch sử.
+      - ĐANG VẮNG: báo MỘT lần khi vượt mỗi mốc (trung vị, TB, P90, kỷ lục).
+    Trạng thái nằm trong system_config (Cloud Run co về 0 → RAM mất hết), đổi
+    bằng UPDATE ... WHERE config_value = <cũ> để hai đường gọi không gửi trùng.
+    Lần đầu chạy chỉ chốt trạng thái, không bắn tin.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        vn_now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+        if vn_now.hour < 6 or vn_now.hour >= 22:
+            return
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        tin = []
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                        (_VANG_TT_KEY,))
+            r = cur.fetchone()
+            cu_raw = r[0] if r else None
+            try:
+                cu = json.loads(cu_raw) if cu_raw else None
+            except Exception:
+                cu = None
+            tk_all = _vang_thong_ke(cur)
+            moi = {}
+            for t in _VANG_TONG_THEO_DOI:
+                tk = tk_all.get(str(t), {})
+                cuoi, truoc, giua, dang = _vang_hien_tai(cur, t)
+                if cuoi is None:
+                    continue
+                trc = (cu or {}).get(str(t), {})
+                da_bao = list(trc.get('da_bao', []))
+                p = _WAYS_TONG[t] / 216
+                if cu is not None and trc.get('cuoi') not in (None, cuoi):
+                    # Vừa ra (so với lần xét trước).
+                    loai = _vang_xep_loai(giua, tk) if giua is not None else '?'
+                    tin.append(f"✅ <b>Tổng {t}</b> vừa ra (#{cuoi}) sau <b>{giua}</b> kỳ — <b>{loai}</b>\n"
+                               + _vang_dong_tk(tk))
+                    da_bao = []
+                elif cu is not None:
+                    vuot = [(k, n, v) for k, n, v in _vang_moc(tk)
+                            if dang >= v and k not in da_bao]
+                    if vuot:
+                        k, n, v = vuot[-1]           # chỉ báo mốc CAO NHẤT vừa vượt
+                        da_bao += [x[0] for x in vuot]
+                        tin.append(
+                            f"⏳ <b>Tổng {t}</b> đã vắng <b>{dang}</b> kỳ — vượt {n} ({v} kỳ)\n"
+                            + _vang_dong_tk(tk) + "\n"
+                            f"<i>Mỗi kỳ vẫn chỉ {p*100:.1f}% ra tổng {t}; vắng lâu KHÔNG làm "
+                            f"kỳ sau dễ ra hơn.</i>")
+                moi[str(t)] = {'cuoi': cuoi, 'da_bao': da_bao}
+            moi_raw = json.dumps(moi, sort_keys=True)
+            if moi_raw != cu_raw:
+                if cu_raw is None:
+                    if USE_POSTGRES:
+                        cur.execute("INSERT INTO system_config (config_key, config_value, description) "
+                                    "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO NOTHING",
+                                    (_VANG_TT_KEY, moi_raw, 'P248'))
+                    else:
+                        cur.execute("INSERT OR IGNORE INTO system_config "
+                                    "(config_key, config_value, description) VALUES (?,?,?)",
+                                    (_VANG_TT_KEY, moi_raw, 'P248'))
+                else:
+                    cur.execute(f"UPDATE system_config SET config_value = {ph} "
+                                f"WHERE config_key = {ph} AND config_value = {ph}",
+                                (moi_raw, _VANG_TT_KEY, cu_raw))
+                if (cur.rowcount or 0) <= 0:
+                    conn.rollback()
+                    return                            # đường kia đã xử lý
+                conn.commit()
+        finally:
+            conn.close()
+        if tin:
+            from telegram_bot import TelegramBot
+            TelegramBot().send_message("\n\n".join(tin)
+                                       + f"\n\n<i>{vn_now.strftime('%H:%M %d/%m')}</i>")
+    except Exception as e:
+        import traceback as _tb
+        try:
+            conn2 = db.get_connection()
+            c2 = conn2.cursor()
+            gt = json.dumps({'luc': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                             'nguon': nguon, 'loi': repr(e)[:300],
+                             'cho': _tb.format_exc().strip().split('\n')[-3:]},
+                            ensure_ascii=False)
+            if USE_POSTGRES:
+                c2.execute("INSERT INTO system_config (config_key, config_value, description) "
+                           "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO UPDATE "
+                           "SET config_value = EXCLUDED.config_value, updated_at = NOW()",
+                           (_VANG_LOI_KEY, gt, 'P248'))
+            else:
+                c2.execute("INSERT OR REPLACE INTO system_config "
+                           "(config_key, config_value, description) VALUES (?,?,?)",
+                           (_VANG_LOI_KEY, gt, 'P248'))
+            conn2.commit(); conn2.close()
+        except Exception:
+            pass
+
+
 def _check_lon_excess_alert(prediction_result: dict):
     """P70: Gửi Telegram alert khi consecutive_excess >= threshold (LON bias escalating)."""
     global _last_lon_excess_alert_ts
@@ -1398,6 +1573,7 @@ def auto_predict_cron():
         _check_sync_lag()
         _check_draw_gap_alert()
         _check_lap_lai_alert('predict')
+        _check_vang_tong_alert('predict')
         _check_lon_excess_alert(result)
         _check_checkpoint_alert(result.get('draw_number', 0))
         _check_triple_drought_alert()
@@ -1423,6 +1599,7 @@ def trigger_prediction():
         # Trước đây chỉ /api/predict mới chạy cảnh báo "bộ ra lại"; chạy thêm ở
         # đây — _laplai_doi_moc bảo đảm không gửi trùng khi hai đường cùng chạy.
         _check_lap_lai_alert('trigger')
+        _check_vang_tong_alert('trigger')
         return jsonify({"success": True, "prediction": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -12293,8 +12470,55 @@ def _vang_theo_tong(rows, top=3):
             'dang_vang': dang,
             'lan_cuoi_ky': rows[cs[-1]][0] if cs else None,
             'tb_khoang': round(sum(k['so_ky'] for k in khoang) / len(khoang), 1) if khoang else None,
+            **_thong_ke_khoang(khoang),
         }
     return out
+
+
+def _phan_vi(xs_sap: list, q: float):
+    """Phan vi kieu nearest-rank tren list DA SAP tang dan."""
+    if not xs_sap:
+        return None
+    k = max(0, min(len(xs_sap) - 1, math.ceil(q * len(xs_sap)) - 1))
+    return xs_sap[k]
+
+
+def _thong_ke_khoang(khoang: list) -> dict:
+    """P248: trung vi / TB / P25 / P75 / P90 cua khoang vang.
+
+    CHI tinh tren khoang 'sach' (so_ky == theo_so_ky): khoang nam de len lo
+    thung du lieu thi con so that khong biet (tong 18 co mot khoang 1563 ky
+    dem duoc nhung 7149 theo so ky) — dua vao se keo lech TB.
+    """
+    sach = sorted(k['so_ky'] for k in khoang if k['so_ky'] == k['theo_so_ky'])
+    return {
+        'so_khoang_sach': len(sach),
+        'so_khoang_bo':   len(khoang) - len(sach),
+        'tb_sach':  round(sum(sach) / len(sach), 1) if sach else None,
+        'trung_vi': _phan_vi(sach, 0.50),
+        'p25':      _phan_vi(sach, 0.25),
+        'p75':      _phan_vi(sach, 0.75),
+        'p90':      _phan_vi(sach, 0.90),
+        'ky_luc':   sach[-1] if sach else None,
+    }
+
+
+def _doc_ky_tong(cur) -> list:
+    """[(draw_number, tong, draw_time)] toan bo lich su, cu -> moi.
+    sum_value NULL thi tinh lai tu numbers."""
+    import ast as _ast
+    cur.execute("SELECT draw_number, sum_value, numbers, draw_time FROM draw_history "
+                "WHERE numbers IS NOT NULL ORDER BY draw_number")
+    rows = []
+    for dn, sv, ns, dt in cur.fetchall():
+        if sv is None:
+            try:
+                ns = ns if isinstance(ns, list) else _ast.literal_eval(ns)
+                sv = sum(int(x) for x in ns)
+            except Exception:
+                continue
+        rows.append((int(dn), int(sv), dt))
+    return rows
 
 
 @app.route('/api/tong/vang-lau-nhat')
@@ -12302,25 +12526,25 @@ def _vang_theo_tong(rows, top=3):
 @cache_resp(ttl=300)
 def tong_vang_lau_nhat():
     """P244: tong nao vang lau nhat bao nhieu ky, tren TOAN BO lich su."""
-    import ast as _ast
     try:
         top = max(1, min(int(request.args.get('top', 3)), 10))
         conn = db.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT draw_number, sum_value, numbers, draw_time FROM draw_history "
-                    "WHERE numbers IS NOT NULL ORDER BY draw_number")
-        raw = cur.fetchall()
+        rows = _doc_ky_tong(cur)
+        ph = '%s' if USE_POSTGRES else '?'
+        canh_bao = {}
+        for k in (_VANG_TT_KEY, _VANG_LOI_KEY):
+            cur.execute(f"SELECT config_value, updated_at FROM system_config "
+                        f"WHERE config_key = {ph}", (k,))
+            r = cur.fetchone()
+            try:
+                canh_bao[k] = {'gia_tri': json.loads(r[0]), 'cap_nhat': str(r[1])} if r and r[0] else None
+            except Exception:
+                canh_bao[k] = {'gia_tri': r[0], 'cap_nhat': str(r[1])}
         conn.close()
-        rows = []
-        for dn, sv, ns, dt in raw:
-            if sv is None:
-                try:
-                    ns = ns if isinstance(ns, list) else _ast.literal_eval(ns)
-                    sv = sum(int(x) for x in ns)
-                except Exception:
-                    continue
-            rows.append((int(dn), int(sv), dt))
         return jsonify({
+            'theo_doi': list(_VANG_TONG_THEO_DOI),
+            'canh_bao': canh_bao,
             'tong_so_ky': len(rows),
             'tu_ky': rows[0][0] if rows else None,
             'den_ky': rows[-1][0] if rows else None,
