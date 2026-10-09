@@ -1641,7 +1641,17 @@ _REGIME_WINDOW = 200               # cửa sổ lịch sử SIZE cho BOCPD regim
 # là đối trọng. Và sáng 28/09 bỏ hẳn nó vẫn NHỎ 95,5% — nó KHÔNG phải nguyên
 # nhân. Tôi chẩn đoán sai ở P240 vì chỉ nhìn "bocpd bầu NHỎ 16/16" mà không đo
 # phản thực tế trước khi đổi.
-_VOTER_SCALE: dict = {}
+#
+# P250: prior_nho x0,25. Diagnose 09/10 (tái hiện 587/587 = 100% lượt bầu thật):
+# 600 dự đoán gần nhất NHỎ 69% / LỚN 29%. prior_nho là phiếu CỐ ĐỊNH luôn bầu
+# NHỎ; tính lại theo trọng số của nó:
+#   x1,0  NHỎ 73,4%  LỚN 26,6%   (đang chạy)
+#   x0,5  NHỎ 60,8%  LỚN 39,2%
+#   x0,25 NHỎ 48,7%  LỚN 51,3%   <- chọn
+#   x0    NHỎ 35,1%  LỚN 64,9%
+# Lần này ĐO TRƯỚC rồi mới đổi (bài học P240). Không đổi kỳ vọng tỉ lệ thắng:
+# NHỎ và LỚN cùng 81/216 = 37,5%.
+_VOTER_SCALE: dict = {'prior_nho': 0.25}
 
 def _hot_adjust_size(numbers: List[int], df, loss_streak: int,
                      banned: set) -> tuple:
