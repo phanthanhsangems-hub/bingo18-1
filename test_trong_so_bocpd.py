@@ -20,14 +20,15 @@ def kiem(ten, dk, ct=''):
 print("=== 1. HE SO ===")
 # P241: tra ve 1,0 — do that tren production cho thay giam bocpd lam NHO NHIEU
 # hon (51,8% -> 59,1%), nguoc voi muc tieu. Co che _VOTER_SCALE van giu.
-kiem("P241: khong voter nao bi nhan he so (bocpd tro ve 1,0)", PS._VOTER_SCALE == {}, str(PS._VOTER_SCALE))
+kiem("P241: bocpd tro ve 1,0 (khong bi nhan he so)", 'regime_bocpd' not in PS._VOTER_SCALE, str(PS._VOTER_SCALE))
+kiem("P250: prior_nho x0,25 (do that: NHO 73% -> ~49%)", PS._VOTER_SCALE == {'prior_nho': 0.25}, str(PS._VOTER_SCALE))
 kiem("co che _VOTER_SCALE van con", isinstance(PS._VOTER_SCALE, dict))
 
-def chuoi(scale, n=120, seed=3):
+def chuoi(scale, n=120, seed=3, ten='prior_nho'):
     rnd = random.Random(seed)
     draws = [[rnd.randint(1, 6) for _ in range(3)] for _ in range(300 + n)]
     PS._sw_ema = {}
-    cu = dict(PS._VOTER_SCALE); PS._VOTER_SCALE.clear(); PS._VOTER_SCALE.update({'regime_bocpd': scale})
+    cu = dict(PS._VOTER_SCALE); PS._VOTER_SCALE.clear(); PS._VOTER_SCALE.update({ten: scale})
     ra = []
     try:
         for t in range(300, 300 + n):
@@ -42,12 +43,15 @@ def chuoi(scale, n=120, seed=3):
     return ra
 
 print("\n=== 2. HE SO CO TAC DUNG THAT (goi _run_majority_vote) ===")
-a = chuoi(1.0); b = chuoi(0.5)
+# P250: test cu "giam bocpd -> NHO it hon" luc dat luc khong VA sai ban chat
+# (P241 do that: giam bocpd lam NHO NHIEU hon). prior_nho LUON bau NHO nen
+# giam no thi NHO khong the tang — kiem tra on dinh, khong phu thuoc gio chay.
+a = chuoi(1.0); b = chuoi(0.25)
 nho = lambda r: sum(1 for _, _, v in r if v['majority_size'] == 'NHO')
-kiem("giam trong so bocpd -> NHO it hon", nho(b) < nho(a), f"x1.0: {nho(a)}/120  x0.5: {nho(b)}/120")
-d = b[-1][2]['all_votes_detail'].get('regime_bocpd')
+kiem("giam prior_nho -> NHO it hon", nho(b) < nho(a), f"x1.0: {nho(a)}/120  x0.25: {nho(b)}/120")
+d = b[-1][2]['all_votes_detail'].get('prior_nho')
 if d:
-    kiem("detail ghi scale 0.5", d.get('scale') == 0.5)
+    kiem("detail ghi scale 0.25", d.get('scale') == 0.25)
     kiem("mult KHONG gom scale (de tinh lai duoc)", 'mult' in d)
 else:
     kiem("bocpd co bo phieu trong mau thu", False, "khong co phieu bocpd")
@@ -73,11 +77,13 @@ for v in ('regime_bocpd', 'prior_nho', 'prior_lon', 'pair_cooc'):
     kiem(f"P241: tinh lai ca voi {v}", f"-- {v} --" in r.stdout)
 kiem("tai hien khop 100%", 'khop 120/120 = 100.0%' in r.stdout,
      [l for l in r.stdout.split('\n') if 'khop' in l][:1])
-kiem(f"tinh lai o x0.5 = dung SIZE that da chon ({nho(b)}/120 NHO)",
-     f"NHO {nho(b)*100/120:5.1f}%" in [l for l in r.stdout.split('\n') if 'x0.5' in l][0])
+# Doc dung khoi "-- prior_nho --" (chuoi b chay voi prior_nho x0,25).
+_kh = r.stdout.split('-- prior_nho --', 1)[1].split('-- ', 1)[0].split('\n')
+def _dong(x): return [l for l in _kh if l.strip().startswith(x)][0]
+kiem(f"tinh lai o x0.25 = dung SIZE that da chon ({nho(b)}/120 NHO)",
+     f"NHO {nho(b)*100/120:5.1f}%" in _dong('x0.25'), _dong('x0.25'))
 kiem(f"tinh lai o x1.0 = dung chuoi chay that o x1.0 ({nho(a)}/120 NHO)",
-     f"NHO {nho(a)*100/120:5.1f}%" in [l for l in r.stdout.split('\n') if 'x1.0' in l][0],
-     [l for l in r.stdout.split('\n') if 'x1.0' in l])
+     f"NHO {nho(a)*100/120:5.1f}%" in _dong('x1.0'), _dong('x1.0'))
 
 print("\n=== 4. /api/vote-log TRA DETAIL ===")
 import app as A
