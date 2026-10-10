@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p251">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p254b">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -283,6 +283,32 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <p class="sub" id="kt-note"></p>
   </div>
 
+  <!-- ═══ TRIP THEO NGÀY (P254) ═══ -->
+  <div class="card" style="margin-top:16px" data-the="trip-ngay">
+    <h2>Trip theo ngày · mỗi lần ra cách nhau bao nhiêu kỳ</h2>
+    <p class="sub" id="tn-sub">Đang tải...</p>
+    <label class="tn-ctl">Xem
+      <select id="tn-ngay" aria-label="Số ngày gần nhất">
+        <option value="3">3</option><option value="5">5</option>
+        <option value="10" selected>10</option><option value="20">20</option>
+        <option value="30">30</option>
+      </select> ngày gần nhất</label>
+    <div class="tn-sum" id="tn-sum"></div>
+    <div class="tn-bo" id="tn-bo"></div>
+    <div class="tbl-scroll">
+      <table class="log-table" id="tn-table">
+        <thead><tr>
+          <th>Kỳ</th><th>Giờ</th><th>Bộ</th>
+          <th class="ta-r"><span class="lbl-lg">Cách trip trước</span><span class="lbl-sm">Cách</span></th>
+          <th class="ta-r"><span class="lbl-lg">Cách lần trước cùng bộ</span><span class="lbl-sm">Cùng bộ</span></th>
+        </tr></thead>
+        <tbody id="tn-body"><tr><td colspan="5" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <button type="button" class="cd-nut tn-them" id="tn-them" hidden></button>
+    <p class="sub" id="tn-note"></p>
+  </div>
+
   <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
   <div class="card" style="margin-top:16px" data-the="cau">
     <h2>Cầu đang theo dõi</h2>
@@ -326,6 +352,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p251"></script>
+<script src="/static/js/dashboard.js?v=p254b"></script>
 </body>
 </html>

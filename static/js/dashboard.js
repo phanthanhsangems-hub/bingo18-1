@@ -695,6 +695,91 @@ async function loadTripleStats(d) {
   loadChuoiKhoangCachTrip(d.triples || []);
 }
 
+// ── P254: Trip theo ngày — mỗi lần trip ra cách lần trước bao nhiêu kỳ ──
+// Khoảng cách = HIỆU SỐ KỲ (184311 -> 184330 = cách 19), cùng quy ước với các
+// thẻ khoảng cách khác và sổ tay của người dùng. Số liệu từ /api/trip/lich-su.
+const TN_LY_THUYET = 36;               // mỗi kỳ 6/216 = 1/36 ra trip
+const TN_GOI_Y = 20;                    // mặc định chỉ hiện 20 lần mới nhất cho thẻ đỡ dài
+let _tnMoHet = false;
+function tnGio(luc) {                  // 'YYYY-MM-DD HH:MM:SS' UTC -> 'dd/mm HH:MM' giờ VN
+  const t = Date.parse(String(luc).replace(' ', 'T') + 'Z');
+  if (isNaN(t)) return '--';
+  const d = new Date(t + 7 * 3600e3), p = n => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+async function loadTripNgay() {
+  const sel = $('tn-ngay');
+  if (!sel) return;
+  const ngay = parseInt(sel.value, 10) || 10;
+  let d;
+  try {
+    d = await J('/api/trip/lich-su?ngay=' + ngay);
+  } catch (e) { d = null; }
+  if (!d || !Array.isArray(d.trip)) {
+    $('tn-body').innerHTML = '<tr><td colspan="5" class="skeleton">Chưa tải được dữ liệu — sẽ thử lại.</td></tr>';
+    return;
+  }
+  const fmt = v => v == null ? '—' : Number(v).toLocaleString('vi-VN');
+  const th = d.tong_hop || {};
+  const kyVong = Math.round((d.so_ky_trong_khoang || 0) / TN_LY_THUYET);
+
+  $('tn-sub').innerHTML =
+    `<b class="num">${fmt(d.so_trip)}</b> lần trip trong <b class="num">${fmt(d.so_ky_trong_khoang)}</b> kỳ` +
+    ` (${ngay} ngày gần nhất) · kỳ vọng ngẫu nhiên ~<b class="num">${fmt(kyVong)}</b> lần`;
+
+  const o = (nhan, val, phu) => `<div class="tn-o"><span class="tn-v num">${val}</span>` +
+    `<span class="tn-l">${nhan}</span>${phu ? `<span class="tn-p">${phu}</span>` : ''}</div>`;
+  $('tn-sum').innerHTML =
+    o('Cách TB', fmt(th.tb_cach), `lý thuyết ${TN_LY_THUYET}`) +
+    o('Trung vị', fmt(th.trung_vi), 'một nửa số lần ngắn hơn') +
+    o('Ngắn nhất', fmt(th.nho_nhat)) +
+    o('Dài nhất', fmt(th.lon_nhat)) +
+    o('Đang chưa về', fmt(d.dang_chua_ve) + ' kỳ',
+      th.tb_cach && d.dang_chua_ve != null ? (d.dang_chua_ve >= th.tb_cach ? 'đã vượt TB' : 'chưa tới TB') : '');
+
+  // đếm theo từng bộ
+  const tb = d.theo_bo || {};
+  $('tn-bo').innerHTML = ['1', '2', '3', '4', '5', '6'].map(v => {
+    const k = `${v}-${v}-${v}`, n = tb[k] ? tb[k].so_lan : 0;
+    return `<span class="tn-chip">${miniDice([+v, +v, +v])}<b class="num">×${n}</b></span>`;
+  }).join('');
+
+  // hàng đầu: hiện tại đang chưa có trip bao lâu (cùng kiểu hàng "Trip gần nhất")
+  const dau = d.ky_cuoi == null ? '' : `<tr class="tr-last">
+      <td colspan="5" class="tr-last-txt">Hiện tại · kỳ <b class="num">#${fmt(d.ky_cuoi)}</b> ·
+        ${d.dang_chua_ve == null ? 'chưa có trip trong dữ liệu'
+          : `đã <b class="num">${fmt(d.dang_chua_ve)}</b> kỳ chưa có trip`}</td>
+    </tr>`;
+
+  const lop = c => c == null ? '' : c >= 2 * TN_LY_THUYET ? ' tn-dai' : c >= TN_LY_THUYET ? ' tn-vua' : c <= 5 ? ' tn-gan' : '';
+  const hang = x => {
+    const v = +String(x.bo).charAt(0);
+    return `<tr>
+      <td class="mono">#${fmt(x.draw_number)}</td>
+      <td class="mono">${tnGio(x.luc_utc)}</td>
+      <td>${miniDice([v, v, v])}</td>
+      <td class="num ta-r${lop(x.cach_truoc)}">${fmt(x.cach_truoc)}${x.thieu_ky ? ' <span class="tn-canh" title="DB thiếu kỳ ở giữa hai lần này">⚠</span>' : ''}</td>
+      <td class="num ta-r ss-prev">${fmt(x.cung_bo_cach)}</td>
+    </tr>`;
+  };
+  const ds = d.trip.slice().reverse();      // mới nhất lên đầu, như các bảng khác
+  const hien = _tnMoHet ? ds : ds.slice(0, TN_GOI_Y);
+  $('tn-body').innerHTML = dau + (ds.length ? hien.map(hang).join('')
+    : '<tr><td colspan="5" class="skeleton">Không có trip nào trong khoảng này.</td></tr>');
+  const them = $('tn-them');
+  if (them) {
+    them.hidden = ds.length <= TN_GOI_Y;
+    them.textContent = _tnMoHet ? 'Thu gọn' : `Hiện tất cả ${ds.length} lần`;
+  }
+
+  $('tn-note').innerHTML =
+    '<b>Cách</b> = hiệu số kỳ giữa hai lần trip liền nhau (bất kỳ bộ nào): #189122 → #189123 là cách 1 kỳ. ' +
+    '<b>Cùng bộ</b> = cách lần trước của chính bộ đó (trống nếu chưa thấy trong dữ liệu). ' +
+    `Màu: <span class="tn-gan">≤ 5 sát nhau</span> · <span class="tn-vua">≥ ${TN_LY_THUYET} dài hơn TB lý thuyết</span> · ` +
+    `<span class="tn-dai">≥ ${2 * TN_LY_THUYET} rất dài</span>. ⚠ = DB thiếu kỳ ở giữa. ` +
+    'Mỗi kỳ vẫn chỉ 1/36 ra trip dù vừa ra hay đã lâu chưa ra.';
+}
+
 // ── P226: bảng BỘ 2 SỐ TRÙNG NHAU ───────────────────────────
 // Dựng y hệt bảng trip ở trên để người dùng không phải học lại cách đọc —
 // cùng cột, cùng quy tắc tô đậm ô "chưa về", dùng lại luôn CSS .tr-*.
@@ -996,6 +1081,14 @@ safe(loadTrend);                       // trend đổi chậm — tải 1 lần 
 // P185: thống kê toàn lịch sử, đổi rất chậm — 5 phút một lần là thừa đủ
 // (server cũng cache 300s nên gọi dày hơn cũng không có dữ liệu mới)
 loadBangLichSu();
+// P254: thẻ trip theo ngày — dữ liệu đổi mỗi kỳ (~6 phút), server cache 120s
+safe(loadTripNgay);
+{
+  const _tnSel = $('tn-ngay'), _tnThem = $('tn-them');
+  if (_tnSel) _tnSel.addEventListener('change', () => safe(loadTripNgay));
+  if (_tnThem) _tnThem.addEventListener('click', () => { _tnMoHet = !_tnMoHet; safe(loadTripNgay); });
+}
+setInterval(() => safe(loadTripNgay), 120000);
 setInterval(refreshAllVaGhiMoc, 60000);
 setInterval(() => safe(loadTrend), 600000);
 setInterval(loadBangLichSu, 300000);
@@ -1035,6 +1128,7 @@ const CD_TEN = {
   'con-bao-nhieu': 'Còn bao nhiêu kỳ nữa sẽ ra',
   'kc-tong':       'Khoảng cách các kỳ theo tổng',
   'kc-trip':       'Khoảng cách các kỳ theo bộ 3 số trùng',
+  'trip-ngay':     'Trip theo ngày · cách nhau bao nhiêu kỳ',
   'cau':           'Cầu đang theo dõi',
   'canh-bao':      'Cảnh báo thông minh',
   'nhat-ky':       'Nhật ký dự đoán',
