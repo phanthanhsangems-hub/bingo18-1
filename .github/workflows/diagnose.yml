@@ -1295,7 +1295,50 @@ jobs:
               if thieu or thua or hong:
                   open('/tmp/job_failed', 'a').write(f"P245: thieu {len(thieu)}, thua {len(thua)}, hong {len(hong)}\n")
           PYEOF
-          echo "doi_chieu_lap_lai" >> /tmp/da_chay
+          echo "doi_chieu_lap_lai ky_thieu_du_doan" >> /tmp/da_chay
+
+      - name: Kỳ thiếu dự đoán (P251)
+        # Nguoi dung thay bang du doan co #190580 ma khong co #190579. He thong
+        # du doan truoc 2 ky (next_draw = last+2); neu chu trinh bo lo mot lan
+        # thi ky giua bi thung vinh vien. Buoc nay doi chieu tung ky that.
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=200&cb=$TS" > /tmp/g4.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/predictions?limit=200&cb=$TS" > /tmp/p4.json
+          python3 - <<'PYEOF'
+          import json
+          g = json.load(open('/tmp/g4.json'))['draws']
+          pr = json.load(open('/tmp/p4.json'))
+          ky = {x['draw_number']: x['time'] for x in g}            # gio UTC HH:MM
+          du = {}
+          for x in pr:
+              du.setdefault(x['draw_number'], x.get('prediction_time'))
+          def vn(t):
+              try:
+                  h, m = map(int, t.split(':')); return f"{(h + 7) % 24:02d}:{m:02d}"
+              except Exception:
+                  return t
+          moi = max(ky); cu = min(ky)
+          print(f"=== DOI CHIEU KY <-> DU DOAN ({len(ky)} ky: #{cu}..#{moi}) ===")
+          print(f"  ky moi nhat trong DB : #{moi}   du doan moi nhat: #{max(du)}   (truoc {max(du) - moi} ky)")
+          thieu = [d for d in range(max(cu, min(du)), max(du) + 1) if d not in du]
+          print(f"  KY THIEU DU DOAN trong khoang #{max(cu, min(du))}..#{max(du)}: {len(thieu)}")
+          for d in thieu[-40:]:
+              print(f"    #{d}  ky {'CO' if d in ky else 'chua/khong co'} trong DB"
+                    f"{'  gio VN ' + vn(ky[d]) if d in ky else ''}")
+          print()
+          print("=== 16 KY GAN NHAT: gio ky ra vs gio tao du doan (gio VN) ===")
+          for d in sorted(set(ky) | set(du), reverse=True)[:16]:
+              print(f"  #{d}  ky ra {vn(ky[d]) if d in ky else '-----'}   du doan tao luc {str(du.get(d) or '-----')[11:19]}")
+          gan = [d for d in thieu if d >= moi - 40]
+          if gan:
+              open('/tmp/job_failed', 'a').write(f"P251: {len(gan)} ky thieu du doan trong 40 ky gan nhat: {gan}\n")
+          PYEOF
+          echo "ky_thieu_du_doan" >> /tmp/da_chay
 
       - name: Chốt kết quả
         if: always()
