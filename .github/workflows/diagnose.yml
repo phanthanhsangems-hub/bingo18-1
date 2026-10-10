@@ -1309,6 +1309,7 @@ jobs:
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
           curl -s --max-time 40 -H "$H" "$BASE/api/draw-grid?n=200&cb=$TS" > /tmp/g4.json
           curl -s --max-time 40 -H "$H" "$BASE/api/predictions?limit=200&cb=$TS" > /tmp/p4.json
+          curl -s --max-time 40 -H "$H" "$BASE/api/next_prediction?cb=$TS" > /tmp/np4.json
           python3 - <<'PYEOF'
           import json
           g = json.load(open('/tmp/g4.json'))['draws']
@@ -1334,6 +1335,22 @@ jobs:
           print("=== 16 KY GAN NHAT: gio ky ra vs gio tao du doan (gio VN) ===")
           for d in sorted(set(ky) | set(du), reverse=True)[:16]:
               print(f"  #{d}  ky ra {vn(ky[d]) if d in ky else '-----'}   du doan tao luc {str(du.get(d) or '-----')[11:19]}")
+          print()
+          print("=== /api/next_prediction (dashboard) ===")
+          try:
+              np_ = json.load(open('/tmp/np4.json'))
+              pend = [x['draw_number'] for x in np_.get('pending', [])]
+              print(f"  ky moi nhat da xo (last_draw): {np_.get('last_draw')}   the lon hien ky: #{np_.get('draw_number')}")
+              print(f"  du doan CHUA XO (pending)    : {pend}")
+              if 'pending' not in np_:
+                  open('/tmp/job_failed', 'a').write("P251: /api/next_prediction chua co truong 'pending'\n")
+              elif np_.get('last_draw') and any(d <= np_['last_draw'] for d in pend):
+                  open('/tmp/job_failed', 'a').write(f"P251: pending co ky da xo: {pend}\n")
+              elif pend and np_.get('draw_number') != min(pend):
+                  open('/tmp/job_failed', 'a').write(f"P251: the lon khong hien ky sap xo: {np_.get('draw_number')} vs {min(pend)}\n")
+          except Exception as ex:
+              print('  LOI doc next_prediction:', repr(ex))
+              open('/tmp/job_failed', 'a').write("P251: khong doc duoc /api/next_prediction\n")
           gan = [d for d in thieu if d >= moi - 40]
           if gan:
               open('/tmp/job_failed', 'a').write(f"P251: {len(gan)} ky thieu du doan trong 40 ky gan nhat: {gan}\n")
