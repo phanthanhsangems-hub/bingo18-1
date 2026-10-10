@@ -93,5 +93,24 @@ kiem(f"ngay=1: dung {len(tay1)} trip, khop tinh tay", [x['draw_number'] for x in
 kiem("ngay=1: so ky ~ 240", 236 <= d1['so_ky_trong_khoang'] <= 241, d1['so_ky_trong_khoang'])
 kiem("dang ky vao bo quet", '/api/trip/lich-su' in open('scripts/endpoints_readonly.txt', encoding='utf-8').read())
 
+print("\n=== 3. THE TRONG DASHBOARD (P254) ===")
+html = open('templates/dashboard.html', encoding='utf-8').read()
+js = open('static/js/dashboard.js', encoding='utf-8').read()
+css = open('static/css/dashboard.css', encoding='utf-8').read()
+kiem("HTML co the data-the=\"trip-ngay\"", 'data-the="trip-ngay"' in html)
+kiem("khoa nam trong danh sach trang _THE_DASHBOARD (bat/tat the duoc)", 'trip-ngay' in A._THE_DASHBOARD)
+kiem("JS co ten hien thi cho khoa (trang cai dat)", "'trip-ngay':" in js)
+for i in ('tn-ngay', 'tn-sum', 'tn-bo', 'tn-body', 'tn-sub', 'tn-note'):
+    kiem(f"HTML co #{i} ma JS dung", f'id="{i}"' in html and f"$('{i}')" in js)
+kiem("JS goi /api/trip/lich-su", "/api/trip/lich-su?ngay=" in js)
+kiem("tai luc dau, khi doi so ngay, va dinh ky", "safe(loadTripNgay)" in js and "addEventListener('change'" in js
+     and "setInterval(() => safe(loadTripNgay)" in js)
+kiem("gio doi tu UTC sang VN (+7)", '7 * 3600e3' in js)
+kiem("chi hien 20 lan moi nhat + nut hien tat ca", 'TN_GOI_Y = 20' in js and 'id="tn-them"' in html and "addEventListener('click'" in js)
+kiem("mau TINH (khong nhap nhay nhu .overdue-hi): .tn-dai khong co animation",
+     '.tn-dai{' in css and 'animation' not in css.split('.tn-dai{')[1].split('}')[0])
+kiem("co luat cho man hep va khi phong to (hep-640)", 'html.hep-640 #tn-table' in css)
+kiem("endpoint co cache 120s (dashboard goi moi 2 phut)", '@cache_resp(ttl=120)\ndef trip_lich_su' in open('app.py', encoding='utf-8').read())
+
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

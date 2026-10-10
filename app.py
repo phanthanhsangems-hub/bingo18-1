@@ -3671,7 +3671,8 @@ def _trip_lich_su(rows: list, tu_utc) -> dict:
 
 
 @app.route('/api/trip/lich-su')
-@limiter.limit("10 per minute")
+@limiter.limit("30 per minute")
+@cache_resp(ttl=120)
 def trip_lich_su():
     """P253: các lần ra trip trong ?ngay=N (mặc định 10) ngày gần nhất, mỗi lần
     cách lần trước bao nhiêu kỳ."""
@@ -3718,7 +3719,7 @@ def trip_lich_su():
 # chọn đã lưu, nên đừng bao giờ đổi khoá theo tiêu đề.
 _THE_DASHBOARD = (
     'winrate', 'size-today', 'nong-lanh', 'bo-hom-nay', 'luoi',
-    'trip', 'doi', 'tong', 'con-bao-nhieu', 'kc-tong', 'kc-trip',
+    'trip', 'doi', 'tong', 'con-bao-nhieu', 'kc-tong', 'kc-trip', 'trip-ngay',
     'cau', 'canh-bao', 'nhat-ky',
 )
 _THE_STATE_KEY = 'dashboard_the_an'

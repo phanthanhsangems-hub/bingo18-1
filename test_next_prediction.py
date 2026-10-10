@@ -82,7 +82,7 @@ kiem("moi du doan chua xo ra mot dong (.map tren pend)", re.search(r"pend\.slice
 kiem("nhan 'KY TOI' cho ky gan nhat", 'KỲ TỚI' in js)
 kiem("lui ve may chu cu khong co 'pending'", 'pend = [np]' in js)
 html = open('templates/dashboard.html', encoding='utf-8').read()
-kiem("doi ?v= de dien thoai chac chan tai ban moi", 'dashboard.js?v=p251' in html)
+kiem("doi ?v= de dien thoai chac chan tai ban moi", 'dashboard.js?v=p254b' in html)
 
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

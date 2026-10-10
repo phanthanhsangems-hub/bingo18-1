@@ -631,3 +631,34 @@ html.hep-420 .hc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
    đưa nhãn tổng lên trên để chip có trọn bề ngang. */
 html.hep-420 .tc-row  { grid-template-columns: minmax(0, 1fr); gap: 4px; }
 html.hep-300 .tiles   { grid-template-columns: minmax(0, 1fr); }
+
+/* ── P254: thẻ "Trip theo ngày" ───────────────────────────────────────── */
+.tn-ctl{display:block;font-size:13px;color:var(--muted);margin:0 0 12px}
+.tn-ctl select{
+  font:inherit;font-weight:600;color:var(--ink);background:var(--card2);
+  border:1px solid var(--line);border-radius:8px;padding:4px 8px;margin:0 4px;
+}
+/* minmax(min(..,100%),1fr): không co được thì tràn ngang khi phóng to (P233) */
+.tn-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(104px,100%),1fr));gap:8px;margin:0 0 12px}
+.tn-o{background:var(--card2);border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tn-v{font-size:18px;font-weight:700;color:var(--ink)}
+.tn-l{font-size:11px;color:var(--muted);letter-spacing:.02em}
+.tn-p{font-size:10.5px;color:var(--muted)}
+.tn-bo{display:flex;flex-wrap:wrap;gap:6px 10px;margin:0 0 12px}
+.tn-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.tn-chip b{color:var(--ink)}
+/* màu TĨNH, không nhấp nháy như .overdue-hi: đây là lịch sử, không phải cảnh báo */
+.tn-gan{color:var(--win);font-weight:600}
+.tn-vua{color:var(--amber);font-weight:600}
+.tn-dai{color:var(--loss);font-weight:700}
+.tn-canh{color:var(--amber);cursor:help}
+#tn-table .tr-last-txt{white-space:normal;line-height:1.35}
+@media (max-width:640px){
+  #tn-table th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
+  #tn-table td{padding:8px 3px;font-size:12.5px}
+  #tn-table .mini-die{width:17px;height:17px;font-size:10px}
+}
+html.hep-640 #tn-table th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
+html.hep-640 #tn-table td{padding:8px 3px;font-size:12.5px}
+html.hep-640 #tn-table .mini-die{width:17px;height:17px;font-size:10px}
+.tn-them{margin:10px 0 0}
