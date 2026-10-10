@@ -3608,6 +3608,108 @@ def triple_stats():
         return jsonify({'error': str(e)}), 500
 
 
+def _trip_lich_su(rows: list, tu_utc) -> dict:
+    """P253: các lần ra TRIP (3 số giống nhau) kể từ `tu_utc` + khoảng cách.
+
+    rows: [(draw_number, [a,b,c], draw_time)] cũ -> mới, nên lấy DƯ phía trước
+    `tu_utc` để lần trip đầu tiên trong khoảng vẫn có "lần trước" mà so.
+
+    Khoảng cách theo quy ước của hệ thống và sổ tay người dùng: HIỆU SỐ KỲ
+    (184311 -> 184330 = cách 19 kỳ), như _chuoi_khoang_cach. 'giua' = số kỳ
+    nằm GIỮA hai lần (= cách - 1). 'thieu_ky' = trong khoảng đó DB thiếu kỳ,
+    nên con số cách có thể đúng theo số kỳ nhưng thiếu dữ liệu để kiểm.
+    """
+    co = {int(dn) for dn, _, _ in rows}
+    trips = []                        # [(dn, bo, draw_time)] toàn bộ trong rows
+    for dn, nums, dt in rows:
+        if len(nums) == 3 and nums[0] == nums[1] == nums[2]:
+            trips.append((int(dn), int(nums[0]), dt))
+
+    def _hut(a, b):                   # có kỳ nào giữa a và b không có trong DB?
+        return any(k not in co for k in range(a + 1, b))
+
+    out, truoc_bo = [], {}
+    prev = None
+    for dn, v, dt in trips:
+        cach = dn - prev[0] if prev else None
+        cung = dn - truoc_bo[v] if v in truoc_bo else None
+        if dt is not None and str(dt)[:19] >= str(tu_utc)[:19]:
+            out.append({
+                'draw_number': dn,
+                'bo': f'{v}-{v}-{v}',
+                'luc_utc': str(dt)[:19],
+                'cach_truoc': cach,                 # so với trip BẤT KỲ liền trước
+                'giua': (cach - 1) if cach else None,
+                'thieu_ky': bool(prev and _hut(prev[0], dn)),
+                'cung_bo_cach': cung,               # so với lần trước CỦA ĐÚNG bộ này
+            })
+        prev = (dn, v)
+        truoc_bo[v] = dn
+
+    cac = sorted(x['cach_truoc'] for x in out if x['cach_truoc'])
+    def _pv(q):
+        return cac[max(0, min(len(cac) - 1, math.ceil(q * len(cac)) - 1))] if cac else None
+    theo_bo = {}
+    for x in out:
+        theo_bo.setdefault(x['bo'], []).append(x)
+    return {
+        'trip': out,
+        'so_trip': len(out),
+        'tong_hop': {
+            'tb_cach': round(sum(cac) / len(cac), 1) if cac else None,
+            'trung_vi': _pv(0.5), 'nho_nhat': cac[0] if cac else None,
+            'lon_nhat': cac[-1] if cac else None,
+            'ly_thuyet_tb': 36,       # mỗi kỳ có 6/216 = 1/36 ra trip
+        },
+        'theo_bo': {b: {'so_lan': len(v),
+                        'cac_ky': [x['draw_number'] for x in v]}
+                    for b, v in sorted(theo_bo.items())},
+        'ky_cuoi': rows[-1][0] if rows else None,
+        'trip_cuoi': trips[-1][0] if trips else None,
+        'dang_chua_ve': (int(rows[-1][0]) - trips[-1][0]) if rows and trips else None,
+    }
+
+
+@app.route('/api/trip/lich-su')
+@limiter.limit("10 per minute")
+def trip_lich_su():
+    """P253: các lần ra trip trong ?ngay=N (mặc định 10) ngày gần nhất, mỗi lần
+    cách lần trước bao nhiêu kỳ."""
+    import ast as _ast
+    try:
+        ngay = max(1, min(int(request.args.get('ngay', 10)), 60))
+        now_utc = datetime.utcnow()
+        tu = now_utc - timedelta(days=ngay)
+        lui = (now_utc - timedelta(days=ngay + 30)).strftime('%Y-%m-%d %H:%M:%S')
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT draw_number, numbers, draw_time FROM draw_history "
+                        f"WHERE numbers IS NOT NULL AND draw_time >= {ph} "
+                        f"ORDER BY draw_number", (lui,))
+            raw = cur.fetchall()
+        finally:
+            conn.close()
+        rows = []
+        for dn, ns, dt in raw:
+            try:
+                ns = ns if isinstance(ns, list) else json.loads(ns)
+            except Exception:
+                try:
+                    ns = _ast.literal_eval(ns)
+                except Exception:
+                    continue
+            rows.append((int(dn), [int(x) for x in ns], dt))
+        kq = _trip_lich_su(rows, tu)
+        kq.update({'ngay': ngay, 'tu_utc': tu.strftime('%Y-%m-%d %H:%M:%S'),
+                   'so_ky_trong_khoang': sum(1 for _, _, dt in rows
+                                             if dt is not None and str(dt)[:19] >= tu.strftime('%Y-%m-%d %H:%M:%S'))})
+        return jsonify(kq)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ── P232: bật/tắt từng thẻ trên dashboard ────────────────────────────────
 # Danh sách TRẮNG. Khoá phải khớp data-the="..." trong dashboard.html.
 # Có whitelist vì người dùng gửi thẳng danh sách khoá lên: không lọc thì

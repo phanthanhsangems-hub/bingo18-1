@@ -149,3 +149,4 @@
 /manifest.json
 /sw.js
 /api/tong/vang-lau-nhat
+/api/trip/lich-su

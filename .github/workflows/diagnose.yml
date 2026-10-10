@@ -1307,7 +1307,7 @@ jobs:
               if thieu or thua or hong:
                   open('/tmp/job_failed', 'a').write(f"P245: thieu {len(thieu)}, thua {len(thua)}, hong {len(hong)}\n")
           PYEOF
-          echo "doi_chieu_lap_lai ky_thieu_du_doan" >> /tmp/da_chay
+          echo "doi_chieu_lap_lai ky_thieu_du_doan trip_10_ngay" >> /tmp/da_chay
 
       - name: Kỳ thiếu dự đoán (P251)
         # Nguoi dung thay bang du doan co #190580 ma khong co #190579. He thong
@@ -1368,6 +1368,41 @@ jobs:
               open('/tmp/job_failed', 'a').write(f"P251: {len(gan)} ky thieu du doan trong 40 ky gan nhat: {gan}\n")
           PYEOF
           echo "ky_thieu_du_doan" >> /tmp/da_chay
+
+      - name: Trip 10 ngày — mỗi lần ra cách nhau bao nhiêu kỳ (P253)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 60 -H "$H" "$BASE/api/trip/lich-su?ngay=10&cb=$TS" > /tmp/trip.json
+          python3 - <<'PYEOF'
+          import json, datetime
+          d = json.load(open('/tmp/trip.json'))
+          if 'trip' not in d:
+              print('LOI:', str(d)[:300]); open('/tmp/job_failed', 'a').write("P253: /api/trip/lich-su loi\n"); raise SystemExit
+          def vn(t):
+              return (datetime.datetime.strptime(t, '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=7)).strftime('%d/%m %H:%M')
+          th = d['tong_hop']
+          print(f"=== TRIP {d['ngay']} NGAY (tu {vn(d['tu_utc'])} gio VN) — {d['so_trip']} lan trong {d['so_ky_trong_khoang']} ky ===")
+          print(f"  khoang cach giua hai trip LIEN TIEP (bat ky bo nao), don vi: ky (hieu so ky)")
+          print(f"    trung binh {th['tb_cach']}  |  trung vi {th['trung_vi']}  |  ngan nhat {th['nho_nhat']}  |  dai nhat {th['lon_nhat']}")
+          print(f"    ly thuyet: moi ky 6/216 = 1/36 ra trip => trung binh ~{th['ly_thuyet_tb']} ky")
+          print(f"  ky moi nhat #{d['ky_cuoi']}, trip gan nhat #{d['trip_cuoi']} -> DANG CHUA VE {d['dang_chua_ve']} ky")
+          print()
+          print("   #   ky        gio VN       bo     cach trip truoc   cach lan truoc cua CHINH bo nay")
+          for i, x in enumerate(d['trip'], 1):
+              c = '--' if x['cach_truoc'] is None else x['cach_truoc']
+              cb = '--' if x['cung_bo_cach'] is None else x['cung_bo_cach']
+              print(f"  {i:>3}  #{x['draw_number']}  {vn(x['luc_utc'])}   {x['bo']}   {c!s:>9} ky       {cb!s:>9} ky{'   (DB thieu ky o giua)' if x['thieu_ky'] else ''}")
+          print()
+          print("  Theo tung bo:")
+          for b, v in d['theo_bo'].items():
+              print(f"    {b}: {v['so_lan']} lan  ky {v['cac_ky']}")
+          print("  (bo khong thay o tren = khong ra lan nao trong khoang)")
+          PYEOF
+          echo "trip_10_ngay" >> /tmp/da_chay
 
       - name: Chốt kết quả
         if: always()
