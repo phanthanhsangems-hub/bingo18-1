@@ -4142,52 +4142,88 @@ def next_prediction_hyphen():
     return multi_preview()
 
 
+def _np_payload(row) -> dict:
+    """Một dòng predictions_vn -> dict trả cho dashboard (đã hiệu chỉnh)."""
+    raw_conf   = float(row[1]) if row[1] else 0.0
+    model_name = row[2]
+    vb_raw     = row[6]
+    try:
+        vb = json.loads(vb_raw) if isinstance(vb_raw, str) else vb_raw
+    except Exception:
+        vb = None
+
+    # Apply calibration: replace raw model score with historical win rate,
+    # bucketed by vote_share (consensus strength) when available.
+    try:
+        from calibration import get_calibrator
+        calibrator = get_calibrator(db)
+        vote_share = (vb or {}).get('vote_share', 0.5)
+        win_prob, cal_meta = calibrator.calibrate_by_vote_share(vote_share, model_name, raw_conf)
+    except Exception:
+        win_prob, cal_meta = raw_conf, {}
+
+    return {
+        "predicted_numbers":    json.loads(row[0]) if isinstance(row[0], str) else row[0],
+        "confidence":           win_prob,
+        "raw_confidence":       raw_conf,
+        "calibration":          cal_meta,
+        "is_confident":         cal_meta.get("is_confident", False),
+        "model_name":           model_name,
+        "draw_number":          row[3],
+        "prediction_time":      str(row[4]) if row[4] else None,
+        "display_time_vietnam": str(row[5]) if row[5] else None,
+        "vote_breakdown":       vb,
+    }
+
+
+_NP_COLS = ("predicted_numbers, confidence, model_name, draw_number, "
+            "full_time_vietnam, display_time_vietnam, vote_breakdown")
+
+
 @app.route('/api/next_prediction')
 @limiter.limit("30 per minute")
 def get_next_prediction():
+    """Dự đoán kỳ SẮP XỔ.
+
+    P251: hệ thống dự đoán TRƯỚC 2 KỲ (next_draw = last + 2, bù độ trễ đồng bộ),
+    nên luôn có HAI dự đoán chưa xổ: kỳ kế tiếp (last+1) và kỳ sau nữa (last+2).
+    Trước đây endpoint chỉ trả dự đoán MỚI NHẤT (last+2) => dashboard hiện #580
+    mà không có #579 dù #579 đã có trong DB từ 6 phút trước, và thẻ lớn lại
+    hiện kỳ xa hơn thay vì kỳ sắp xổ.
+
+    - 'pending': MỌI dự đoán có kỳ > kỳ mới nhất đã xổ, kỳ gần nhất đứng đầu.
+    - các trường cấp trên cùng = pending[0] (kỳ sắp xổ); nếu không có dự đoán
+      chưa xổ thì lùi về dự đoán mới nhất như cũ.
+    """
     try:
         conn = db.get_connection()
         cur  = conn.cursor()
+        ph   = db._ph()
+        cur.execute("SELECT COALESCE(MAX(draw_number), 0) FROM draw_history "
+                    "WHERE numbers IS NOT NULL")
+        last_draw = int(cur.fetchone()[0] or 0)
         cur.execute(
-            "SELECT predicted_numbers, confidence, model_name, draw_number, "
-            "full_time_vietnam, display_time_vietnam, vote_breakdown "
-            "FROM predictions_vn ORDER BY draw_number DESC LIMIT 1")
-        row = conn.cursor().fetchone() if False else cur.fetchone()
+            f"SELECT {_NP_COLS}, id FROM predictions_vn WHERE draw_number > {ph} "
+            f"ORDER BY draw_number ASC, id DESC LIMIT 8", (last_draw,))
+        pend_rows, seen = [], set()
+        for r in cur.fetchall():
+            if r[3] in seen:            # nhiều dòng cùng một kỳ -> lấy dòng mới nhất
+                continue
+            seen.add(r[3])
+            pend_rows.append(r)
+        row = pend_rows[0] if pend_rows else None
+        if row is None:
+            cur.execute(f"SELECT {_NP_COLS} FROM predictions_vn "
+                        f"ORDER BY draw_number DESC LIMIT 1")
+            row = cur.fetchone()
         conn.close()
         if not row:
             return jsonify({})
 
-        raw_conf   = float(row[1]) if row[1] else 0.0
-        model_name = row[2]
-        vb_raw     = row[6]
-
-        try:
-            vb = json.loads(vb_raw) if isinstance(vb_raw, str) else vb_raw
-        except Exception:
-            vb = None
-
-        # Apply calibration: replace raw model score with historical win rate,
-        # bucketed by vote_share (consensus strength) when available.
-        try:
-            from calibration import get_calibrator
-            calibrator = get_calibrator(db)
-            vote_share = (vb or {}).get('vote_share', 0.5)
-            win_prob, cal_meta = calibrator.calibrate_by_vote_share(vote_share, model_name, raw_conf)
-        except Exception:
-            win_prob, cal_meta = raw_conf, {}
-
-        return jsonify({
-            "predicted_numbers":    json.loads(row[0]) if isinstance(row[0], str) else row[0],
-            "confidence":           win_prob,
-            "raw_confidence":       raw_conf,
-            "calibration":          cal_meta,
-            "is_confident":         cal_meta.get("is_confident", False),
-            "model_name":           model_name,
-            "draw_number":          row[3],
-            "prediction_time":      str(row[4]) if row[4] else None,
-            "display_time_vietnam": str(row[5]) if row[5] else None,
-            "vote_breakdown":       vb,
-        })
+        out = _np_payload(row)
+        out["pending"] = [_np_payload(r) for r in pend_rows]
+        out["last_draw"] = last_draw
+        return jsonify(out)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

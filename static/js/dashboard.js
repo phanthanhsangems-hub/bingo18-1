@@ -64,7 +64,8 @@ async function loadHero() {
   const nums = p.predicted_numbers;
   $('pred-draw').textContent = '#' + p.draw_number;
   $('pred-model').textContent = p.model_name || '--';
-  if (p.display_time_vietnam) $('pred-time').textContent = 'xổ lúc ' + p.display_time_vietnam;
+  // display_time_vietnam là giờ TẠO dự đoán, không phải giờ xổ (kỳ xổ sau đó ~6-12 phút)
+  if (p.display_time_vietnam) $('pred-time').textContent = 'dự đoán lúc ' + p.display_time_vietnam;
 
   const row = $('dice-row');
   row.classList.remove('rolled');
@@ -197,20 +198,29 @@ async function loadRecent() {
       `Kỳ trước: <b>${(lr.numbers || []).join('·')} — ${SZ_VI[lr.size] || ''} ${lr.is_win ? '✓' : '✕'}</b>`;
   }
 
-  // log table — dòng đầu: dự đoán kỳ SẮP TỚI (chưa xổ)
-  let pendingRow = '';
-  if (np && np.predicted_numbers && np.draw_number > rows[0].draw_number) {
-    const psz = sizeOf(np.predicted_numbers);
-    const ptime = np.display_time_vietnam ? esc(String(np.display_time_vietnam).slice(0, 5)) : '--';
-    pendingRow = `<tr class="pending-row">
-      <td class="mono">#${np.draw_number}</td>
-      <td class="mono">${ptime}</td>
-      <td>${miniDice(np.predicted_numbers)}</td>
-      <td>${szPill(psz)}</td>
-      <td colspan="3" class="pending-note">chờ xổ · win prob ${((np.confidence || 0) * 100).toFixed(1)}%</td>
-      <td><span class="wl pd">DỰ ĐOÁN</span></td>
-    </tr>`;
+  // log table — các dòng đầu: MỌI dự đoán chưa xổ. Hệ thống dự đoán trước 2 kỳ
+  // nên thường có hai dòng (kỳ kế tiếp + kỳ sau nữa). P251: trước đây chỉ hiện
+  // dự đoán mới nhất => #580 hiện ra còn #579 (kỳ sắp xổ) biến mất.
+  let pend = [];
+  if (np && Array.isArray(np.pending) && np.pending.length) {
+    pend = np.pending.filter(x => x.predicted_numbers && x.draw_number > rows[0].draw_number);
+  } else if (np && np.predicted_numbers && np.draw_number > rows[0].draw_number) {
+    pend = [np];                        // máy chủ cũ chưa có trường 'pending'
   }
+  const gan = pend.length ? Math.min(...pend.map(x => x.draw_number)) : null;
+  const pendingRow = pend.slice().sort((a, b) => b.draw_number - a.draw_number).map(x => {
+    const psz = sizeOf(x.predicted_numbers);
+    const ptime = x.display_time_vietnam ? esc(String(x.display_time_vietnam).slice(0, 5)) : '--';
+    const tip = x.draw_number === gan;
+    return `<tr class="pending-row">
+      <td class="mono">#${x.draw_number}</td>
+      <td class="mono">${ptime}</td>
+      <td>${miniDice(x.predicted_numbers)}</td>
+      <td>${szPill(psz)}</td>
+      <td colspan="3" class="pending-note">chờ xổ · win prob ${((x.confidence || 0) * 100).toFixed(1)}%</td>
+      <td><span class="wl pd">${pend.length > 1 && tip ? 'KỲ TỚI' : 'DỰ ĐOÁN'}</span></td>
+    </tr>`;
+  }).join('');
   $('log-body').innerHTML = pendingRow + rows.map(r => {
     const wl = r.is_win == null
       ? '<span class="wl p">CHỜ</span>'
