@@ -158,12 +158,29 @@ class DatabaseManager:
         except Exception:
             pass                            # không bao giờ để việc dọn dẹp làm hỏng request
 
+    @staticmethod
+    def _connect_pg_retry(lan_thu=4):
+        """Supabase pooler o session mode (cong 5432) tu choi khi het slot
+        (EMAXCONNSESSION). Slot thuong duoc tra lai sau vai giay, nen thu lai
+        ngan thay vi lam hong request / mat canh bao. Loi khac -> nem ngay."""
+        import time
+        import psycopg2
+        for i in range(lan_thu):
+            try:
+                return psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
+            except psycopg2.OperationalError as e:
+                het_slot = 'EMAXCONNSESSION' in str(e) or 'max clients' in str(e)
+                if not het_slot or i == lan_thu - 1:
+                    raise
+                logger.warning("Supabase het slot ket noi (lan %d/%d), thu lai", i + 1, lan_thu)
+                time.sleep(0.5 * (2 ** i))
+
     def get_connection(self):
         if USE_POSTGRES:
             # Direct connect per request — correct for Supabase pgbouncer
             # transaction mode. ThreadedConnectionPool causes pool exhaustion
             # because many endpoints still have connection leaks.
-            conn = psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
+            conn = self._connect_pg_retry()
             conn.autocommit = False
         else:
             # P195: factory dịch SQL Postgres sang SQLite. Chỉ gắn ở nhánh này —
