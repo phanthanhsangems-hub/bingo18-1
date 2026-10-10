@@ -1307,7 +1307,7 @@ jobs:
               if thieu or thua or hong:
                   open('/tmp/job_failed', 'a').write(f"P245: thieu {len(thieu)}, thua {len(thua)}, hong {len(hong)}\n")
           PYEOF
-          echo "doi_chieu_lap_lai ky_thieu_du_doan trip_10_ngay" >> /tmp/da_chay
+          echo "doi_chieu_lap_lai" >> /tmp/da_chay
 
       - name: Kỳ thiếu dự đoán (P251)
         # Nguoi dung thay bang du doan co #190580 ma khong co #190579. He thong
@@ -1424,7 +1424,7 @@ jobs:
           # buoc chot van in "Tat ca cac buoc chan doan deu dat" — vi
           # job_failed rong. Bao dat trong khi khong do duoc gi thi te hon la
           # khong co buoc kiem tra. Nay phai co DU mocs moi duoc bao dat.
-          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai vang_tong doi_chieu_lap_lai"
+          CAN="doi_chieu_200 sum_value p207 p216 phan_bo wr_size khung_gio hieu_chinh lo_hong phan_loai_lo_hong cong_dang_nhap nhat_ky_phieu canh_bao_lap_lai vang_tong doi_chieu_lap_lai ky_thieu_du_doan trip_10_ngay"
           THIEU=""
           for m in $CAN; do
             grep -qx "$m" /tmp/da_chay 2>/dev/null || THIEU="$THIEU $m"
