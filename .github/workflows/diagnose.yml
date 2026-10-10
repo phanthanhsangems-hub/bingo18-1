@@ -1292,6 +1292,18 @@ jobs:
               print(f"  THIEU (le ra bao ma khong co): {thieu or 'khong'}")
               print(f"  THUA  (bao ma khong dung)    : {thua or 'khong'}")
               print(f"  gui Telegram HONG            : {len(hong)}")
+              # P252: moi muc THIEU -> in du lieu de biet vi sao (khong doan)
+              for (dn0, c0) in thieu:
+                  tr = next((gg for gg in range(1, 161) if ky.get(dn0 - gg, (None,))[0] == tuple(map(int, c0))), None)
+                  print(f"  >> THIEU #{dn0} {'-'.join(c0)} gio VN {vn(ky[dn0][1])}: lan ra truoc cach {tr} ky")
+                  gan_m = [m for m in cb.get('nhat_ky', []) if 'den' in m and abs(m['den'] - dn0) <= 2]
+                  for m in gan_m:
+                      print(f"       nhat ky: den={m['den']} combo={m.get('combo')} ok={m.get('ok')} nguon={m.get('nguon')} luc={m.get('luc')}")
+                  if not gan_m:
+                      print("       nhat ky: KHONG co muc nao trong +-2 ky")
+                  bq0 = [m for m in cb.get('nhat_ky', []) if 'bo_qua_tu' in m and m['bo_qua_tu'] <= dn0 <= m['bo_qua_den']]
+                  print(f"       nam trong khoang bi bo qua vi nguoi may: {bq0 or 'khong'}")
+              print(f"  trang thai gan nhat: {cb.get('lan_chay_gan_nhat')}")
               if thieu or thua or hong:
                   open('/tmp/job_failed', 'a').write(f"P245: thieu {len(thieu)}, thua {len(thua)}, hong {len(hong)}\n")
           PYEOF
