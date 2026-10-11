@@ -1545,10 +1545,12 @@ def mode_watch():
     last_draw_time_utc       = None  # #24 gap detector
     conn = None  # persistent connection — reconnect only on error
 
+    _loi_xt = 0   # so lan loi xac thuc DB lien tiep (lui dan, xem khoi except)
     while True:
         try:
             if conn is None:
                 conn = get_conn()
+                _loi_xt = 0
             last_id = get_last_draw_id(conn)
             new     = get_new_since(last_id)
 
@@ -1670,6 +1672,14 @@ def mode_watch():
             except Exception:
                 pass
             conn = None
+            # Sai mat khau / bi chan (ECIRCUITBREAKER): thu lai moi 10s chi keo dai
+            # lenh chan cua Supabase va chan luon Cloud Run. Lui dan toi da 15 phut.
+            _l = str(e)
+            if any(k in _l for k in ('authentication', 'ECIRCUITBREAKER', 'password', 'ESSLREQUIRED', 'Tenant or user')):
+                _loi_xt += 1
+                _cho = min(60 * 2 ** (_loi_xt - 1), 900)
+                logger.error(f"Loi xac thuc DB lan {_loi_xt} — kiem tra DB_PASSWORD/DB_PORT=6543 trong .env. Cho {_cho}s truoc khi thu lai.")
+                time.sleep(_cho)
         except Exception as e:
             logger.error(f"Lỗi: {e}")
             try:
