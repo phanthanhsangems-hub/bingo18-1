@@ -167,18 +167,12 @@ _LAPLAI_CUA_SO_SAU    = 160
 _LAPLAI_STATE_KEY     = 'lap_lai_last_draw'
 
 # ── Size bias alert ───────────────────────────────────────────
-_last_bias_alert_ts: float = 0.0
 _BIAS_ALERT_COOLDOWN_SEC   = 7200  # max 1 alert/2 hours
-_BIAS_HOA_THRESHOLD        = 30.0  # alert nếu predicted HOA% > 30 (actual ~20%)
 
 # ── P70: LON excess alert ─────────────────────────────────────
-_last_lon_excess_alert_ts: float = 0.0
-_LON_EXCESS_ALERT_COOLDOWN_SEC   = 1800   # max 1 alert/30 phút
-_LON_EXCESS_CONSEC_THRESHOLD     = 3      # alert khi consecutive_excess >= 3
 
 # ── Triple drought alert ───────────────────────────────────────
 _last_triple_alert_ts: float = 0.0
-_TRIPLE_ALERT_COOLDOWN_SEC   = 3600   # max 1 alert/1h
 _TRIPLE_WARN_START           = 20     # alert đầu tiên — trước đa số triple (median=25)
 _TRIPLE_WARN_STEP            = 25     # re-alert mỗi 25 kỳ (~2.5h)
 _TRIPLE_DROUGHT_P90          = 95     # p90 gap lịch sử (hạn hán hiếm)
@@ -188,7 +182,6 @@ _triple_drought_notified_gap: int = 0  # gap lúc gửi alert gần nhất (rese
 
 _CHECKPOINT_TS = '2026-05-15 16:15:00'
 _CHECKPOINT_N  = 200
-_CHECKPOINT_ALERT_KEY = 'checkpoint_200_reached'
 # P195: phep kiem dinh pre-registered ve ml voter DA KET LUAN.
 #
 # Ket qua tren 20.288 predictions ke tu checkpoint:
@@ -208,7 +201,6 @@ _CHECKPOINT_ALERT_KEY = 'checkpoint_200_reached'
 # Cờ một-lần-duy-nhất: dòng alert_log mang key này CHÍNH LÀ dấu "đã gửi rồi".
 # Nó phải nằm trong AlertManager._PERMANENT_KEYS (prediction_service.py), nếu
 # không thì dọn 90 ngày sẽ xoá cờ và alert bắn lại mỗi 90 ngày — xem P190.
-_checkpoint_last_draw: int = -1   # skip duplicate queries for same draw
 
 
 def _get_checkpoint_config(cur):
@@ -241,106 +233,6 @@ def _save_checkpoint_config(cur, ts: str, n: int):
         """, (key, val, desc))
 
 
-def _check_checkpoint_alert(draw_number: int = 0):
-    """P152: Gửi Telegram alert khi đạt 200 fresh predictions. Dùng alert_log để dedup qua restarts."""
-    global _checkpoint_last_draw
-    if not USE_POSTGRES:
-        return
-    if draw_number and draw_number == _checkpoint_last_draw:
-        return
-    if draw_number:
-        _checkpoint_last_draw = draw_number
-    conn = None
-    try:
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        ts, n = _get_checkpoint_config(cur)
-        cur.execute("SELECT COUNT(*) FROM predictions WHERE created_at > %s", (ts,))
-        n_fresh = int(cur.fetchone()[0])
-        if n_fresh < n:
-            return
-        cur.execute("SELECT 1 FROM alert_log WHERE alert_key = %s LIMIT 1", (_CHECKPOINT_ALERT_KEY,))
-        already_sent = cur.fetchone() is not None
-        if already_sent:
-            return
-        # Fetch ml stats for the alert body
-        import math as _math
-        _BASELINE = 0.375
-        ctrl_str = over_str = z_ctrl = None
-        z_lon_str = "n/a"
-        ship_p171 = False
-        try:
-            cur.execute("""
-                SELECT
-                  SUM(CASE WHEN (p.vote_breakdown->'all_votes'->>'ml') =
-                               (p.vote_breakdown->>'final_size') THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN (p.vote_breakdown->'all_votes'->>'ml') =
-                               (p.vote_breakdown->>'final_size')
-                              AND pr.is_win_size THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN (p.vote_breakdown->'all_votes'->>'ml') <>
-                               (p.vote_breakdown->>'final_size') THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN (p.vote_breakdown->'all_votes'->>'ml') <>
-                               (p.vote_breakdown->>'final_size')
-                              AND pr.is_win_size THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN p.vote_breakdown->'all_votes'->>'ml' = 'LON'
-                              AND p.vote_breakdown->>'final_size' = 'LON' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN p.vote_breakdown->'all_votes'->>'ml' = 'LON'
-                              AND p.vote_breakdown->>'final_size' = 'LON'
-                              AND pr.is_win_size THEN 1 ELSE 0 END)
-                FROM predictions p
-                JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE p.created_at > %s AND pr.is_win_size IS NOT NULL
-                  AND p.vote_breakdown IS NOT NULL
-                  AND p.vote_breakdown->'all_votes'->>'ml' IS NOT NULL
-            """, (ts,))
-            r2 = cur.fetchone()
-            ctrl_t, ctrl_w, over_t, over_w, lon_t, lon_w = (int(x or 0) for x in r2)
-            wr_ctrl = ctrl_w / ctrl_t if ctrl_t > 0 else None
-            z_ctrl_val = ((wr_ctrl - _BASELINE) / _math.sqrt(_BASELINE * (1 - _BASELINE) / ctrl_t)
-                          if wr_ctrl is not None and ctrl_t >= 10 else None)
-            ctrl_str = (f"{wr_ctrl*100:.1f}% (n={ctrl_t}, z={z_ctrl_val:+.2f})"
-                        if z_ctrl_val is not None else f"{ctrl_w}/{ctrl_t}")
-            over_str = f"{over_w/over_t*100:.1f}% (n={over_t})" if over_t > 0 else "n/a"
-            if z_ctrl_val is not None and z_ctrl_val <= -2.0:
-                ship_p171 = True
-            if lon_t >= 10:
-                wr_lon = lon_w / lon_t
-                z_lon  = (wr_lon - _BASELINE) / _math.sqrt(_BASELINE * (1 - _BASELINE) / lon_t)
-                z_lon_str = f"{wr_lon*100:.1f}% (n={lon_t}, z={z_lon:+.2f})"
-                if z_lon <= -2.0:
-                    ship_p171 = True
-        except Exception:
-            ctrl_str = ctrl_str or "n/a"
-            over_str = over_str or "n/a"
-        action_line = ("🚨 <b>ĐIỀU KIỆN ĐẠT — SHIP P171: xóa ml voter!</b>"
-                       if ship_p171 else
-                       "⏳ Chưa đạt z ≤ −2.0 — phép kiểm định đã đóng, "
-                       "không phát hiện tác động (xem /checkpoint)")
-        cur.execute(
-            "INSERT INTO alert_log (alert_key, message) VALUES (%s, %s)",
-            (_CHECKPOINT_ALERT_KEY, f"Checkpoint reached: {n_fresh}/{n} fresh predictions")
-        )
-        conn.commit()
-        from telegram_bot import TelegramBot
-        from zoneinfo import ZoneInfo
-        now_vn = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%H:%M %d/%m/%Y")
-        TelegramBot().send_message(
-            f"✅ <b>CHECKPOINT ĐẠT {n} DỰ ĐOÁN!</b>\n\n"
-            f"Đã có <b>{n_fresh}</b> predictions kể từ checkpoint.\n\n"
-            f"1️⃣ <b>ML-LON (pre-reg #1)</b>\n"
-            f"   {z_lon_str}\n\n"
-            f"2️⃣ <b>ML controls (pre-reg #2)</b>\n"
-            f"   ctrl: {ctrl_str}\n"
-            f"   override: {over_str}\n\n"
-            f"3️⃣ <b>WR by SIZE</b> → /checkpoint\n\n"
-            f"{action_line}\n"
-            f"Time: {now_vn} VN"
-        )
-    except Exception:
-        pass
-    finally:
-        if conn is not None:
-            conn.close()
 
 
 def _check_sync_lag():
@@ -1040,129 +932,6 @@ def _check_vang_tong_alert(nguon: str = '?'):
             pass
 
 
-def _check_lon_excess_alert(prediction_result: dict):
-    """P70: Gửi Telegram alert khi consecutive_excess >= threshold (LON bias escalating)."""
-    global _last_lon_excess_alert_ts
-    try:
-        at = prediction_result.get('adaptive_thresholds') or {}
-        consec  = at.get('consecutive_excess', 0)
-        tune_k  = at.get('tune_k', 0.0)
-        excess  = at.get('pred_lon_excess', 0.0)
-        nho_min = at.get('nho_share_min', 0.0)
-        if consec < _LON_EXCESS_CONSEC_THRESHOLD:
-            return
-        now_t = _time.monotonic()
-        if now_t - _last_lon_excess_alert_ts < _LON_EXCESS_ALERT_COOLDOWN_SEC:
-            return
-        _last_lon_excess_alert_ts = now_t
-        draw_num = prediction_result.get('draw_number', '?')
-        from telegram_bot import TelegramBot
-        from zoneinfo import ZoneInfo
-        TelegramBot().send_message(
-            f"⚠️ <b>LON Excess Alert · #{draw_num}</b>\n"
-            f"Model đang lệch LON liên tục <b>{consec}</b> chu kỳ\n"
-            f"pred_lon_excess: <b>{excess*100:+.1f}%</b>\n"
-            f"TUNE_K đang ở: <b>{tune_k}</b> (max 1.0)\n"
-            f"nho_share_min tự động: <b>{nho_min:.0%}</b>\n"
-            f"Time: {datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%H:%M %d/%m/%Y')} VN"
-        )
-    except Exception:
-        pass
-
-
-def _check_triple_drought_alert():
-    """Alert khi đã lâu chưa có triple (tất cả 3 số giống nhau).
-    p90 gap = 95 kỳ, p95 gap = 139 kỳ (từ 64k draws lịch sử).
-    """
-    global _last_triple_alert_ts, _triple_drought_notified_gap
-    try:
-        now_t = _time.monotonic()
-        if now_t - _last_triple_alert_ts < _TRIPLE_ALERT_COOLDOWN_SEC:
-            return
-        conn = db.get_connection()
-        try:
-            cur  = conn.cursor()
-            if USE_POSTGRES:
-                cur.execute("""
-                    SELECT draw_number,
-                           (numbers::json->>0)::int AS n1,
-                           (numbers::json->>1)::int AS n2,
-                           (numbers::json->>2)::int AS n3
-                    FROM draw_history
-                    ORDER BY draw_number DESC
-                    LIMIT 200
-                """)
-            else:
-                cur.execute("""
-                    SELECT draw_number,
-                           json_extract(numbers, '$[0]') AS n1,
-                           json_extract(numbers, '$[1]') AS n2,
-                           json_extract(numbers, '$[2]') AS n3
-                    FROM draw_history
-                    ORDER BY draw_number DESC
-                    LIMIT 200
-                """)
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-        if not rows:
-            return
-        latest_draw = rows[0][0]
-        last_triple_draw = None
-        for draw_num, n1, n2, n3 in rows:
-            if n1 == n2 == n3:
-                last_triple_draw = draw_num
-                break
-        if last_triple_draw is None:
-            gap = 200  # ít nhất 200 kỳ
-        else:
-            gap = latest_draw - last_triple_draw
-        # Triple vừa ra → reset
-        if gap < _TRIPLE_WARN_START:
-            _triple_drought_notified_gap = 0
-            return
-        # Re-alert chỉ khi gap tăng thêm ≥ STEP kỳ so với lần alert trước
-        if gap < _triple_drought_notified_gap + _TRIPLE_WARN_STEP:
-            return
-        _last_triple_alert_ts = now_t
-        _triple_drought_notified_gap = gap
-        q_val   = 0.9722
-        cum_prob = round((1 - q_val ** gap) * 100, 1)
-        next10   = round((1 - q_val ** 10) * 100, 1)
-        if gap >= _TRIPLE_DROUGHT_P95:
-            level, note = "🚨", "cực hiếm — top 5% hạn hán lịch sử"
-        elif gap >= _TRIPLE_DROUGHT_P90:
-            level, note = "🔥", "hiếm — top 10% hạn hán lịch sử"
-        elif gap >= 47:
-            level, note = "⚠️", "trên trung bình (avg=47kỳ)"
-        else:
-            level, note = "🎲", "đang tích lũy (median=25kỳ)"
-        # Milestone projections from NOW (memoryless)
-        log_q = math.log(q_val)
-        milestones = []
-        for pct, label in [(50, "Median"), (75, "75%"), (90, "P90"), (95, "P95")]:
-            n = math.ceil(math.log(1 - pct / 100) / log_q)
-            draw_at = latest_draw + n
-            hrs = n * 6 / 60
-            hrs_str = f"{hrs:.1f}h" if hrs < 24 else f"{hrs/24:.1f}ngày"
-            milestones.append(f"  {label}: ~{n} kỳ → <b>#{draw_at}</b> (~{hrs_str})")
-        milestone_text = "\n".join(milestones)
-        from telegram_bot import TelegramBot
-        from zoneinfo import ZoneInfo
-        TelegramBot().send_message(
-            f"{level} <b>Triple Alert · {gap} kỳ chưa có triple</b>\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"Kỳ triple cuối: <b>#{last_triple_draw}</b> · {note}\n"
-            f"📊 Xác suất đã qua: <b>{cum_prob}%</b>  |  P(10 kỳ tới): <b>{next10}%</b>\n"
-            f"\n📅 Dự kiến triple tiếp theo (từ kỳ #{latest_draw}):\n"
-            f"{milestone_text}\n"
-            f"\n💡 Mỗi kỳ luôn 2.78% — cân nhắc <b>Bộ 3 bất kỳ ×20</b>\n"
-            f"⏱ {datetime.now(ZoneInfo('Asia/Ho_Chi_Minh')).strftime('%H:%M %d/%m/%Y')} VN"
-        )
-    except Exception:
-        pass
-
-
 # ── Rate Limiting ─────────────────────────────────────────────
 # Dùng memory storage (Cloud Run stateless – mỗi instance độc lập)
 def _khoa_gioi_han() -> str:
@@ -1632,9 +1401,6 @@ def auto_predict_cron():
         _check_draw_gap_alert()
         _check_lap_lai_alert('predict')
         _check_vang_tong_alert('predict')
-        _check_lon_excess_alert(result)
-        _check_checkpoint_alert(result.get('draw_number', 0))
-        _check_triple_drought_alert()
         return jsonify({"status": "success", "cycles": 1, "data": [result]})
     except Exception as e:
         import traceback as _tb
@@ -2791,12 +2557,6 @@ def health_check():
         result["status"] = "error"
     elif "warning" in statuses:
         result["status"] = "warning"
-
-    # ── Size bias alert (background, non-blocking) ───────────
-    try:
-        _check_size_bias()
-    except Exception:
-        pass
 
     # ── Throttled Telegram alert on ERROR (debounce: 2 lần liên tiếp) ──
     global _consecutive_db_errors
@@ -6822,61 +6582,6 @@ def confidence_trend():
         return jsonify({'batches': batches, 'n': len(rows), 'batch_size': batch})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
-
-def _check_size_bias():
-    """Gửi Telegram alert nếu HOA predicted > threshold. Gọi từ health check."""
-    global _last_bias_alert_ts
-    try:
-        now_t = _time.monotonic()
-        if now_t - _last_bias_alert_ts < _BIAS_ALERT_COOLDOWN_SEC:
-            return
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        if USE_POSTGRES:
-            cur.execute("""
-                SELECT
-                    COUNT(*) as total,
-                    SUM(CASE WHEN s<=9 THEN 1 ELSE 0 END) as nho,
-                    SUM(CASE WHEN s BETWEEN 10 AND 11 THEN 1 ELSE 0 END) as hoa,
-                    SUM(CASE WHEN s>=12 THEN 1 ELSE 0 END) as lon
-                FROM (
-                    SELECT (SELECT SUM(v::int) FROM json_array_elements_text(predicted_numbers::json) v) AS s
-                    FROM predictions ORDER BY draw_number DESC LIMIT 50
-                ) sub
-            """)
-        else:
-            cur.execute("""
-                SELECT COUNT(*) as total,
-                    SUM(CASE WHEN s<=9 THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN s BETWEEN 10 AND 11 THEN 1 ELSE 0 END),
-                    SUM(CASE WHEN s>=12 THEN 1 ELSE 0 END)
-                FROM (
-                    SELECT SUM(CAST(je.value AS INTEGER)) AS s
-                    FROM predictions p, json_each(p.predicted_numbers) je
-                    GROUP BY p.id ORDER BY p.draw_number DESC LIMIT 50
-                ) sub
-            """)
-        row = cur.fetchone()
-        conn.close()
-        if not row or not row[0]:
-            return
-        total = row[0]
-        hoa_pct = round((row[2] or 0) / total * 100, 1)
-        if hoa_pct <= _BIAS_HOA_THRESHOLD:
-            return
-        _last_bias_alert_ts = now_t
-        nho_pct = round((row[1] or 0) / total * 100, 1)
-        lon_pct = round((row[3] or 0) / total * 100, 1)
-        from telegram_bot import TelegramBot
-        TelegramBot().send_message(
-            f"⚠️ <b>Size Bias Alert</b>\n"
-            f"HOA dự đoán: <b>{hoa_pct}%</b> (thực tế ~20%)\n"
-            f"50 kỳ gần nhất: NHO={nho_pct}% HOA={hoa_pct}% LON={lon_pct}%\n"
-            f"SizePredictor có thể cần điều chỉnh."
-        )
-    except Exception:
-        pass
 
 
 @app.route('/api/model-performance')
@@ -14209,6 +13914,9 @@ def daily_summary_evening():
 
     if not _trigger_authorized():
         return jsonify({'error': 'unauthorized'}), 403
+    # P259: tin 22:05 trùng với tổng kết 23:55 — tắt. Giữ endpoint để job
+    # Cloud Scheduler `bingo18-daily-22h` không báo lỗi; nên xoá job đó.
+    return jsonify({'sent': False, 'skipped': 'P259: tin 22:05 da tat (trung tong ket 23:55)'})
 
     try:
         from database import USE_POSTGRES as _USE_PG

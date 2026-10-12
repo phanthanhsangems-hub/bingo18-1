@@ -407,18 +407,9 @@ def _update_pred_diversity(numbers: list) -> None:
 _voter_weight_cache: dict = {}
 _voter_weight_ts: int = 0
 _bocpd_cache: dict = {}        # {draw_number: {NHO: float, HOA: float, LON: float}}
-_last_bocpd_regime: str = ''   # tracks last alerted regime to avoid alert spam
-_last_triple_alert_draw: int = 0  # cooldown: don't re-alert within 8 draws
-_TRIPLE_DROUGHT_THRESH = 25       # alert when ≥25 draws without a triple (near expected 36; fire early)
-_TRIPLE_ALERT_COOLDOWN = 8        # draws between repeated triple drought alerts
 # Gap analysis over 2,039 historical triple gaps: 26.2% of gaps ≤10 draws vs 19.7%
 # expected under a memoryless geometric (mean 46) — triples cluster. After a fresh
 # triple, the next ~10 draws carry ~33% elevated triple probability.
-_last_triple_cluster_draw: int = 0  # last draw a cluster-window alert was sent
-_TRIPLE_CLUSTER_WINDOW = 10         # draws of elevated triple probability after a fresh triple
-_last_pair_alert_draw: int = 0    # cooldown for pair drought alert
-_PAIR_DROUGHT_THRESH = 10         # alert when ≥10 draws without any pair (~1.1× expected 9.3)
-_PAIR_ALERT_COOLDOWN = 5          # draws between repeated pair drought alerts
 # P163/P165: forward out-of-sample watch for combo→triple "cầu" patterns. Each
 # trigger combo is logged so hit rates accumulate on future data only (no
 # look-elsewhere bias). Registering every triple's strongest historical
@@ -469,7 +460,6 @@ _voter_decay_cache: dict = {}    # {voter_name: {'streak': int, 'decay': float}}
 _DECAY_RESET_STREAK_MIN = 7    # streak >= 7 → decay at floor 0.55×
 _DECAY_RESET_WR_MAX     = 0.20 # WR must also be below this to qualify (was 0.35)
 _DECAY_RESET_MIN_DRAWS  = 30   # need at least 30 draws in window before resetting
-_reset_alerted_voters: set = set()  # P77: track voters already alerted this reset session
 
 # ── P102: Alert manager ──────────────────────────────────────
 import time as _time_module
@@ -547,14 +537,6 @@ class AlertManager:
 _alert_mgr = AlertManager()
 
 # Alert thresholds
-_WR_DROP_THRESHOLD    = 0.30   # rolling WR below this triggers P91 alert
-_WR_DROP_COOLDOWN_SEC = 7200
-_MOMENTUM_THRESHOLD    = 8     # same-SIZE streak length for P93 alert
-_MOMENTUM_COOLDOWN_SEC = 3600  # per-SIZE cooldown
-_GAP_THRESHOLD_MIN     = 12    # minutes since last draw for P94 alert
-_GAP_COOLDOWN_SEC      = 1800
-_VOTER_DRIFT_THRESHOLD    = 0.10  # conf drop (pp) for P98 alert
-_VOTER_DRIFT_COOLDOWN_SEC = 7200  # per-voter cooldown
 
 # ── Adaptive SIZE threshold cache ────────────────────────────
 _adaptive_thresh_cache: dict = {}
@@ -1262,7 +1244,6 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
                          for k, v in _voter_decay_cache.items() if v['streak'] > 0})
 
         # ── P75+P77: Auto-reset voters stuck at decay floor ──────
-        global _reset_alerted_voters
         for name, a in acc.items():
             t  = a['total']
             wr = a['correct'] / t if t else 0
@@ -1281,22 +1262,6 @@ def _get_voter_multipliers(db, current_draw: int) -> dict:
                     "WR=%.1f%% (n=%d) → reset to 1.0x",
                     name, old_mult, old_decay, s, wr * 100, t,
                 )
-                # P77: alert once per reset session
-                if name not in _reset_alerted_voters:
-                    _reset_alerted_voters.add(name)
-                    try:
-                        TelegramBot().send_message(
-                            f"🔄 <b>Voter Auto-Reset · P77</b>\n"
-                            f"Voter <b>{name}</b> bị reset về 1.0×\n"
-                            f"Trước: mult={old_mult:.2f}× · decay={old_decay:.2f}× · streak={s}L\n"
-                            f"WR gần nhất: <b>{wr*100:.1f}%</b> ({t} kỳ)\n"
-                            f"→ Voter sẽ được đánh giá lại từ đầu"
-                        )
-                    except Exception as _te:
-                        logger.debug("P77 alert error: %s", _te)
-            else:
-                # voter recovered → remove from alerted set so next reset alerts again
-                _reset_alerted_voters.discard(name)
 
         # ── Hedge overlay: replace WR/streak/decay with Hedge weights when warm ──
         # Hedge is more principled (formal regret bound) and self-adapts without
@@ -2321,144 +2286,11 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
 
 
 # ── P85: Auto-explain helper ─────────────────────────────────
-def _send_explain_breakdown(db, telegram, draw_number: int):
-    """Fetch prediction vote_breakdown for draw_number and send to Telegram."""
-    import json as _json, ast as _ast
-    try:
-        conn = db.get_connection()
-        cur  = conn.cursor()
-        ph = '%s' if USE_POSTGRES else '?'
-        cur.execute(f"""
-            SELECT p.draw_number, p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence,
-                   p.vote_breakdown, pr.is_win, pr.actual_numbers
-            FROM predictions p
-            LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
-            WHERE p.draw_number = {ph}
-            LIMIT 1
-        """, (draw_number,))
-        row = cur.fetchone()
-        conn.close()
-        if not row:
-            return
-        dn, pred_nums, conf, vb_raw, is_win, actual = row
-        try:
-            vb = _json.loads(vb_raw) if isinstance(vb_raw, str) else (vb_raw or {})
-        except Exception:
-            vb = {}
-        if isinstance(pred_nums, str):
-            pred_nums = _ast.literal_eval(pred_nums)
-
-        pred_sum   = sum(pred_nums)
-        majority   = vb.get('majority_size') or ('NHO' if pred_sum <= 9 else ('HOA' if pred_sum <= 11 else 'LON'))
-        SIZE_EMJ   = {'NHO': '🔵', 'HOA': '🟡', 'LON': '🔴'}
-        SIZE_VI    = {'NHO': 'NHỎ 🔵', 'HOA': 'HÒA 🟡', 'LON': 'LỚN 🔴'}
-        conf_str   = f"{conf:.1%}" if conf else "N/A"
-        vote_share = vb.get('vote_share', 0)
-        size_w     = vb.get('size_weights', {})
-        sw_total   = sum(size_w.values()) or 1
-        detail     = vb.get('all_votes_detail', {})
-
-        voter_lines = []
-        for vname in ['prior_nho', 'prior_lon', 'sum_transition', 'regime_bocpd']:
-            d = detail.get(vname)
-            if d is None:
-                continue
-            sz      = d.get('size', '?')
-            c       = d.get('conf', 0)
-            mult    = d.get('mult', 1.0)
-            eff_pct = d.get('eff_w_pct', 0)
-            decay   = d.get('decay', 1.0)
-            sk      = d.get('streak', 0)
-            won     = d.get('winner', False)
-            decay_str  = f" decay {decay:.2f}×" if decay < 1.0 else ""
-            streak_str = f" {sk}L" if sk > 0 else ""
-            voter_lines.append(
-                f"{'✅' if won else '❌'} <b>{vname}</b>: {SIZE_EMJ.get(sz,'⚪')}{sz} "
-                f"conf {c:.0%}  ×{mult:.2f}{decay_str}{streak_str}  → {eff_pct:.1f}%"
-            )
-
-        sw_parts = [
-            f"{SIZE_EMJ.get(sz,'')}{sz} {round(size_w.get(sz,0)/sw_total*100)}%"
-            for sz in ['NHO', 'HOA', 'LON']
-        ]
-
-        adaptive  = vb.get('adaptive', {})
-        adapt_parts = []
-        for k in ('tune_k', 'nho_share_min', 'hoa_suppress', 'consecutive_excess'):
-            if k in adaptive:
-                v = adaptive[k]
-                adapt_parts.append(f"{k}={int(v)}" if k == 'consecutive_excess' else f"{k}={v:.2f}")
-
-        msg_parts = [
-            f"🔍 <b>AUTO-EXPLAIN KỲ #{dn}</b> (thua liên tiếp)",
-            "━━━━━━━━━━━━━━━━━━",
-            f"{SIZE_EMJ.get(majority,'⚪')} Dự đoán: <b>{SIZE_VI.get(majority, majority)}</b>  "
-            f"conf <b>{conf_str}</b>  consensus <b>{vote_share:.0%}</b>",
-            f"📊 Weights: {' · '.join(sw_parts)}",
-            "",
-            "🗳 Voters:",
-        ] + [f"  {l}" for l in voter_lines]
-
-        if adapt_parts:
-            msg_parts.append(f"\n⚙️ Adaptive: {' · '.join(adapt_parts)}")
-
-        telegram.send_message("\n".join(msg_parts))
-    except Exception as ex:
-        logger.debug("Auto-explain error: %s", ex)
-
-
 # ── Main: 1 chu kỳ dự đoán ───────────────────────────────────
 def run_prediction_cycle() -> dict:
     import time as _time
     db       = DatabaseManager()
     telegram = TelegramBot()
-
-    # ── P94: Prediction gap alert — check at cycle start ─────
-    try:
-        vn_hour = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).hour
-        if 6 <= vn_hour < 22:  # active hours only
-            if _alert_mgr.fire('gap', _GAP_COOLDOWN_SEC):
-                conn_g = db.get_connection()
-                try:
-                    cur_g  = conn_g.cursor()
-                    if config.DATABASE_URL:
-                        cur_g.execute("""
-                            SELECT draw_time FROM draw_history
-                            ORDER BY draw_number DESC LIMIT 1
-                        """)
-                        row_g = cur_g.fetchone()
-                        if row_g and row_g[0]:
-                            last_draw_time = row_g[0]
-                            if hasattr(last_draw_time, 'tzinfo') and last_draw_time.tzinfo is None:
-                                last_draw_time = last_draw_time.replace(tzinfo=timezone.utc)
-                            age_min = (datetime.now(timezone.utc) - last_draw_time.astimezone(timezone.utc)).total_seconds() / 60
-                            # P171: kỳ cuối trước 06:00 hôm nay → khoảng trống là do
-                            # nghỉ đêm (P159), không phải sync lỗi. Bỏ qua để sáng nào
-                            # cũng không bắn báo động giả lúc 6h.
-                            _vn_now = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
-                            _window_start = _vn_now.replace(hour=6, minute=0, second=0, microsecond=0)
-                            _overnight = last_draw_time.astimezone(ZoneInfo("Asia/Ho_Chi_Minh")) < _window_start
-                            if _overnight:
-                                _alert_mgr.reset('gap')
-                                logger.info("P94 gap alert bỏ qua: %.0f phút là khoảng nghỉ đêm", age_min)
-                            elif age_min > _GAP_THRESHOLD_MIN:
-                                telegram.send_message(
-                                    f"⏰ <b>PREDICTION GAP ALERT · P94</b>\n"
-                                    f"━━━━━━━━━━━━━━━━\n"
-                                    f"Kỳ cuối cách đây <b>{age_min:.0f} phút</b> (ngưỡng {_GAP_THRESHOLD_MIN}p)\n"
-                                    f"Giờ VN: {vn_hour}h — đang trong active hours\n"
-                                    f"━━━━━━━━━━━━━━━━\n"
-                                    f"⚠️ Sync có thể bị lỗi. Kiểm tra sync_to_supabase.py.\n"
-                                    f"🔕 Alert tắt 30 phút."
-                                )
-                                _alert_mgr.log(db, 'gap', f"gap={age_min:.0f}min", {'gap_min': round(age_min, 1), 'vn_hour': vn_hour})
-                                logger.warning("P94 gap alert: last draw %.0f min ago", age_min)
-                            else:
-                                _alert_mgr.reset('gap')  # didn't actually fire — allow retry sooner
-                finally:
-                    conn_g.close()
-    except Exception as _ge:
-        logger.debug("P94 gap alert error: %s", _ge)
 
     # ── Bước 1: Auto-process các kết quả còn pending ─────────
     conn = db.get_connection()
@@ -2537,33 +2369,6 @@ def run_prediction_cycle() -> dict:
             })
             logger.info("Auto-processed draw #%d: match=%d win=%s", draw_number, match_count, is_win)
 
-            # P59: streak alerts — fire at 5, 10, 15... consecutive wins or losses
-            try:
-                trail = recent_wl + [is_win]   # oldest→newest, current is last
-                streak = 1
-                for r in reversed(trail[:-1]):
-                    if r == is_win:
-                        streak += 1
-                    else:
-                        break
-                if streak >= 5 and streak % 5 == 0:
-                    if is_win:
-                        telegram.send_message(
-                            f"🔥 <b>STREAK THẮNG {streak} KỸ!</b>\n"
-                            f"━━━━━━━━━━━━━━━━\n"
-                            f"🎯 {streak} kỳ thắng liên tiếp đến kỳ #{draw_number}\n"
-                            f"💡 Duy trì cặp lời — ngưỡng cao!"
-                        )
-                    else:
-                        telegram.send_message(
-                            f"❄️ <b>STREAK THUA {streak} KỸ!</b>\n"
-                            f"━━━━━━━━━━━━━━━━\n"
-                            f"⚠️ {streak} kỳ thua liên tiếp đến kỳ #{draw_number}\n"
-                            f"💡 Hãy giảm cặp hoặc dừng lại để bảo toàn vốn"
-                        )
-            except Exception as _se:
-                logger.debug("Streak alert error: %s", _se)
-
         except Exception as e:
             logger.warning("Auto-process error draw #%d: %s", draw_number, e)
 
@@ -2620,42 +2425,6 @@ def run_prediction_cycle() -> dict:
                     f"Hệ thống đang trong chuỗi thua. Theo dõi thêm."
                 )
                 logger.warning("Loss streak alert: %d in a row", loss_streak)
-                # P85: auto-explain at first trigger (loss_streak == 5) to debug
-                if loss_streak == 5:
-                    latest_dn = max(r['draw_number'] for r in processed_results)
-                    _send_explain_breakdown(db, telegram, latest_dn)
-
-            # Low win rate alert (last 20 < 20%)
-            if len(streak_seq) >= 20:
-                wr20 = sum(1 for w in streak_seq[:20] if w) / 20
-                if wr20 < 0.20 and loss_streak >= 3:
-                    telegram.send_message(
-                        f"🚨 <b>WIN RATE THẤP BẤT THƯỜNG</b>\n"
-                        f"━━━━━━━━━━━━━━━━\n"
-                        f"20 kỳ gần nhất: <b>{wr20*100:.0f}%</b> (baseline 37.5%)\n"
-                        f"Đang thua {loss_streak} kỳ liên tiếp."
-                    )
-                    logger.warning("Low WR alert: %.0f%% last 20", wr20 * 100)
-
-            # P91: WR drop alert — rolling 50-draw WR < 30%, cooldown 2h
-            if len(streak_seq) >= 20:
-                wr50 = sum(1 for w in streak_seq if w) / len(streak_seq)
-                if wr50 < _WR_DROP_THRESHOLD and _alert_mgr.fire('wr_drop', _WR_DROP_COOLDOWN_SEC):
-                    deficit = round((_WR_DROP_THRESHOLD - wr50) * 100, 1)
-                    wr20_str = f"{sum(1 for w in streak_seq[:20] if w) / 20 * 100:.0f}%"
-                    telegram.send_message(
-                        f"📉 <b>WR DROP ALERT · P91</b>\n"
-                        f"━━━━━━━━━━━━━━━━\n"
-                        f"Rolling {len(streak_seq)} kỳ: <b>{wr50*100:.1f}%</b> "
-                        f"(ngưỡng {_WR_DROP_THRESHOLD*100:.0f}%  −{deficit}%)\n"
-                        f"WR 20 kỳ gần nhất: <b>{wr20_str}</b>\n"
-                        f"━━━━━━━━━━━━━━━━\n"
-                        f"⚠️ Hệ thống underperform nghiêm trọng. Dùng /health và /explain để debug.\n"
-                        f"🔕 Alert tắt 2h."
-                    )
-                    _alert_mgr.log(db, 'wr_drop', f"WR50={wr50:.1%}", {'wr50': round(wr50, 4), 'n': len(streak_seq)})
-                    logger.warning("P91 WR drop alert: %.1f%% over last %d draws",
-                                   wr50 * 100, len(streak_seq))
         except Exception as e:
             logger.debug("Streak alert error: %s", e)
 
@@ -2874,41 +2643,6 @@ def run_prediction_cycle() -> dict:
                 "processed": processed_results}
 
 
-    # BOCPD regime change alert — only fires when dominant category deviates
-    # significantly from base rate (NHO/LON > 55%, HOA > 45%) and the regime
-    # has changed since the last alert, to avoid spam on stable runs.
-    try:
-        global _last_bocpd_regime
-        _bd = (_vote_info or {}).get('bocpd_dist') or {}
-        if _bd:
-            _BASE = {'NHO': 0.375, 'HOA': 0.25, 'LON': 0.375}
-            _THRESH = {'NHO': 0.55, 'HOA': 0.45, 'LON': 0.55}
-            _SLV = {'NHO': 'NHỎ', 'HOA': 'HÒA', 'LON': 'LỚN'}
-            _dom = max(_bd, key=_bd.get)
-            if _bd[_dom] >= _THRESH[_dom] and _dom != _last_bocpd_regime:
-                _delta = _bd[_dom] - _BASE[_dom]
-                _msg = (
-                    f"📡 <b>BOCPD Regime Shift</b>\n"
-                    f"Chuỗi SIZE đang lệch mạnh về <b>{_SLV[_dom]}</b> "
-                    f"({_bd[_dom]*100:.0f}% vs baseline {_BASE[_dom]*100:.0f}%, "
-                    f"Δ+{_delta*100:.0f}pp)\n"
-                    f"NHỎ {_bd.get('NHO',0)*100:.0f}% · "
-                    f"HÒA {_bd.get('HOA',0)*100:.0f}% · "
-                    f"LỚN {_bd.get('LON',0)*100:.0f}%\n"
-                    f"<i>Kỳ #{next_draw} · BOCPD hazard=1/120</i>"
-                )
-                telegram.send_message(_msg)
-                _alert_mgr.log(db, 'bocpd_regime',
-                               f"Chuỗi SIZE lệch mạnh về {_SLV[_dom]}: {_bd[_dom]*100:.0f}% "
-                               f"vs baseline {_BASE[_dom]*100:.0f}% (Δ+{_delta*100:.0f}pp)",
-                               {'regime': _dom, 'prob': round(_bd[_dom], 4), 'draw': next_draw})
-                _last_bocpd_regime = _dom
-                logger.info("BOCPD regime alert sent: %s %.0f%%", _dom, _bd[_dom] * 100)
-            elif _bd.get(_last_bocpd_regime, 0) < _THRESH.get(_last_bocpd_regime, 1):
-                _last_bocpd_regime = ''  # reset when regime normalises
-    except Exception as _bae:
-        logger.debug("bocpd alert error: %s", _bae)
-
     # Combo→triple forward out-of-sample watch (P163/P165). Every registered
     # trigger combo is logged so hit rates accumulate on future data only — the
     # only look-elsewhere-free way to confirm/reject these patterns.
@@ -2916,18 +2650,13 @@ def run_prediction_cycle() -> dict:
         global _last_watch_draw
         _ld, _lcombo, _pcombo = _query_combo_watch(db)
         if _ld is not None and _ld != _last_watch_draw:
-            _dash = lambda c: '-'.join(c)
 
             # HIT: kỳ trước là trigger và kỳ này đúng target đã đăng ký
             _hits = [(t, n) for t, n in _WATCH_PAIRS.get(_pcombo or '', [])
                      if t == _lcombo]
             if _hits:
                 _tgt, _hist = _hits[0]
-                telegram.send_message(
-                    f"🎯 <b>CẦU {_pcombo}→{_tgt} TRÚNG · kỳ #{_ld}</b>\n"
-                    f"Kỳ trước ra {_dash(_pcombo)}, kỳ này ra {_dash(_tgt)}!\n"
-                    f"📌 Ghi nhận 1 HIT cho forward-test (lịch sử {_hist} lần)."
-                )
+                # P259: chỉ ghi log forward-test, không gửi Telegram nữa
                 _alert_mgr.log(db, f'watch_{_pcombo}_{_tgt}_hit',
                                f"Kỳ #{_ld} ra {_tgt} ngay sau {_pcombo} (#{_ld - 1}) — "
                                f"HIT forward-test cầu {_pcombo}→{_tgt}",
@@ -2936,8 +2665,8 @@ def run_prediction_cycle() -> dict:
                 _last_watch_draw = _ld
                 logger.info("%s->%s HIT at draw #%d", _pcombo, _tgt, _ld)
 
-            # WATCH: kỳ này là trigger → theo dõi kỳ kế. Ghi log mọi cặp, chỉ
-            # gửi Telegram khi có cặp đạt _WATCH_NOTIFY_MIN (tránh spam).
+            # WATCH: kỳ này là trigger → theo dõi kỳ kế. P259: chỉ ghi log
+            # (forward-test), không gửi Telegram — chưa cầu nào đủ ý nghĩa.
             elif _lcombo in _WATCH_PAIRS:
                 _targets = _WATCH_PAIRS[_lcombo]
                 for _t, _n in _targets:
@@ -2946,208 +2675,15 @@ def run_prediction_cycle() -> dict:
                                    f"có {_t} không (forward-test cầu {_lcombo}→{_t})",
                                    {'draw': _ld, 'next': _ld + 1,
                                     'pair': f'{_lcombo}->{_t}', 'hist': _n})
-                _strong = [(t, n) for t, n in _targets if n >= _WATCH_NOTIFY_MIN]
-                if _strong:
-                    _tlist = ' hoặc '.join(f"{_dash(t)} (lịch sử {n} lần)" for t, n in _strong)
-                    _more = len(_targets) - len(_strong)
-                    telegram.send_message(
-                        f"👀 <b>WATCH {_lcombo} · kỳ #{_ld}</b>\n"
-                        f"Vừa ra bộ {_dash(_lcombo)}. Theo dõi kỳ kế #{_ld + 1} "
-                        f"xem có {_tlist} không.\n"
-                        + (f"<i>(+{_more} cầu yếu hơn đang ghi log im lặng)</i>\n" if _more else "")
-                        + f"📊 Forward-test đối chứng — chưa cầu nào đủ ý nghĩa thống kê."
-                    )
+                _strong = [(t, n) for t, n in _targets if n >= _WATCH_NOTIFY_MIN]   # chỉ để log
                 _last_watch_draw = _ld
                 logger.info("watch %s -> %s at draw #%d (telegram=%s)",
                             _lcombo, [t for t, _ in _targets], _ld, bool(_strong))
     except Exception as _we:
         logger.debug("combo watch alert error: %s", _we)
 
-    # Triple alerts — cluster window after a fresh triple + drought watch
-    try:
-        global _last_triple_alert_draw, _last_triple_cluster_draw
-        _drought, _last_triple = _query_triple_drought(db)
-        if _drought is not None:
-            if (_drought == 0
-                    and next_draw - _last_triple_cluster_draw >= _TRIPLE_CLUSTER_WINDOW):
-                # Latest result IS a triple → open the 10-draw cluster window
-                _msg = (
-                    f"🔥 <b>TRIPLE CLUSTER · vừa ra triple kỳ #{_last_triple}</b>\n"
-                    f"Triple có xu hướng ra theo cụm: 26% cụm lịch sử có "
-                    f"triple tiếp trong ≤10 kỳ (vs ~20% nếu ngẫu nhiên, +33%)\n"
-                    f"➡️ Cửa sổ theo dõi: kỳ #{_last_triple + 1}–#{_last_triple + _TRIPLE_CLUSTER_WINDOW}\n"
-                    f"📌 Chú ý khả năng có triple nữa trong 10 kỳ tới!"
-                )
-                telegram.send_message(_msg)
-                _alert_mgr.log(db, 'triple_cluster',
-                               f"Vừa ra triple kỳ #{_last_triple} — cửa sổ cụm 10 kỳ "
-                               f"(#{_last_triple + 1}–#{_last_triple + _TRIPLE_CLUSTER_WINDOW}), "
-                               f"26% cụm lịch sử có triple tiếp trong ≤10 kỳ",
-                               {'triple_draw': _last_triple, 'window': _TRIPLE_CLUSTER_WINDOW})
-                _last_triple_cluster_draw = next_draw
-                logger.info("Triple cluster alert: triple at #%d, window %d draws",
-                            _last_triple, _TRIPLE_CLUSTER_WINDOW)
-            elif (_drought >= _TRIPLE_DROUGHT_THRESH
-                    and next_draw - _last_triple_alert_draw >= _TRIPLE_ALERT_COOLDOWN):
-                _p_next5  = round((1 - (1 - 6/216) ** 5) * 100, 1)
-                _p_next10 = round((1 - (1 - 6/216) ** 10) * 100, 1)
-                _msg = (
-                    f"⚡ <b>WATCH TRIPLE · {_drought} kỳ chưa có</b>\n"
-                    f"Kỳ gần nhất: #{_last_triple} · Trung bình 36 kỳ/1 lần\n"
-                    f"➡️ P(triple trong 5 kỳ tới): <b>{_p_next5}%</b>\n"
-                    f"➡️ P(triple trong 10 kỳ tới): <b>{_p_next10}%</b>\n"
-                    f"📌 Triple có khả năng xuất hiện sớm — chú ý theo dõi!"
-                )
-                telegram.send_message(_msg)
-                _alert_mgr.log(db, 'triple_drought',
-                               f"{_drought} kỳ chưa có triple (trung bình 36 kỳ/lần) — "
-                               f"kỳ triple gần nhất #{_last_triple}",
-                               {'drought': _drought, 'last_triple': _last_triple})
-                _last_triple_alert_draw = next_draw
-                logger.info("Triple drought alert: %d draws since #%d", _drought, _last_triple)
-    except Exception as _tae:
-        logger.debug("triple alert error: %s", _tae)
-
-    # Pair drought alert — fires when no pair for ≥ _PAIR_DROUGHT_THRESH draws
-    try:
-        global _last_pair_alert_draw
-        if next_draw - _last_pair_alert_draw >= _PAIR_ALERT_COOLDOWN:
-            _pd, _lp_draw, _cold_dbls = _query_pair_drought(db)
-            if _pd is not None and _pd >= _PAIR_DROUGHT_THRESH:
-                _pp5  = round((1 - (1 - 30/216) ** 5)  * 100, 1)
-                _pp10 = round((1 - (1 - 30/216) ** 10) * 100, 1)
-                _cold_lines = '\n'.join(
-                    f"  • Đôi <b>{d}</b> ({d},{d},?): <b>{dr} kỳ</b> chưa ra"
-                    for d, dr in _cold_dbls[:3]
-                )
-                _pmsg = (
-                    f"🎯 <b>WATCH CẶP ĐÔI · {_pd} kỳ chưa có</b>\n"
-                    f"Kỳ gần nhất: #{_lp_draw} · TB ~9 kỳ/lần\n"
-                    f"➡️ P(cặp đôi trong 5 kỳ tới): <b>{_pp5}%</b>\n"
-                    f"➡️ P(cặp đôi trong 10 kỳ tới): <b>{_pp10}%</b>\n"
-                )
-                if _cold_lines:
-                    _pmsg += f"🧊 Đôi lạnh nhất:\n{_cold_lines}\n"
-                _pmsg += f"📌 Cặp đôi sắp xuất hiện — chú ý theo dõi!"
-                telegram.send_message(_pmsg)
-                _alert_mgr.log(db, 'pair_drought',
-                               f"{_pd} kỳ chưa có cặp đôi (trung bình ~9 kỳ/lần) — "
-                               f"kỳ gần nhất #{_lp_draw}",
-                               {'drought': _pd, 'last_pair': _lp_draw})
-                _last_pair_alert_draw = next_draw
-                logger.info("Pair drought alert: %d draws since #%d, cold=%s",
-                            _pd, _lp_draw, _cold_dbls[:3])
-    except Exception as _pae:
-        logger.debug("pair alert error: %s", _pae)
-
     logger.info("Predicted draw #%d: %s (model=%s raw_conf=%.1f%% calibrated=%.2f%%)",
                 next_draw, sorted(numbers), best_name, confidence * 100, win_prob * 100)
-
-    # P98: Voter confidence drift alert
-    try:
-        import json as _json
-        _conn_d = db.get_connection()
-        try:
-            _cur_d  = _conn_d.cursor()
-            _cur_d.execute(
-                "SELECT vote_breakdown FROM predictions "
-                "WHERE vote_breakdown IS NOT NULL ORDER BY draw_number DESC LIMIT 50"
-            )
-            _vb_rows = _cur_d.fetchall()
-        finally:
-            _conn_d.close()
-
-        from collections import defaultdict as _dd
-        _vc: dict = _dd(lambda: [[], []])  # {voter: [[recent_25_confs], [prior_25_confs]]}
-        for _idx, (_vb_raw,) in enumerate(_vb_rows):
-            try:
-                _vb = _json.loads(_vb_raw) if isinstance(_vb_raw, str) else _vb_raw
-                _detail = _vb.get('all_votes_detail', {})
-                _bucket = 0 if _idx < 25 else 1
-                for _vname, _vinfo in _detail.items():
-                    _c = _vinfo.get('conf', 0)
-                    if _c:
-                        _vc[_vname][_bucket].append(float(_c))
-            except Exception:
-                pass
-
-        for _voter, (_rec, _pri) in _vc.items():
-            if len(_rec) < 10 or len(_pri) < 10:
-                continue
-            _rec_avg = sum(_rec) / len(_rec)
-            _pri_avg = sum(_pri) / len(_pri)
-            _drop    = _pri_avg - _rec_avg
-            if _drop >= _VOTER_DRIFT_THRESHOLD and _alert_mgr.fire(f'voter_drift_{_voter}', _VOTER_DRIFT_COOLDOWN_SEC):
-                _badge = '🔴' if _rec_avg < 0.45 else '🟡'
-                telegram.send_message(
-                    f"📉 <b>VOTER DRIFT · P98</b>\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"{_badge} Voter <b>{_voter}</b> conf giảm mạnh:\n"
-                    f"  25 kỳ trước: <b>{_pri_avg*100:.1f}%</b>\n"
-                    f"  25 kỳ gần:   <b>{_rec_avg*100:.1f}%</b>\n"
-                    f"  Giảm: <b>−{_drop*100:.1f}pp</b>\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"⚠️ Voter đang mất tin tưởng — kiểm tra /health\n"
-                    f"🔕 Alert tắt 2h."
-                )
-                _alert_mgr.log(db, f'voter_drift_{_voter}',
-                               f"{_voter} conf {_pri_avg:.1%}→{_rec_avg:.1%} (−{_drop:.1%})",
-                               {'voter': _voter, 'prior': round(_pri_avg, 4), 'recent': round(_rec_avg, 4), 'drop': round(_drop, 4)})
-                logger.warning("P98 Voter drift: %s conf %.1f%%→%.1f%% (−%.1fpp)",
-                               _voter, _pri_avg * 100, _rec_avg * 100, _drop * 100)
-    except Exception as _de:
-        logger.debug("P98 voter drift check error: %s", _de)
-
-    # P93: Same-SIZE momentum bias alert
-    try:
-        _check_n = _MOMENTUM_THRESHOLD + 2  # fetch a few extra to be safe
-        _conn_m  = db.get_connection()
-        try:
-            _cur_m   = _conn_m.cursor()
-            _ph_m    = '%s' if USE_POSTGRES else '?'
-            _cur_m.execute(f"""
-                SELECT (SELECT SUM(v::int) FROM json_array_elements_text(predicted_numbers::json) v)
-                FROM predictions
-                WHERE predicted_numbers IS NOT NULL
-                ORDER BY draw_number DESC LIMIT {_ph_m}
-            """ if USE_POSTGRES else f"""
-                SELECT (SELECT SUM(value) FROM json_each(predicted_numbers))
-                FROM predictions WHERE predicted_numbers IS NOT NULL
-                ORDER BY draw_number DESC LIMIT {_ph_m}
-            """, (_check_n,))
-            _sums = [row[0] for row in _cur_m.fetchall() if row[0] is not None]
-        finally:
-            _conn_m.close()
-
-        def _sz(s): return 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
-        _sizes = [_sz(int(s)) for s in _sums]
-
-        if len(_sizes) >= _MOMENTUM_THRESHOLD:
-            _streak_sz  = _sizes[0]
-            _streak_len = sum(1 for s in _sizes if s == _streak_sz)
-            # Only count leading streak
-            _streak_len = 0
-            for _s in _sizes:
-                if _s == _streak_sz: _streak_len += 1
-                else: break
-
-            if _streak_len >= _MOMENTUM_THRESHOLD and _alert_mgr.fire(f'momentum_{_streak_sz}', _MOMENTUM_COOLDOWN_SEC):
-                _sz_vi = {'NHO': 'NHỎ 🔵', 'HOA': 'HÒA 🟡', 'LON': 'LỚN 🔴'}
-                telegram.send_message(
-                    f"🔄 <b>MOMENTUM BIAS · P93</b>\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"Model đang predict <b>{_sz_vi.get(_streak_sz, _streak_sz)}</b> "
-                    f"liên tiếp <b>{_streak_len} kỳ</b>!\n"
-                    f"━━━━━━━━━━━━━━━━\n"
-                    f"⚠️ Có thể bị bias — kiểm tra /explain và /health.\n"
-                    f"🔕 Alert tắt 1h."
-                )
-                _alert_mgr.log(db, f'momentum_{_streak_sz}',
-                               f"{_streak_sz} x{_streak_len} streak",
-                               {'size': _streak_sz, 'streak_len': _streak_len})
-                logger.warning("P93 Momentum bias: %s repeated %d times", _streak_sz, _streak_len)
-    except Exception as _me:
-        logger.debug("P93 momentum check error: %s", _me)
 
     return {
         "draw_number":        next_draw,

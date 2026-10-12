@@ -562,7 +562,8 @@ def check_size_streak(conn, alerted_streak: dict):
         if k.startswith(current + "_") and k != streak_key:
             del alerted_streak[k]
 
-    if streak < 4 or alerted_streak.get(streak_key):
+    # P259: báo ở 5, 8, 12 — không báo lại ở mọi độ dài 4, 5, 6, 7...
+    if streak not in (5, 8, 12) or alerted_streak.get(streak_key):
         return
 
     alerted_streak[streak_key] = True
@@ -574,99 +575,6 @@ def check_size_streak(conn, alerted_streak: dict):
     )
     _tg_send(msg)
     logger.info("📊 Size streak alert: %s ×%d", current, streak)
-
-
-def check_wr_alert(conn, wr_alerted: dict):
-    """#42 Alert khi WR 20 kỳ gần nhất < 30% (dưới baseline xa)."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT pr.is_win_size
-            FROM predictions p
-            JOIN prediction_results pr ON pr.prediction_id = p.id
-            WHERE pr.is_win_size IS NOT NULL
-            ORDER BY p.draw_number DESC
-            LIMIT 20
-        """)
-        rows = [bool(r[0]) for r in cur.fetchall()]
-        cur.close()
-    except Exception as e:
-        logger.warning("check_wr_alert: %s", e)
-        return
-    if len(rows) < 20:
-        return
-    wins = sum(rows)
-    wr   = wins / len(rows)
-    if wr < 0.30 and not wr_alerted.get('low'):
-        wr_alerted['low'] = True
-        wr_alerted.pop('recovered', None)
-        _tg_html(
-            f"📉 <b>WR THẤP!</b>\n"
-            f"20 kỳ gần nhất: <b>{wins}/20 ({wr*100:.0f}%)</b>\n"
-            f"Baseline: 37.5% — đang dưới xa\n"
-            f"⚠️ Cân nhắc kiểm tra model"
-        )
-        logger.info("#42 WR low alert: %d/20 = %.0f%%", wins, wr * 100)
-    elif wr >= 0.375 and wr_alerted.get('low') and not wr_alerted.get('recovered'):
-        wr_alerted['recovered'] = True
-        wr_alerted.pop('low', None)
-        _tg_send(f"✅ WR phục hồi: {wins}/20 ({wr*100:.0f}%) ≥ baseline")
-        logger.info("#42 WR recovered: %d/20 = %.0f%%", wins, wr * 100)
-
-
-def check_hoa_reeval(conn, reeval_state: dict):
-    """#49 Monthly re-evaluation of HOA block (P142).
-    Compares recent HOA actual rate vs historical — alerts if HOA is trending up."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    import time as _t
-    now = _t.time()
-    if now - reeval_state.get('last_ts', 0) < 86400 * 30:  # 30 days
-        return
-    reeval_state['last_ts'] = now
-    try:
-        cur = conn.cursor()
-        # Recent 30d HOA rate
-        cur.execute("""
-            SELECT
-                COUNT(*) FILTER (WHERE size_category='HOA')::float / NULLIF(COUNT(*),0) AS hoa_recent,
-                COUNT(*) AS n_recent
-            FROM draw_history
-            WHERE draw_time >= NOW() - INTERVAL '30 days'
-        """)
-        r30 = cur.fetchone()
-        # All-time HOA rate
-        cur.execute("""
-            SELECT
-                COUNT(*) FILTER (WHERE size_category='HOA')::float / NULLIF(COUNT(*),0) AS hoa_all,
-                COUNT(*) AS n_all
-            FROM draw_history
-        """)
-        rall = cur.fetchone()
-        cur.close()
-
-        hoa_30  = round((r30[0] or 0) * 100, 1)
-        n_30    = r30[1] or 0
-        hoa_all = round((rall[0] or 0) * 100, 1)
-        n_all   = rall[1] or 0
-        delta   = round(hoa_30 - hoa_all, 1)
-
-        # P142 was blocked when HOA WR ≈ 18-24%. Alert if HOA frequency rebounds
-        if n_30 >= 100 and delta >= 3.0:
-            _tg_html(
-                f"📊 <b>HOA Re-evaluation (#49)</b>\n"
-                f"HOA 30 ngày gần: <b>{hoa_30}%</b> (n={n_30})\n"
-                f"HOA lịch sử: {hoa_all}% (n={n_all})\n"
-                f"Delta: <b>+{delta}%</b> — HOA đang tăng tần suất\n"
-                f"⚠️ Cân nhắc đánh giá lại block P142"
-            )
-            logger.info("#49 HOA reeval: recent=%.1f%% all=%.1f%% delta=+%.1f%% → alert sent", hoa_30, hoa_all, delta)
-        else:
-            logger.info("#49 HOA reeval: recent=%.1f%% all=%.1f%% delta=%.1f%% → block OK", hoa_30, hoa_all, delta)
-    except Exception as e:
-        logger.warning("check_hoa_reeval: %s", e)
 
 
 def check_system_health_alert(conn, sh_alerted: dict):
@@ -707,82 +615,6 @@ def check_system_health_alert(conn, sh_alerted: dict):
             f"WR 50 kỳ: <b>{wr50*100:.1f}%</b>\n{msg}"
         )
         logger.info("System health %s: WR50=%.1f%%", status, wr50 * 100)
-
-
-def check_confidence_gap(conn, gap_alerted: dict):
-    """#47 Alert khi avg confidence - actual WR > 15% trong 20 kỳ đã đánh giá.
-
-    P247: đo con số ĐÃ HIỆU CHỈNH (win_prob) — cái người dùng thật sự thấy —
-    không phải cột confidence (điểm thô của model, luôn ~60% vì model không
-    có tín hiệu thật). Đo điểm thô thì cảnh báo bật gần như thường trực.
-    """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT p.win_prob, pr.is_win_size
-            FROM predictions p
-            JOIN prediction_results pr ON pr.prediction_id = p.id
-            WHERE pr.is_win_size IS NOT NULL AND p.win_prob IS NOT NULL
-            ORDER BY p.draw_number DESC
-            LIMIT 20
-        """)
-        rows = cur.fetchall()
-        cur.close()
-    except Exception as e:
-        logger.warning("check_confidence_gap: %s", e)
-        return
-    if len(rows) < 20:
-        return
-    avg_conf = sum(float(r[0]) for r in rows) / len(rows)
-    wr       = sum(1 for r in rows if r[1]) / len(rows)
-    gap      = avg_conf - wr
-    if gap > 0.15 and not gap_alerted.get('active'):
-        gap_alerted['active'] = True
-        _tg_html(
-            f"⚠️ <b>Confidence Gap (#47)</b>\n"
-            f"20 kỳ gần nhất:\n"
-            f"Avg confidence: <b>{avg_conf*100:.1f}%</b>\n"
-            f"Actual WR: <b>{wr*100:.1f}%</b>\n"
-            f"Gap: <b>+{gap*100:.1f}%</b> &gt; 15% — model đang overcalibrated"
-        )
-        logger.info("#47 Conf gap: conf=%.1f%% wr=%.1f%% gap=+%.1f%%",
-                    avg_conf * 100, wr * 100, gap * 100)
-    elif gap <= 0.10 and gap_alerted.get('active'):
-        gap_alerted.pop('active', None)
-        logger.info("#47 Conf gap resolved: conf=%.1f%% wr=%.1f%%", avg_conf * 100, wr * 100)
-
-
-def check_triple_number(draw: dict, triple_alerted: dict):
-    """#32 — Alert khi kết quả có 3 số giống nhau [x,x,x]."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    try:
-        nums = draw.get('numbers', [])
-        if isinstance(nums, str):
-            import json as _j
-            nums = _j.loads(nums)
-        nums = [int(x) for x in nums]
-        if len(nums) == 3 and nums[0] == nums[1] == nums[2]:
-            draw_id = draw.get('draw_id', '?')
-            if triple_alerted.get(draw_id):
-                return
-            triple_alerted[draw_id] = True
-            n = nums[0]
-            s = sum(nums)
-            size_vi = 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
-            _tg_html(
-                f"🎰  <b>TRIPLE RA ROI! KY #{draw_id}</b>\n"
-                f"────────────────────\n"
-                f"     <b>{n}  ·  {n}  ·  {n}</b>\n"
-                f"     Tong <b>{s}</b>   <b>{size_vi}</b>\n"
-                f"────────────────────\n"
-                f"Xac suat: 0.45% — trung binh 220 ky moi ra 1 lan"
-            )
-            logger.info("Triple alert ky #%s: %s-%s-%s", draw_id, n, n, n)
-    except Exception as e:
-        logger.warning("check_triple_number: %s", e)
 
 
 _drought_history_cache: dict = {}  # {latest_draw_number: history_list}
@@ -878,8 +710,7 @@ def check_pair_triple_drought(conn, drought_alerted: dict):
                 drought_alerted.pop(key, None)  # reset khi triple da ra
 
         # ── PAIR drought ───────────────────────────────────────
-        PAIR_THRESH = 6   # avg=2.4 ky; alert khi qua 6 (1 lan) va 9
-        for threshold in (6, 9):
+        for threshold in (9,):   # P259: chỉ báo 1 lần ở 9 kỳ (TB 2.4 kỳ/lần)
             key = f'pair_d{threshold}'
             if pair_drought >= threshold:
                 if not drought_alerted.get(key):
@@ -946,9 +777,8 @@ def check_cold_numbers(conn, cold_alerted: dict):
             cold_alerted.pop(num, None)
             continue
 
-        last_alerted_at = cold_alerted.get(num, 0)
-        if latest_draw - last_alerted_at < 10:
-            continue  # alert lại sau ≥10 kỳ để tránh spam
+        if num in cold_alerted:
+            continue  # P259: mỗi đợt lạnh báo 1 lần; reset khi số ra lại (ở trên)
 
         cold_alerted[num] = latest_draw
         msg = (
@@ -959,86 +789,6 @@ def check_cold_numbers(conn, cold_alerted: dict):
         )
         _tg_send(msg)
         logger.info("❄️ Cold number alert: %d chưa ra %d kỳ", num, gap)
-
-
-def check_size_bias(conn, bias_alerted: dict):
-    """
-    #27 — Alert khi SIZE phân bố hôm nay lệch mạnh: một SIZE chiếm >65% draws.
-    Chỉ alert khi có ≥20 kỳ hôm nay để tránh false positive sáng sớm.
-    bias_alerted: {bias_key: True} — reset khi bias hết.
-    """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT size_category, COUNT(*) AS cnt
-            FROM draw_history
-            WHERE (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                  = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-            GROUP BY size_category
-        """)
-        rows = cur.fetchall()
-        cur.close()
-    except Exception as e:
-        logger.warning(f"check_size_bias query: {e}")
-        return
-
-    total = sum(r[1] for r in rows)
-    if total < 20:
-        return  # chưa đủ sample
-
-    for size_cat, cnt in rows:
-        ratio = cnt / total
-        if ratio < 0.65:
-            bias_alerted.pop(size_cat, None)  # reset nếu bias hết
-            continue
-        if bias_alerted.get(size_cat):
-            continue  # đã alert rồi
-
-        bias_alerted[size_cat] = True
-        sz_emoji = {"NHO": "🟢", "HOA": "🟡", "LON": "🔴"}.get(size_cat, "⚪")
-        msg = (
-            f"📊 SIZE BIAS ALERT {sz_emoji}\n"
-            f"{size_cat} chiếm {round(ratio*100)}% hôm nay ({cnt}/{total} kỳ)!\n"
-            f"Phân bố bất thường — xem xét bet ngược chiều."
-        )
-        _tg_send(msg)
-        logger.info("📊 Size bias: %s %.0f%% (%d/%d)", size_cat, ratio*100, cnt, total)
-
-
-def check_draw_gap(last_draw_time_utc, gap_alerted: dict):
-    """
-    #24 — Alert khi không có draw mới >15 phút trong giờ hoạt động (7-23h VN).
-    gap_alerted: {'alerted_at': timestamp} để tránh spam (re-alert sau 60 phút).
-    """
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    now_vn = datetime.now(timezone.utc).astimezone(ZoneInfo('Asia/Ho_Chi_Minh'))
-    hour_vn = now_vn.hour
-    if not (7 <= hour_vn <= 23):
-        return  # ngoài giờ hoạt động
-
-    if last_draw_time_utc is None:
-        return
-    elapsed = (datetime.now(timezone.utc) - last_draw_time_utc).total_seconds() / 60
-    if elapsed < 15:
-        gap_alerted.pop('alerted_at', None)  # reset khi draw lại bình thường
-        return
-
-    last_alerted = gap_alerted.get('alerted_at', 0)
-    if time.time() - last_alerted < 3600:  # chỉ alert 1 lần mỗi giờ
-        return
-
-    gap_alerted['alerted_at'] = time.time()
-    msg = (
-        f"⚠️ DRAW GAP ALERT\n"
-        f"Không có kỳ mới trong {int(elapsed)} phút!\n"
-        f"Kỳ cuối: {last_draw_time_utc.strftime('%H:%M:%S UTC')}\n"
-        f"Kiểm tra vietlott.vn hoặc kết nối mạng."
-    )
-    _tg_send(msg)
-    logger.warning("⚠️ Draw gap: %.1f phút không có kỳ mới", elapsed)
 
 
 def send_morning_digest(conn):
@@ -1534,15 +1284,8 @@ def mode_watch():
     hot_combo_alerted: dict = {}  # (date_vn, combo_key) → True; tự reset theo ngày
     streak_alerted:    dict = {}  # streak_key → True
     cold_alerted:      dict = {}  # num → last_alerted_draw_number
-    gap_alerted:       dict = {}  # 'alerted_at' → timestamp
-    bias_alerted:      dict = {}  # size_cat → True; reset khi bias hết
-    triple_alerted:    dict = {}  # draw_id → True (#32)
-    hoa_reeval_state:  dict = {}  # {last_ts} (#49)
-    wr_alerted:        dict = {}  # {low, recovered} (#42)
     drought_alerted:   dict = {}  # triple_dN / pair_dN → True
-    conf_gap_alerted:  dict = {}  # {active} (#47)
     sh_alerted:        dict = {}  # {status, last_check} system health
-    last_draw_time_utc       = None  # #24 gap detector
     conn = None  # persistent connection — reconnect only on error
 
     _loi_xt = 0   # so lan loi xac thuc DB lien tiep (lui dan, xem khoi except)
@@ -1573,8 +1316,6 @@ def mode_watch():
                         logger.info(f"  ✅  #{draw['draw_id']} {draw['numbers']} tổng={draw.get('total')} {draw.get('size')} @ {now_utc}")
                         send_telegram(draw)
                         check_and_alert_hot_combo(conn, draw, hot_combo_alerted)
-                        check_triple_number(draw, triple_alerted)  # #32
-                        last_draw_time_utc = datetime.now(timezone.utc)  # #24
 
                 # Trigger prediction + announce sau khi có kỳ mới (non-blocking)
                 if inserted > 0:
@@ -1587,21 +1328,12 @@ def mode_watch():
                     check_size_streak(conn, streak_alerted)
                     # #6: cold number alert
                     check_cold_numbers(conn, cold_alerted)
-                    # #27: size bias alert
-                    check_size_bias(conn, bias_alerted)
-                    # #42: WR low alert
-                    check_wr_alert(conn, wr_alerted)
-                    # #47: confidence gap alert
-                    check_confidence_gap(conn, conf_gap_alerted)
                     # system health alert (WR50 trend)
                     check_system_health_alert(conn, sh_alerted)
-                    # #49: HOA monthly re-evaluation
-                    check_hoa_reeval(conn, hoa_reeval_state)
                     # triple/pair drought alert (GAN RA)
                     check_pair_triple_drought(conn, drought_alerted)
             else:
                 logger.info(f"Không có kỳ mới (last=#{last_id})")
-                check_draw_gap(last_draw_time_utc, gap_alerted)  # #24
 
             # fill_gaps mỗi 10 phút
             now = time.time()
