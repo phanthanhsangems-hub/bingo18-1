@@ -84,6 +84,7 @@ jobs:
           PASS=0; FAIL=0; SLOW=0
           : > /tmp/fail.txt
           : > /tmp/slow.txt
+          : > /tmp/timing.txt
           while read -r p; do
             [ -z "$p" ] && continue
             case "$p" in \#*) continue ;; esac
@@ -97,9 +98,19 @@ jobs:
             # chua kip chay RC=$?. Lan chay #15 dung o day: khong mot dong
             # tong ket nao duoc in, ma continue-on-error che mat. Dat phep
             # gan trong "|| RC=$?" thi set -e bo qua.
+            # P258: dung som sau 420s de cac buoc phan tich phia sau con chay
+            # duoc (buoc nay tung bi huy o phut thu 10 khi dich vu cham).
+            if [ "$SECONDS" -gt 420 ]; then
+              echo "DUNG SOM: da het 420s, bo qua cac endpoint con lai tu $p" >> /tmp/slow.txt
+              break
+            fi
             RC=0
-            CODE=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 30 \
+            OUT=$(curl -s -o /tmp/body -w '%{http_code} %{time_total}' --max-time 30 \
                    -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE$p") || RC=$?
+            CODE=${OUT%% *}
+            TT=${OUT##* }
+            # ghi thoi gian tung endpoint de biet cai nao cham
+            echo "$TT $CODE $p" >> /tmp/timing.txt
             if [ "$RC" -ne 0 ] || [ "$CODE" = "000" ]; then
               SLOW=$((SLOW+1)); echo "curl rc=$RC $p (qua 30s hoac dut ket noi)" >> /tmp/slow.txt
               sleep 0.7; continue
@@ -110,6 +121,8 @@ jobs:
             esac
             sleep 0.7
           done < scripts/endpoints_readonly.txt
+          echo "--- 10 ENDPOINT CHAM NHAT (giay, ma, duong dan) ---"
+          sort -rn /tmp/timing.txt 2>/dev/null | head -10
           echo "================================================"
           echo "  Khong loi 5xx : $PASS"
           echo "  Loi 5xx       : $FAIL"
