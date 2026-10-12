@@ -1,5 +1,5 @@
 """P247: con so 'tin cay' HIEN RA phai la win_prob (da hieu chinh), khong phai
-diem tho 'confidence' (~60%) — va canh bao #47 phai do dung con so do."""
+diem tho 'confidence' (~60%)."""
 import os, re, sys
 from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,27 +29,7 @@ print("\n=== 2. CHO PHAN TICH GIU DIEM THO (can de hieu chinh) ===")
 for ham in ('calibration_report', 'confidence_histogram', 'bet_signal'):
     kiem(f"{ham}: van doc confidence tho", 'win_prob' not in than(ham))
 
-print("\n=== 3. CANH BAO #47 DO win_prob ===")
-os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'x'); os.environ.setdefault('TELEGRAM_CHAT_ID', '1')
-import sync_to_supabase as S
-S.TELEGRAM_TOKEN, S.TELEGRAM_CHAT = 'x', '1'
-def chay(rows):
-    q = {}
-    class C:
-        def execute(s, sql, *a): q['sql'] = sql
-        def fetchall(s): return rows
-        def close(s): pass
-    class K:
-        def cursor(s): return C()
-    gui = []
-    with mock.patch.object(S, '_tg_html', side_effect=gui.append):
-        S.check_confidence_gap(K(), {})
-    return q.get('sql', ''), gui
-sql, gui = chay([(0.39, i % 5 < 2) for i in range(20)])   # 39% vs WR 40%
-kiem("doc cot win_prob", 'p.win_prob' in sql and 'p.confidence' not in sql, sql)
-kiem("win_prob ~ WR -> KHONG canh bao", not gui, gui)
-sql, gui = chay([(0.60, i % 5 < 2) for i in range(20)])   # lech that 20 diem
-kiem("lech that > 15% -> VAN canh bao", len(gui) == 1, gui)
+# (muc 3 — canh bao #47 confidence gap — da bo o P259: tin noi bo cho dev)
 
 print("\n=== 4. /api/predictions CHAY THAT tren VIEW cu (khong co win_prob) ===")
 # Loi that sau deploy P247: predictions_vn tao bang SELECT p.* TRUOC khi co

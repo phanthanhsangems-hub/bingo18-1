@@ -488,7 +488,7 @@ kiem("... kem vi tri loi (traceback)", bool(tt().get('cho')))
 
 print("\n=== 19b. LOI PHAI DUOC GHI, KHONG NUOT IM ===")
 src = open('app.py', encoding='utf-8').read()
-than = src[src.index('def _check_lap_lai_alert('):src.index('def _check_lon_excess_alert(')]
+than = src[src.index('def _check_lap_lai_alert('):src.index('# ── P248: cảnh báo tổng hiếm')]
 kiem("khong con 'except Exception: pass' nuot loi trong ham canh bao",
      'except Exception:\n        pass' not in than)
 kiem("loi duoc ghi 'LOI' kem traceback", "_laplai_ghi_trang_thai('LOI'" in than and 'format_exc' in than)
