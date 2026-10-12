@@ -239,8 +239,6 @@ kiem("cach 12 ky: CO bao o nguong mac dinh (P246)",
 xa2 = [(1000, (2,3,5), 10)] + [(1000+i, (1,1,i%6+1), 5) for i in range(1, 158)] \
       + [(1158, (2,3,5), 10)]
 kiem("cach 158 ky: van bao", any(e['combo'] == '235' for e in A._tim_bo_ra_lai(xa2, moc=1157)))
-kiem("fetch du ky cho nguong 160 + bu 40",
-     A._LAPLAI_MAX_CATCHUP + max(A._LAPLAI_ALERT_GAP, A._LAPLAI_CUA_SO_SAU) + 5 >= 205)
 
 print("\n=== 13. LO HONG DU LIEU ===")
 # Thieu #102 -> day tong giua bi hut, phai gan co.
@@ -263,247 +261,158 @@ kiem("khong co gi lap -> rong",
      A._tim_bo_ra_lai([(1,(1,2,3),6), (2,(4,5,6),15)], moc=0) == [])
 kiem("danh sach rong -> khong chet", A._tim_bo_ra_lai([], moc=0) == [])
 
-print("\n=== 15. TIN TELEGRAM ===")
-CHAY_CUOI = {}
-def chay_canh_bao(ky, moc, gio=12, thua_cas=False, kho=None, bot_tra=True):
-    """Chay _check_lap_lai_alert, tra ve (tin da gui hoac None, moc da ghi).
+print("\n=== 15. TIN MOI KY (P260) — WATCHER GUI 1 TIN/KY ===")
+# Truoc P260: 3 tin/ky (ket qua tho + THANG/THUA o Cloud Run + nhac 2 phut) va tin
+# "bo ra lai" rieng o ~73% so ky. Nay: MOT tin do watcher gui ngay khi co ky moi.
+import sqlite3, json as _js
+os.environ.setdefault('TELEGRAM_BOT_TOKEN', 'x'); os.environ.setdefault('TELEGRAM_CHAT_ID', '1')
+import sync_to_supabase as S
+import lap_lai as LL
+S.TELEGRAM_TOKEN, S.TELEGRAM_CHAT = 'x', '1'
 
-    P242: con tro gia la mot KHO khoa-gia tri nho dung ngu nghia that:
-    SELECT doc, INSERT/UPSERT ghi, UPDATE ... WHERE value = cu chi doi khi
-    gia tri van la `cu` (rowcount 1/0). thua_cas=True gia lap duong kia
-    (trigger/predict) vua doi moc truoc.
-    """
-    if kho is None:
-        kho = {}
-    if moc is not None:
-        kho.setdefault('lap_lai_last_draw', str(moc))
-    ghi = {}
-    class C:
-        rowcount = 0
-        def execute(s, q, *a):
-            s.q = q; s.a = a[0] if a else ()
-            Q = q.strip().upper()
-            if 'SYSTEM_CONFIG' in Q and Q.startswith('SELECT'):
-                s.mode = 'doc'; s.khoa = s.a[0]
-            elif 'SYSTEM_CONFIG' in Q and Q.startswith('UPDATE'):
-                moi_, khoa, cu = s.a
-                if not thua_cas and kho.get(khoa) == cu:
-                    kho[khoa] = moi_; s.rowcount = 1
-                else:
-                    s.rowcount = 0
-            elif 'SYSTEM_CONFIG' in Q:
-                kho[s.a[0]] = s.a[1]; s.rowcount = 1
-            else:
-                s.mode = 'ky'
-        def fetchone(s):
-            v = kho.get(getattr(s, 'khoa', None))
-            return None if v is None else (v,)
-        def fetchall(s):
-            k = s.a[0] if s.a else len(ky)
-            return [(d, str(list(b))) for d, b, _ in sorted(ky, key=lambda r: -r[0])[:k]]
-        def close(s): pass
-    class K:
-        def cursor(s): return C()
-        def commit(s): pass
-        def rollback(s): pass
-        def close(s): pass
-    import datetime as _dt
-    from zoneinfo import ZoneInfo
-    that = _dt.datetime(2026, 9, 27, gio, 30, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
-    class FakeDT(_dt.datetime):
-        @classmethod
-        def now(cls, tz=None): return that
-    gui = []
-    bot = mock.MagicMock()
-    def _gui(m, *a, **k):
-        gui.append(m)
-        if isinstance(bot_tra, Exception):
-            raise bot_tra
-        return bot_tra
-    bot.return_value.send_message.side_effect = _gui
-    with mock.patch.object(A.db, 'get_connection', return_value=K()), \
-         mock.patch.object(A, 'datetime', FakeDT), \
-         mock.patch.dict('sys.modules', {'telegram_bot': mock.MagicMock(TelegramBot=bot)}):
-        A._check_lap_lai_alert()
-    v = kho.get('lap_lai_last_draw')
-    CHAY_CUOI.clear(); CHAY_CUOI.update(kho)
-    return (gui[0] if gui else None), (int(v) if v is not None else None)
+class _Cur:                      # psycopg2-style %s -> sqlite ?
+    def __init__(s, k): s.c = k.cursor()
+    def execute(s, q, a=()): s.c.execute(q.replace('%s', '?'), a); return s
+    def fetchall(s): return s.c.fetchall()
+    def fetchone(s): return s.c.fetchone()
+    @property
+    def rowcount(s): return s.c.rowcount
+    def close(s): s.c.close()
+class _Conn:
+    def __init__(s, k): s.k = k
+    def cursor(s): return _Cur(s.k)
+    def commit(s): s.k.commit()
+    def rollback(s): s.k.rollback()
 
-ky = [(100, (2,3,5), 10), (101, (1,1,4), 6), (102, (6,6,6), 18),
-      (103, (2,3,5), 10)]
-tin, moc_moi = chay_canh_bao(ky, moc=102)
-kiem("co gui tin", tin is not None)
-kiem("tin neu ten bo dang 2-3-5", '2-3-5' in (tin or ''))
-# P238: noi dung = TONG cua ky NGAY SAU moi lan bo do ra (160 ky), khong phai
-# cac tong nam giua, khong can khoang cach. ky: 235@100 -> #101 tong 6.
-kiem("tin bao bo vua ra lai", '<b>2-3-5</b> vừa ra lại' in (tin or ''), tin)
-kiem("P238: liet ke tong cua ky NGAY SAU lan truoc (#101 = 6)",
-     'kỳ ngay sau 2-3-5 ra tổng:\n<b>6</b>' in (tin or ''), tin)
-kiem("P238: KHONG con 'ra lai sau N ky' (khong can khoang cach)",
-     'ra lại sau' not in (tin or ''))
-kiem("P238: KHONG con 'Tong da ra' (cac tong nam giua)",
-     'Tổng đã ra' not in (tin or '') and '6 · 18' not in (tin or ''))
-kiem("P238: KHONG con so ky #100", '#100' not in (tin or ''))
-kiem("da ghi moc moi = ky moi nhat", moc_moi == 103, str(moc_moi))
+def db_moi(ky, du_doan=()):
+    """ky: [(dn, bo)]; du_doan: [(dn, bo, win_prob)]. Cot/kieu giong DB that."""
+    k = sqlite3.connect(':memory:')
+    k.executescript("""
+      CREATE TABLE draw_history (draw_number INT PRIMARY KEY, numbers TEXT);
+      CREATE TABLE predictions (id INTEGER PRIMARY KEY, draw_number INT, predicted_numbers TEXT,
+                                win_prob REAL, confidence REAL);
+      CREATE TABLE system_config (config_key TEXT PRIMARY KEY, config_value TEXT,
+                                  description TEXT, updated_at TIMESTAMP);
+    """)
+    for dn, bo in ky:
+        k.execute("INSERT INTO draw_history VALUES (?,?)", (dn, str(list(bo))))   # watcher luu str(list)
+    for dn, bo, wp in du_doan:
+        k.execute("INSERT INTO predictions (draw_number, predicted_numbers, win_prob, confidence) "
+                  "VALUES (?,?,?,?)", (dn, _js.dumps(list(bo)), wp, 0.6))
+    k.commit()
+    return k
 
-print("\n=== 15b. TONG CUA KY NGAY SAU MOI LAN (P238) ===")
-# 1-2-3 ra o #300, #303, #306, #309. Ky ngay sau: #301 t=9, #304 t=15, #307 t=12.
-# Lan #309 la lan ra lai -> liet ke 3 lan truoc: 9 · 15 · 12 (cu -> moi).
-d = [(300,(1,2,3),6),(301,(1,2,6),9),(302,(4,5,6),15),
-     (303,(1,2,3),6),(304,(4,5,6),15),(305,(3,3,3),9),
-     (306,(1,2,3),6),(307,(2,4,6),12),(308,(1,1,4),6),
-     (309,(1,2,3),6)]
-tin, _ = chay_canh_bao(d, moc=308)
-kiem("1-2-3 vua ra lai", '<b>1-2-3</b> vừa ra lại' in (tin or ''), tin)
-kiem("liet ke dung tong ky ngay sau cac lan truoc: 9 · 15 · 12",
-     '<b>9 · 15 · 12</b>' in (tin or ''), tin)
-kiem("ghi ro thu tu cu -> moi va pham vi 160 ky",
-     'cũ → mới' in (tin or '') and '160 kỳ' in (tin or ''))
+def gui(k, dn, bo, tra=True):
+    da_gui = []
+    with mock.patch.object(S, '_tg_html', side_effect=lambda t: (da_gui.append(t), tra)[1]):
+        ok = S.gui_tin_ky(_Conn(k), {'draw_id': dn, 'numbers': list(bo)})
+    return da_gui, ok
+def nk(k):
+    r = k.execute("SELECT config_value FROM system_config WHERE config_key=?", (LL.NK_KEY,)).fetchone()
+    return _js.loads(r[0]) if r else []
 
-print("\n--- ham _tong_sau_cac_lan ---")
-kiem("tra (ky bo ra, tong ky sau)",
-     A._tong_sau_cac_lan(d, (1,2,3), 309) == [(300,9),(303,15),(306,12)],
-     str(A._tong_sau_cac_lan(d, (1,2,3), 309)))
-kiem("KHONG tinh lan ra lai hien tai", all(k < 309 for k, _ in A._tong_sau_cac_lan(d, (1,2,3), 309)))
-kiem("chi trong cua so 160 ky",
-     A._tong_sau_cac_lan([(1,(1,2,3),6),(2,(1,2,6),9),(500,(1,2,3),6)], (1,2,3), 500) == [])
-kiem("cua so dung 160 (nguoi dung chon)", A._LAPLAI_CUA_SO_SAU == 160)
-lien = [(400,(1,2,3),6),(401,(1,2,3),6)]
-kiem("ra lai ngay ky ke tiep: ky sau lan truoc CHINH la ky nay (tong 6)",
-     A._tong_sau_cac_lan(lien, (1,2,3), 401) == [(400,6)])
-thung = [(500,(1,2,3),6),(502,(4,5,6),15),(503,(1,2,3),6)]    # thieu #501
-kiem("ky ngay sau bi thieu -> None, KHONG lay ky ke tiep ma doan",
-     A._tong_sau_cac_lan(thung, (1,2,3), 503) == [(500, None)])
-tin, _ = chay_canh_bao(thung, moc=502)
-kiem("tin hien '?' va giai thich khi thieu", '<b>?</b>' in (tin or '') and 'thiếu' in (tin or ''), tin)
+# 235 ra o #100 (ky sau #101 tong 6) roi ra lai o #103. Du doan #103 = 1-2-6 (9 NHO) vs 10 HOA -> THUA.
+# Chuoi truoc: #100 L (1-2-3 vs HOA), #101 W, #102 W.
+k = db_moi([(100,(2,3,5)), (101,(1,1,4)), (102,(6,6,6)), (103,(2,3,5))],
+           [(100,(1,2,3),0.4), (101,(1,2,3),0.4), (102,(4,5,6),0.4), (103,(1,2,6),0.42), (104,(2,4,6),0.41)])
+tins, ok = gui(k, 103, (2,3,5))
+tin = tins[0] if tins else ''
+kiem("gui DUNG MOT tin", len(tins) == 1, len(tins))
+kiem("tieu de KY #103 — THUA", 'KỲ #103 — THUA' in tin, tin)
+kiem("ket qua + size", 'Kết quả <b>2·3·5 (10 HÒA)</b>' in tin, tin)
+kiem("du doan cua ky nay + khop", 'Dự đoán 1·2·6 (9 NHỎ)' in tin and 'Khớp 1/3' in tin, tin)
+kiem("chuoi W/L 3 ky truoc + ky nay: L W W L", '❌  ✅  ✅  ❌  ← kỳ này' in tin, tin)
+kiem("dong RA LAI: sau 3 ky", '🔁 Ra lại sau <b>3</b> kỳ' in tin, tin)
+kiem("P238: tong cua ky NGAY SAU lan truoc (#101 = 6)", 'ra tổng: <b>6</b>' in tin, tin)
+kiem("du doan KY TOI #104 kem win_prob 41%", 'Kỳ tới <b>#104</b>: <b>2·4·6 (12 LỚN)</b> · 41%' in tin, tin)
+kiem("khong con tin rieng 'vừa ra lại'", 'vừa ra lại' not in tin)
+m = nk(k)
+kiem("nhat ky: 1 muc den=103 combo=235 cach=3 ok=True", len(m) == 1 and (m[0]['den'], m[0].get('combo'), m[0].get('cach'), m[0]['ok']) == (103, '235', 3, True), m)
+kiem("nguon = watcher", m[0].get('nguon') == 'watcher')
 
-print("\n--- phai LAY DU 160 ky (ban cu chi lay 55) ---")
-# 1-2-3 o #1001 (ky sau #1002 tong 17), roi ra lai o #1150 va #1158.
-# #1001 cach #1158 la 157 ky: nam trong 160 -> PHAI co tong 17 trong tin.
-# Nen: 12 bo khac nhau xoay vong -> khong bo nen nao ra lai trong <= 10 ky
-# (lan dau toi dung toan 4-5-6, no "ra lai" moi ky va chiem het tin nhan).
-nen = [c for c in A._WAYS_COMBO if len(set(c)) == 3 and c != (1,2,3)][:12] \
-      if hasattr(A, '_WAYS_COMBO') else [(1,2,4),(1,2,5),(1,2,6),(1,3,4),(1,3,5),(1,3,6),
-                                          (1,4,5),(1,4,6),(1,5,6),(2,3,4),(2,3,5),(2,3,6)]
-dai = [(1000 + i, nen[i % 12], sum(nen[i % 12])) for i in range(0, 170)]
-dai = [x for x in dai if x[0] not in (1001, 1002, 1150, 1158)]
-dai += [(1001,(1,2,3),6), (1002,(5,6,6),17), (1150,(1,2,3),6), (1158,(1,2,3),6)]
-dai.sort()
-sau_1150 = dict((d, t) for d, _, t in dai)[1151]
-tin, _ = chay_canh_bao(dai, moc=1157)
-kiem("lan ra cach 157 ky van duoc tinh (tong 17 ngay sau #1001)",
-     f'<b>17 · {sau_1150}</b>' in (tin or ''), tin)
+print("\n--- khong ra lai, khong co du doan ---")
+k = db_moi([(200,(1,2,3)), (201,(4,5,6))])
+tins, ok = gui(k, 201, (4,5,6))
+tin = tins[0]
+kiem("van gui tin (ket qua)", 'KỲ #201' in tin and 'Kết quả <b>4·5·6 (15 LỚN)</b>' in tin, tin)
+kiem("noi ro khong co du doan", 'không có dự đoán' in tin, tin)
+kiem("khong co dong ra lai", '🔁' not in tin)
+kiem("ky toi: chua co du doan", 'chưa có dự đoán' in tin, tin)
+m = nk(k)
+kiem("nhat ky: muc KHONG co 'combo' (de P245 khong tinh la 'bao thua')", len(m) == 1 and 'combo' not in m[0] and m[0]['den'] == 201, m)
 
-print("\n--- nhieu bo cung ra lai ---")
-nhieu = [(300,(2,3,5),10),(301,(1,1,4),6),(302,(6,6,6),18),
-         (303,(1,1,4),6),(304,(6,6,6),18),(305,(2,3,5),10),(306,(3,4,6),13)]
-tin, _ = chay_canh_bao(nhieu, moc=302)
-for bo in ('2-3-5','1-1-4','6-6-6'):
-    kiem(f"bo {bo} co trong tin", f'<b>{bo}</b> vừa ra lại' in (tin or ''), tin)
-kiem("bo 3-4-6 (khong ra lai) KHONG co", '3-4-6' not in (tin or ''))
-kiem("1-1-4 @301 -> ky #302 tong 18", 'kỳ ngay sau 1-1-4 ra tổng:\n<b>18</b>' in (tin or ''))
-kiem("2-3-5 @300 -> ky #301 tong 6",  'kỳ ngay sau 2-3-5 ra tổng:\n<b>6</b>' in (tin or ''))
+print("\n--- trip ---")
+k = db_moi([(300,(1,2,3)), (301,(5,5,5))], [(301,(1,2,3),0.4)])
+tin = gui(k, 301, (5,5,5))[0][0]
+kiem("trip: dong dau TRIPLE 5-5-5", tin.startswith('🎰🎰🎰 <b>TRIPLE 5-5-5</b>'), tin)
+kiem("trip van co THANG/THUA (15 LON vs 6 NHO -> THUA)", 'THUA' in tin)
 
-print("\n=== 16. KHONG DUOC SPAM ===")
-tin, moc_moi = chay_canh_bao(ky, moc=103)
-kiem("khong co ky moi -> KHONG gui gi", tin is None)
+print("\n--- ky ngay sau bi thieu -> '?' ---")
+k = db_moi([(500,(1,2,3)), (502,(4,5,6)), (503,(1,2,3))])
+tin = gui(k, 503, (1,2,3))[0][0]
+kiem("hien '?' va giai thich", 'ra tổng: <b>?</b>' in tin and 'kỳ sau bị thiếu' in tin, tin)
 
-# Lan dau chay (mat state / vua deploy): chot moc, KHONG bung mot trang tin.
-tin, moc_moi = chay_canh_bao(ky, moc=None)
-kiem("lan dau chay: KHONG gui tin nao", tin is None)
-kiem("lan dau chay: van chot moc = ky moi nhat", moc_moi == 103, str(moc_moi))
+print("\n--- Telegram tu choi -> ghi ok=False, khong nem loi ---")
+k = db_moi([(600,(1,2,3)), (601,(1,2,3))])
+tins, ok = gui(k, 601, (1,2,3), tra=False)
+kiem("tra False", ok is False)
+kiem("nhat ky ghi ok=False (diagnose P245 se bao 'hong')", nk(k)[0]['ok'] is False, nk(k))
 
-# Ngoai gio xo thi im
-tin, _ = chay_canh_bao(ky, moc=102, gio=23)
-kiem("23h: im lang", tin is None)
-tin, _ = chay_canh_bao(ky, moc=102, gio=5)
-kiem("5h: im lang", tin is None)
-tin, _ = chay_canh_bao(ky, moc=102, gio=6)
-kiem("6h: co bao", tin is not None)
+print("\n--- DB hong luc soan -> van gui tin toi thieu ---")
+k = db_moi([(700,(2,2,6))])
+with mock.patch.object(S, 'doc_du_lieu_tin_ky', side_effect=RuntimeError('DB chet')):
+    tins, ok = gui(k, 700, (2,2,6))
+kiem("van gui 1 tin", len(tins) == 1 and 'KỲ #700' in tins[0] and '2·2·6' in tins[0], tins)
+kiem("nhat ky van ghi (ket noi con)", nk(k) and nk(k)[0]['den'] == 700, nk(k))
 
-print("\n=== 17. NGUOI MAY LAU -> KHONG BU MOT TRANG ===")
-# 300 ky moi ke tu moc, ky nao cung 111 -> ky nao cung "ra lai sau 1 ky".
-# Neu khong chan, se bu ca 300 ky va bung ra mot trang tin.
-dai = [(500 + i, (1, 1, 1), 3) for i in range(300)]
-tin, moc_moi = chay_canh_bao(dai, moc=500)
-kiem("van chot moc len ky moi nhat", moc_moi == 799, str(moc_moi))
-kiem("CO gui tin (khong duoc im lang)", tin is not None)
-kiem(f"chi liet ke toi da {A._LAPLAI_MAX_LIET_KE} su kien",
-     tin.count('vừa ra lại') == A._LAPLAI_MAX_LIET_KE,
-     str(tin.count('vừa ra lại')))
-kiem("co ghi chu '+N lan nua'", 'lần nữa)' in tin)
-# Chan bu: chi xet _LAPLAI_MAX_CATCHUP ky gan nhat, nen su kien cu nhat
-# khong duoc som hon moc nay.
-som_nhat = 799 - A._LAPLAI_MAX_CATCHUP
-su = A._tim_bo_ra_lai([(d, b, t) for d, b, t in dai],
-                      moc=max(500, 799 - A._LAPLAI_MAX_CATCHUP))
-kiem(f"khong bu qua {A._LAPLAI_MAX_CATCHUP} ky",
-     len(su) <= A._LAPLAI_MAX_CATCHUP, str(len(su)))
-kiem("va khong dung toi ky qua cu",
-     all(e['den'] > som_nhat for e in su))
+print("\n--- bat kip nhieu ky: 1 tin tom tat + 1 tin day du ---")
+k = db_moi([(800,(1,2,3)), (801,(4,5,6)), (802,(1,2,3)), (803,(2,3,4)), (804,(4,5,6))],
+           [(804,(1,2,3),0.4), (805,(2,2,2),0.39)])
+da_gui = []
+with mock.patch.object(S, '_tg_html', side_effect=lambda t: (da_gui.append(t), True)[1]):
+    S.gui_tin_bat_kip(_Conn(k), [{'draw_id': d, 'numbers': list(b)} for d, b in
+                                 [(802,(1,2,3)), (803,(2,3,4)), (804,(4,5,6))]])
+kiem("dung 2 tin", len(da_gui) == 2, len(da_gui))
+kiem("tin 1: 'Bắt kịp 3 kỳ' + tung ky cu, 🔁 cho #802 (ra lai sau 2)", 'Bắt kịp 3 kỳ' in da_gui[0]
+     and '#802: 1·2·3 (6 NHỎ) 🔁 sau 2 kỳ' in da_gui[0] and '#803: 2·3·4 (9 NHỎ)' in da_gui[0], da_gui[0])
+kiem("tin 1 KHONG gom ky moi nhat", '#804' not in da_gui[0])
+kiem("tin 2: day du cho #804 (ra lai sau 3, ky toi #805)", 'KỲ #804' in da_gui[1] and 'Ra lại sau <b>3</b>' in da_gui[1]
+     and 'Kỳ tới <b>#805</b>' in da_gui[1], da_gui[1])
+m = nk(k)
+kiem("nhat ky: 3 muc (802 combo, 803 khong combo, 804 combo)", [(x['den'], x.get('combo')) for x in m] == [(802,'123'),(803,None),(804,'456')], m)
+kiem("muc bat kip ghi nguon rieng", m[0]['nguon'] == 'watcher_bat_kip' and m[2]['nguon'] == 'watcher')
 
-print("\n=== 18. CANH BAO HONG KHONG DUOC LAM CHET VONG DU DOAN ===")
-with mock.patch.object(A.db, 'get_connection', side_effect=RuntimeError('DB die')):
-    try:
-        A._check_lap_lai_alert()
-        kiem("DB chet -> nuot loi, khong nem ra ngoai", True)
-    except Exception as ex:
-        kiem("DB chet -> nuot loi, khong nem ra ngoai", False, repr(ex))
-kiem("da duoc goi trong /api/predict", "_check_lap_lai_alert('predict')" in ap)
-kiem("moc luu o system_config (song qua nguoi may), khong phai bien RAM",
-     "_LAPLAI_STATE_KEY" in ap and "system_config" in ap)
+print("\n--- nhat ky xoay vong ---")
+k = db_moi([(900,(1,2,3))])
+c = _Cur(k)
+LL.ghi_nhat_ky(c, [LL.muc_nhat_ky(i, None, True) for i in range(LL.NK_MAX + 50)]); k.commit()
+kiem(f"giu toi da {LL.NK_MAX} muc moi nhat", len(nk(k)) == LL.NK_MAX and nk(k)[-1]['den'] == LL.NK_MAX + 49)
 
-print("\n=== 19. P242: GHI TRANG THAI + CHONG GUI TRUNG + GOI TU HAI DUONG ===")
-import json as _js
-d = [(100,(2,3,5),10),(101,(1,1,4),6),(102,(6,6,6),18),(103,(2,3,5),10)]
-def tt(): return _js.loads(CHAY_CUOI.get('lap_lai_trang_thai', '{}'))
+print("\n=== 16. CHI MOT NGUON GUI: Cloud Run khong gui tin ky, watcher khong gui tin le ===")
+ps = open('prediction_service.py', encoding='utf-8').read()
+tb = open('telegram_bot.py', encoding='utf-8').read()
+wt = open('sync_to_supabase.py', encoding='utf-8').read()
+ap = open('app.py', encoding='utf-8').read()
+kiem("prediction_service: khong con send_result", 'send_result(' not in ps)
+kiem("telegram_bot: bo send_result", 'def send_result' not in tb)
+kiem("app: bo _check_lap_lai_alert (tin rieng)", '_check_lap_lai_alert' not in ap)
+kiem("app: dung ham thuan tu lap_lai", 'from lap_lai import' in ap and A._tim_bo_ra_lai is LL.tim_bo_ra_lai)
+kiem("watcher: bo tin ket qua tho (send_telegram), nhac 2 phut, announce",
+     'def send_telegram(' not in wt and '_send_play_reminder' not in wt and 'announce_prediction' not in wt)
+kiem("watcher: mode_watch goi gui_tin_ky / gui_tin_bat_kip", 'gui_tin_ky(conn, da_chen[0])' in wt and 'gui_tin_bat_kip(conn, da_chen)' in wt)
+kiem("watcher: gui tin SAU khi da bat trigger (khong cho Cloud Run)",
+     wt.index('threading.Thread(target=trigger_prediction') < wt.index('gui_tin_ky(conn, da_chen[0])'))
+kiem("_tg_html / _tg_send tra bool", 'def _tg_html(text: str) -> bool' in wt and 'def _tg_send(text: str) -> bool' in wt)
 
-tin, m = chay_canh_bao(d, moc=102)
-kiem("gui xong -> ghi 'da_gui'", tt().get('ket_qua') == 'da_gui', str(tt()))
-kiem("ghi so bo va ky", tt().get('so_bo') == 1 and tt().get('den') == 103)
-
-tin, m = chay_canh_bao(d, moc=102, thua_cas=True)
-kiem("duong kia doi moc truoc -> KHONG gui (chong trung)", tin is None, tin)
-kiem("ghi 'duong_khac_da_xu_ly'", tt().get('ket_qua') == 'duong_khac_da_xu_ly', str(tt()))
-
-tin, m = chay_canh_bao(d, moc=103)
-kiem("khong co ky moi -> ghi 'chua_co_ky_moi'", tt().get('ket_qua') == 'chua_co_ky_moi', str(tt()))
-
-tin, m = chay_canh_bao(d, moc=None)
-kiem("lan dau -> ghi 'chot_moc'", tt().get('ket_qua') == 'chot_moc', str(tt()))
-
-yen = [(100,(1,2,3),6),(101,(4,5,6),15),(102,(1,2,4),7),(103,(3,5,6),14)]
-tin, m = chay_canh_bao(yen, moc=102)
-kiem("co ky moi nhung khong bo nao ra lai -> ghi ro", tt().get('ket_qua') == 'khong_bo_nao_ra_lai', str(tt()))
-kiem("... va VAN day moc len (khong xet lai lan sau)", m == 103, str(m))
-
-# Telegram tra False / nem loi -> ghi ro, KHONG im lang
-tin, m = chay_canh_bao(d, moc=102, bot_tra=False)
-kiem("Telegram tra False -> ghi 'gui_telegram_THAT_BAI'",
-     tt().get('ket_qua') == 'gui_telegram_THAT_BAI', str(tt()))
-tin, m = chay_canh_bao(d, moc=102, bot_tra=RuntimeError('mat mang'))
-kiem("Telegram nem loi -> ghi 'LOI' kem noi dung loi",
-     tt().get('ket_qua') == 'LOI' and 'mat mang' in tt().get('loi', ''), str(tt()))
-kiem("... kem vi tri loi (traceback)", bool(tt().get('cho')))
-
-print("\n=== 19b. LOI PHAI DUOC GHI, KHONG NUOT IM ===")
-src = open('app.py', encoding='utf-8').read()
-than = src[src.index('def _check_lap_lai_alert('):src.index('# ── P248: cảnh báo tổng hiếm')]
-kiem("khong con 'except Exception: pass' nuot loi trong ham canh bao",
-     'except Exception:\n        pass' not in than)
-kiem("loi duoc ghi 'LOI' kem traceback", "_laplai_ghi_trang_thai('LOI'" in than and 'format_exc' in than)
-kiem("ket qua send_message duoc ghi (da_gui / THAT_BAI)", "'gui_telegram_THAT_BAI'" in than)
-kiem("/api/trigger-prediction cung goi canh bao", "_check_lap_lai_alert('trigger')" in src)
-kiem("doi moc co dieu kien (chong gui trung)", '_laplai_doi_moc(cur, moc, moi_nhat)' in than)
-
-print("\n=== 19c. /api/canh-bao/lap-lai ===")
+print("\n=== 17. /api/canh-bao/lap-lai: doc tu nhat ky ===")
+NK = [{'luc':'2026-10-12 10:00:00','den':190900,'ok':True,'nguon':'watcher'},
+      {'luc':'2026-10-12 10:06:00','den':190901,'combo':'235','cach':4,'ok':False,'nguon':'watcher'},
+      {'luc':'2026-10-12 10:12:00','den':190902,'combo':'114','cach':9,'ok':True,'nguon':'watcher'}]
 class C2:
     def execute(s, q, *a): s.q = q; s.a = a[0] if a else ()
     def fetchone(s):
-        if 'MAX(draw_number)' in s.q: return (188630,)
-        if s.a and s.a[0] == 'lap_lai_last_draw': return ('188629', '2026-09-28 03:10:00')
-        if s.a and s.a[0] == 'lap_lai_trang_thai':
-            return (_js.dumps({'ket_qua': 'da_gui', 'nguon': 'trigger'}), '2026-09-28 03:10:00')
+        if 'MAX(draw_number)' in s.q: return (190903,)
+        if s.a and s.a[0] == LL.NK_KEY: return (_js.dumps(NK),)
         return None
     def close(s): pass
 class K2:
@@ -513,88 +422,16 @@ with mock.patch.object(A.db, 'get_connection', return_value=K2()):
     r = A.app.test_client().get('/api/canh-bao/lap-lai')
 dd = r.get_json()
 kiem("tra 200", r.status_code == 200, str(r.status_code))
-kiem("co moc da xet", dd['moc_da_xet']['gia_tri'] == '188629')
-kiem("co ky moi nhat", dd['ky_moi_nhat'] == 188630)
-kiem("co lan chay gan nhat (da giai JSON)", dd['lan_chay_gan_nhat'] == {'ket_qua': 'da_gui', 'nguon': 'trigger'})
+kiem("nhat_ky nguyen ven", dd['nhat_ky'] == NK)
+kiem("lan_chay_gan_nhat = muc cuoi", dd['lan_chay_gan_nhat']['den'] == 190902)
+kiem("gui_duoc_cuoi / hong_cuoi / so_hong", dd['gui_duoc_cuoi']['den'] == 190902 and dd['hong_cuoi']['den'] == 190901 and dd['so_hong'] == 1, dd)
+kiem("ky_moi_nhat + nguong_cach 160", dd['ky_moi_nhat'] == 190903 and dd['nguong_cach'] == 160)
 kiem("dang ky vao bo quet", '/api/canh-bao/lap-lai' in open('scripts/endpoints_readonly.txt', encoding='utf-8').read())
 
-print("\n=== 19d. P243: LUU RIENG LAN GUI DUOC / LAN HONG GAN NHAT ===")
-kho = {}
-chay_canh_bao(d, moc=102, kho=kho, bot_tra=False)
-hong = _js.loads(kho.get('lap_lai_hong_cuoi', '{}'))
-kiem("gui hong -> ghi khoa rieng 'lap_lai_hong_cuoi'", hong.get('ket_qua') == 'gui_telegram_THAT_BAI', str(hong))
-kiem("gui hong -> KHONG ghi 'lap_lai_gui_duoc_cuoi'", 'lap_lai_gui_duoc_cuoi' not in kho)
-kho['lap_lai_last_draw'] = '103'
-chay_canh_bao(d + [(104,(1,2,4),7)], moc=None, kho=kho)
-kiem("lan chay sau (khong_bo_nao_ra_lai) de len trang_thai",
-     _js.loads(kho['lap_lai_trang_thai']).get('ket_qua') == 'khong_bo_nao_ra_lai', kho.get('lap_lai_trang_thai'))
-kiem("... nhung lan HONG van con giu lai", _js.loads(kho.get('lap_lai_hong_cuoi', '{}')).get('ket_qua') == 'gui_telegram_THAT_BAI')
-kho2 = {}
-chay_canh_bao(d, moc=102, kho=kho2)
-kiem("gui duoc -> ghi 'lap_lai_gui_duoc_cuoi'", _js.loads(kho2.get('lap_lai_gui_duoc_cuoi', '{}')).get('ket_qua') == 'da_gui')
-kho3 = {}
-chay_canh_bao(d, moc=102, kho=kho3, bot_tra=RuntimeError('x'))
-kiem("LOI -> cung ghi 'lap_lai_hong_cuoi'", _js.loads(kho3.get('lap_lai_hong_cuoi', '{}')).get('ket_qua') == 'LOI')
-
-class C3(C2):
-    def fetchone(s):
-        if s.a and s.a[0] == 'lap_lai_gui_duoc_cuoi':
-            return (_js.dumps({'ket_qua': 'da_gui'}), '2026-09-28 03:00:00')
-        if s.a and s.a[0] == 'lap_lai_hong_cuoi':
-            return (_js.dumps({'ket_qua': 'LOI'}), '2026-09-28 02:00:00')
-        return C2.fetchone(s)
-class K3(K2):
-    def cursor(s): return C3()
-with mock.patch.object(A.db, 'get_connection', return_value=K3()):
-    dd = A.app.test_client().get('/api/canh-bao/lap-lai').get_json()
-kiem("endpoint tra 'gui_duoc_cuoi'", (dd.get('gui_duoc_cuoi') or {}).get('ket_qua') == 'da_gui', str(dd.get('gui_duoc_cuoi')))
-kiem("endpoint tra 'hong_cuoi'", (dd.get('hong_cuoi') or {}).get('ket_qua') == 'LOI', str(dd.get('hong_cuoi')))
-
-print("\n=== 19e. P245: NHAT KY TUNG BO DA BAO ===")
-kho = {}
-chay_canh_bao(d, moc=102, kho=kho)
-nk = _js.loads(kho.get('lap_lai_nhat_ky', '[]'))
-kiem("gui xong -> nhat ky co 1 muc", len(nk) == 1, nk)
-kiem("muc ghi dung ky / bo / cach / ok", nk and (nk[0]['den'], nk[0]['combo'], nk[0]['cach'], nk[0]['ok']) == (103, '235', 3, True), nk)
-d2 = d + [(104, (1,1,4), 6)]
-kho['lap_lai_last_draw'] = '103'
-chay_canh_bao(d2, moc=None, kho=kho)
-nk = _js.loads(kho['lap_lai_nhat_ky'])
-kiem("lan sau NOI THEM, khong ghi de", [m['combo'] for m in nk] == ['235', '114'], nk)
-kho = {}
-chay_canh_bao(d, moc=102, kho=kho, bot_tra=False)
-nk = _js.loads(kho.get('lap_lai_nhat_ky', '[]'))
-kiem("gui hong -> van ghi, ok=False", nk and nk[0]['ok'] is False, nk)
-# nhieu bo cung luc: ca nhung bo vuot _LAPLAI_MAX_LIET_KE cung phai co trong nhat ky
-nen = [(1,2,3),(1,2,4),(1,2,5),(1,2,6),(1,3,4),(1,3,5),(1,3,6),(1,4,5),(1,4,6),(1,5,6)]
-dai = [(200 + i, b, sum(b)) for i, b in enumerate(nen)] + [(210 + i, b, sum(b)) for i, b in enumerate(nen)]
-kho = {}
-chay_canh_bao(dai, moc=209, kho=kho)
-nk = [m for m in _js.loads(kho.get('lap_lai_nhat_ky', '[]')) if 'combo' in m]
-kiem("10 bo ra lai -> nhat ky du 10 (ke ca bo khong liet ke trong tin)", len(nk) == 10, len(nk))
-kiem("... bo thu 9, 10 danh dau liet_ke=False", sum(1 for m in nk if not m['liet_ke']) == 2)
-# nguoi may qua lau -> ghi so ky bi bo qua
-lau = [(300 + i, nen[i % 10], 0) for i in range(60)]
-kho = {}
-chay_canh_bao(lau, moc=300, kho=kho)
-bq = [m for m in _js.loads(kho.get('lap_lai_nhat_ky', '[]')) if 'bo_qua_tu' in m]
-kiem("bo qua vi nguoi may -> ghi ro khoang bi bo", bq and (bq[0]['bo_qua_tu'], bq[0]['bo_qua_den']) == (301, 319), bq)
-
-print("\n=== 19f. P249: KY CHEN VAO DB MUON VAN DUOC XET ===")
-# #102 (2-3-5, ra lai sau 2 ky so voi #100) chen vao SAU khi moc da toi #104.
-d9 = [(100,(2,3,5),10),(101,(1,1,4),6),(102,(2,3,5),10),(103,(6,6,6),18),(104,(1,2,4),7)]
-kho = {'lap_lai_last_draw': '104', 'lap_lai_da_xet': _js.dumps([100, 101, 103, 104])}
-tin, m = chay_canh_bao(d9, moc=None, kho=kho)
-kiem("ky #102 chen muon -> VAN bao 2-3-5", tin is not None and '2-3-5' in tin, tin)
-kiem("... #102 vao tap da xet", 102 in _js.loads(kho['lap_lai_da_xet']), kho.get('lap_lai_da_xet'))
-tin, m = chay_canh_bao(d9, moc=None, kho=kho)
-kiem("chay lai -> KHONG bao trung", tin is None, tin)
-kho = {'lap_lai_last_draw': '104', 'lap_lai_da_xet': _js.dumps([100, 101, 103, 104])}
-tin, m = chay_canh_bao(d9, moc=None, kho=kho, thua_cas=True)
-kiem("chi co ky chen muon + duong kia xu ly truoc -> KHONG gui trung", tin is None, tin)
-kho = {'lap_lai_last_draw': '102'}                     # chuyen tu co che moc cu
-tin, m = chay_canh_bao(d9, moc=None, kho=kho)
-kiem("chuyen tu moc cu: chi xet ky > moc", tin is None and 'lap_lai_da_xet' in kho, (tin, kho))
+print("\n=== 18. DIAGNOSE doi chieu theo nhat ky moi ===")
+dg = open('.github/workflows/diagnose.yml', encoding='utf-8').read()
+kiem("P245 chi doi chieu ky watcher da gui (da_xet)", "k[0] in da_xet" in dg and "da_xet = {m['den']" in dg)
+kiem("buoc 'Tin moi ky (P260)' bao tut hau / gui hong", 'Tin mỗi kỳ (P260)' in dg and 'nhat ky tut hau' in dg and 'lan gan nhat gui hong' in dg)
 
 print("\n" + "=" * 54)
 print(f"DAT: {DAT}   HONG: {HONG}")

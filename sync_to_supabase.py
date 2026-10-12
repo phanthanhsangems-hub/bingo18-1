@@ -26,6 +26,7 @@ import requests
 from bs4 import BeautifulSoup
 import psycopg2
 from vietlott_fetcher import fetch_from_github
+import lap_lai
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +57,6 @@ TRIGGER_SECRET = os.environ.get('TRIGGER_SECRET', '').strip()
 TELEGRAM_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT  = os.environ.get('TELEGRAM_CHAT_ID', '')
 # #18: chỉ announce khi conf >= ngưỡng (0.0 = luôn announce)
-ANNOUNCE_MIN_CONF = float(os.environ.get('ANNOUNCE_MIN_CONF', '0.0'))
 
 _tg_last_sent: float = 0.0
 _MIN_TG_INTERVAL = 2.5  # seconds minimum between any two Telegram sends
@@ -333,32 +333,149 @@ def trigger_prediction():
 #  TELEGRAM
 # ══════════════════════════════════════════════════════════════
 
-def send_telegram(draw: dict):
-    nums  = draw['numbers']
-    total = draw.get('total') or sum(nums)
-    cat   = 'NHO' if total <= 9 else ('HOA' if total <= 11 else 'LON')
-    nums_str = " - ".join(str(n) for n in nums)
+# ══════════════════════════════════════════════════════════════
+#  TIN MỖI KỲ (P260) — một tin duy nhất ngay khi có kỳ mới:
+#  kết quả · THẮNG/THUA · chuỗi W/L · 🔁 ra lại · 🔮 dự đoán kỳ tới
+#  Trước đây là 3 tin/kỳ (kết quả thô ở đây, THẮNG/THUA ở Cloud Run, nhắc 2 phút
+#  ở đây) + tin "bộ ra lại" riêng ~73% số kỳ. Gửi từ watcher vì nó biết kỳ mới
+#  sớm nhất và không phụ thuộc Cloud Run đang kẹt hay không.
+# ══════════════════════════════════════════════════════════════
+_SIZE_VI = {'NHO': 'NHỎ', 'HOA': 'HÒA', 'LON': 'LỚN'}
 
-    is_triple = len(set(nums)) == 1
-    if is_triple:
-        triple_val = nums[0]
-        header = f"🎰🎰🎰 TRIPLE {triple_val}-{triple_val}-{triple_val} 🎰🎰🎰\n"
-        note   = f"\n⚡ Xác suất: 1/36 (~2.78%) | Trung bình 36 kỳ mới ra 1 lần!"
+
+def _cat(nums) -> str:
+    s = sum(nums)
+    return 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
+
+
+def _mo_ta(nums) -> str:
+    """'2·3·6 (11 HÒA)'"""
+    return f"{'·'.join(str(n) for n in nums)} ({sum(nums)} {_SIZE_VI[_cat(nums)]})"
+
+
+def doc_du_lieu_tin_ky(conn, dn: int) -> dict:
+    """Mọi thứ tin kỳ #dn cần. SQL thuần (không jsonb) để test chạy được trên SQLite."""
+    cur = conn.cursor()
+    cur.execute("SELECT draw_number, numbers FROM draw_history WHERE draw_number <= %s "
+                "ORDER BY draw_number DESC LIMIT %s", (dn, lap_lai.LAPLAI_ALERT_GAP + 12))
+    ky = lap_lai.rows_to_ky(cur.fetchall())
+    # dự đoán cho kỳ này + 2 kỳ tới — mỗi kỳ lấy dòng mới nhất; hiện win_prob (đã
+    # hiệu chỉnh, P247), lùi về confidence nếu chưa có
+    cur.execute("SELECT draw_number, predicted_numbers, win_prob, confidence, id FROM predictions "
+                "WHERE draw_number BETWEEN %s AND %s ORDER BY draw_number, id DESC", (dn, dn + 2))
+    du = {}
+    for d, pn, wp, cf, _id in cur.fetchall():
+        if d not in du:
+            du[int(d)] = (lap_lai.parse_bo(pn), wp if wp is not None else cf)
+    # chuỗi W/L 7 kỳ trước: so SIZE dự đoán với SIZE thật — không phụ thuộc
+    # prediction_results (Cloud Run ghi, có thể chưa kịp khi DB chậm)
+    cur.execute("SELECT p.draw_number, p.predicted_numbers, d.numbers, p.id FROM predictions p "
+                "JOIN draw_history d ON d.draw_number = p.draw_number "
+                "WHERE p.draw_number < %s ORDER BY p.draw_number DESC, p.id DESC LIMIT 40", (dn,))
+    seen = {}
+    for d, pn, nums, _id in cur.fetchall():
+        if d in seen:
+            continue
+        a, b = lap_lai.parse_bo(pn), lap_lai.parse_bo(nums)
+        if len(a) == 3 and len(b) == 3:
+            seen[d] = (_cat(a) == _cat(b))
+        if len(seen) >= 7:
+            break
+    cur.close()
+    return {'ky': ky, 'du_doan': du, 'trail': [seen[d] for d in sorted(seen)]}
+
+
+def soan_tin_ky(dn: int, nums, dl: dict):
+    """Trả (HTML, info_ra_lai|None)."""
+    bo = tuple(sorted(int(x) for x in nums))
+    du = dl['du_doan']
+    pred = du.get(dn)
+    dong = []
+    if pred and len(pred[0]) == 3:
+        thang = (_cat(pred[0]) == _cat(bo))
+        dong.append(f"{'✅' if thang else '❌'} <b>KỲ #{dn} — {'THẮNG' if thang else 'THUA'}</b>")
+        dong.append(f"Kết quả <b>{_mo_ta(bo)}</b> · Dự đoán {_mo_ta(pred[0])} · Khớp {len(set(pred[0]) & set(bo))}/3")
+        trail = (dl.get('trail') or []) + [thang]
+        dong.append('  '.join('✅' if w else '❌' for w in trail[-8:]) + '  ← kỳ này')
     else:
-        header = ""
-        note   = ""
+        dong.append(f"🎯 <b>KỲ #{dn}</b> — không có dự đoán cho kỳ này")
+        dong.append(f"Kết quả <b>{_mo_ta(bo)}</b>")
+    if len(set(bo)) == 1:
+        dong.insert(0, f"🎰🎰🎰 <b>TRIPLE {bo[0]}-{bo[0]}-{bo[0]}</b> (1/36 ≈ 2,8%/kỳ) 🎰🎰🎰")
+    info = lap_lai.ra_lai_cua_ky(dl['ky'], dn)
+    if info:
+        dong.append(lap_lai.dong_ra_lai(info))
+    toi = [(d, du[d]) for d in (dn + 1, dn + 2) if d in du and len(du[d][0]) == 3]
+    if toi:
+        for i, (d, (pn, wp)) in enumerate(toi):
+            conf = f" · {float(wp) * 100:.0f}%" if wp is not None else ''
+            dong.append(f"{'🔮 Kỳ tới' if i == 0 else '     Kỳ sau'} <b>#{d}</b>: <b>{_mo_ta(pn)}</b>{conf}")
+    else:
+        dong.append("🔮 Kỳ tới: chưa có dự đoán (Cloud Run chưa trả)")
+    return '\n'.join(dong), info
 
-    msg = (
-        f"{header}"
-        f"🎯 Bingo18 #{draw['draw_id']}\n"
-        f"📅 {draw.get('draw_date','')}\n"
-        f"🔢 {nums_str}\n"
-        f"📊 Tổng {total} | {cat}"
-        f"{note}"
-    )
-    _tg_send(msg)
-    if is_triple:
-        logger.info(f"🎰 TRIPLE alert sent: {nums[0]}-{nums[0]}-{nums[0]}")
+
+def _ghi_nhat_ky_tin(conn, muc: list):
+    try:
+        cur = conn.cursor()
+        lap_lai.ghi_nhat_ky(cur, muc)
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.warning("nhat ky tin ky: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def gui_tin_ky(conn, draw: dict, nguon: str = 'watcher') -> bool:
+    """Gửi tin cho kỳ vừa chèn và ghi nhật ký (P245 đối chiếu). Soạn hỏng thì
+    vẫn gửi tin tối thiểu (kết quả) chứ không im lặng."""
+    dn = int(draw['draw_id'])
+    info = None
+    try:
+        dl = doc_du_lieu_tin_ky(conn, dn)
+        tin, info = soan_tin_ky(dn, draw['numbers'], dl)
+    except Exception as e:
+        logger.warning("tin ky #%s: khong soan duoc (%s) — gui tin toi thieu", dn, e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        nums = sorted(int(x) for x in draw['numbers'])
+        tin = f"🎯 <b>KỲ #{dn}</b>\nKết quả <b>{_mo_ta(nums)}</b>"
+    ok = _tg_html(tin)
+    _ghi_nhat_ky_tin(conn, [lap_lai.muc_nhat_ky(dn, info, ok, nguon)])
+    logger.info("Tin ky #%d %s%s", dn, 'gui OK' if ok else 'GUI HONG', ' (ra lai)' if info else '')
+    return ok
+
+
+def gui_tin_bat_kip(conn, draws: list):
+    """Watcher vừa gián đoạn, chèn nhiều kỳ một lúc: MỘT tin tóm tắt các kỳ cũ
+    (kèm 🔁 nếu ra lại, 🎰 nếu trip) + tin đầy đủ cho kỳ mới nhất."""
+    cu, moi = draws[:-1], draws[-1]
+    dong = [f"⏩ <b>Bắt kịp {len(draws)} kỳ</b> (watcher vừa gián đoạn)"]
+    muc = []
+    for d in cu:
+        dn = int(d['draw_id'])
+        nums = sorted(int(x) for x in d['numbers'])
+        info = None
+        try:
+            info = lap_lai.ra_lai_cua_ky(doc_du_lieu_tin_ky(conn, dn)['ky'], dn)
+        except Exception as e:
+            logger.debug("bat kip #%s: %s", dn, e)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        dong.append(f"#{dn}: {_mo_ta(nums)}"
+                    + (f" 🔁 sau {info['cach']} kỳ" if info else '')
+                    + (' 🎰' if len(set(nums)) == 1 else ''))
+        muc.append((dn, info))
+    ok = _tg_html('\n'.join(dong))
+    _ghi_nhat_ky_tin(conn, [lap_lai.muc_nhat_ky(dn, info, ok, 'watcher_bat_kip') for dn, info in muc])
+    gui_tin_ky(conn, moi)
 
 
 def check_and_alert_hot_combo(conn, draw: dict, alerted: dict):
@@ -428,30 +545,32 @@ def check_and_alert_hot_combo(conn, draw: dict, alerted: dict):
         logger.warning(f"Telegram hot_combo: {e}")
 
 
-def _tg_send(text: str):
-    """Gửi tin nhắn Telegram đơn giản (plain text)."""
+def _tg_send(text: str) -> bool:
+    """Gửi tin nhắn Telegram đơn giản (plain text). Trả True nếu Telegram nhận."""
     global _tg_last_sent
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
+        return False
     gap = _MIN_TG_INTERVAL - (time.time() - _tg_last_sent)
     if gap > 0:
         time.sleep(gap)
     try:
-        requests.post(
+        r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT, "text": text},
             timeout=5,
         )
         _tg_last_sent = time.time()
+        return bool(r.ok)
     except Exception as e:
         logger.warning(f"Telegram send: {e}")
+        return False
 
 
-def _tg_html(text: str):
-    """Gửi tin nhắn Telegram với HTML formatting."""
+def _tg_html(text: str) -> bool:
+    """Gửi tin nhắn Telegram với HTML formatting. Trả True nếu Telegram nhận."""
     global _tg_last_sent
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
+        return False
     gap = _MIN_TG_INTERVAL - (time.time() - _tg_last_sent)
     if gap > 0:
         time.sleep(gap)
@@ -462,66 +581,13 @@ def _tg_html(text: str):
             timeout=5,
         )
         _tg_last_sent = time.time()
-        if not r.ok:
-            import re as _re
-            _tg_send(_re.sub(r'<[^>]+>', '', text))
+        if r.ok:
+            return True
+        import re as _re
+        return _tg_send(_re.sub(r'<[^>]+>', '', text))
     except Exception as e:
         logger.warning(f"Telegram html: {e}")
-
-
-def announce_prediction(conn, draw_number: int):
-    """
-    #2 — Poll Supabase until prediction for next draw appears (max 24s), then send Telegram.
-    Replaces flat sleep(10): wakes as soon as Cloud Run writes the prediction.
-    """
-    row = None
-    for _ in range(12):
-        time.sleep(2)
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT predicted_numbers, model_name, confidence,
-                       CASE WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 9  THEN 'NHO'
-                            WHEN (SELECT SUM(v::int) FROM jsonb_array_elements_text(predicted_numbers::jsonb) v) <= 11 THEN 'HOA'
-                            ELSE 'LON' END AS pred_size
-                FROM predictions
-                WHERE draw_number = %s
-                ORDER BY prediction_time DESC
-                LIMIT 1
-            """, (draw_number + 1,))
-            row = cur.fetchone()
-            cur.close()
-            if row:
-                break
-        except Exception as _pe:
-            logger.debug("announce_prediction poll: %s", _pe)
-    try:
-        if not row:
-            logger.info("announce_prediction: chưa có dự đoán cho kỳ %d", draw_number + 1)
-            return
-        pred_nums, model_name, conf, pred_size = row
-        if isinstance(pred_nums, str):
-            import json as _json
-            pred_nums = _json.loads(pred_nums)
-        conf_val = float(conf) if conf else 0.0
-        # #18: smart announce — bỏ qua nếu confidence dưới ngưỡng
-        if ANNOUNCE_MIN_CONF > 0 and conf_val < ANNOUNCE_MIN_CONF:
-            logger.info("announce_prediction: skip kỳ #%d conf=%.2f < threshold=%.2f",
-                        draw_number + 1, conf_val, ANNOUNCE_MIN_CONF)
-            return
-        nums_str = " - ".join(str(n) for n in pred_nums)
-        conf_pct = f"{round(conf_val*100)}%" if conf else "?"
-        sz_emoji = {"NHO": "🟢", "HOA": "🟡", "LON": "🔴"}.get(pred_size, "⚪")
-        conf_star = "⭐" if conf_val >= 0.7 else "🔸" if conf_val >= 0.55 else ""
-        msg = (
-            f"🤖 Dự đoán kỳ #{draw_number + 1} {conf_star}\n"
-            f"🔢 {nums_str}\n"
-            f"{sz_emoji} {pred_size} · model: {model_name} · conf: {conf_pct}"
-        )
-        _tg_send(msg)
-        logger.info("📢 Announced prediction kỳ #%d: %s conf=%.2f", draw_number + 1, nums_str, conf_val)
-    except Exception as e:
-        logger.warning(f"announce_prediction: {e}")
+        return False
 
 
 def check_size_streak(conn, alerted_streak: dict):
@@ -1224,51 +1290,6 @@ def _run_sync_predictions(limit: int = 50, min_draw: int = 0):
         logger.warning("sync_predictions failed: %s", e)
 
 
-def _send_play_reminder(conn, draw_number: int):
-    """Gửi nhắc nhở ngắn ~2 phút trước kỳ draw_number."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT predicted_numbers, confidence
-            FROM predictions
-            WHERE draw_number = %s
-              AND model_name = 'majority_vote'
-            ORDER BY prediction_time DESC LIMIT 1
-        """, (draw_number,))
-        row = cur.fetchone()
-        cur.close()
-        if not row:
-            return
-        pred_nums, conf = row
-        if isinstance(pred_nums, str):
-            import json as _j
-            pred_nums = _j.loads(pred_nums)
-        nums = [int(x) for x in pred_nums]
-        s = sum(nums)
-        size = 'NHO' if s <= 9 else ('HOA' if s <= 11 else 'LON')
-        size_vi   = {'NHO': 'NHO', 'HOA': 'HOA', 'LON': 'LON'}[size]
-        size_icon = {'NHO': '\U0001f535', 'HOA': '\U0001f7e1', 'LON': '\U0001f534'}[size]
-        nums_str = ' · '.join(str(n) for n in nums)
-        conf_str = f"{float(conf)*100:.0f}%" if conf else "?"
-        msg = (
-            f"⏰  <b>SAP RA KY #{draw_number} — CON ~2 PHUT!</b>\n"
-            f"────────────────────\n"
-            f"     <b>{nums_str}</b>\n"
-            f"     Tong <b>{s}</b>  {size_icon}  <b>{size_vi}</b>   ·   {conf_str}\n"
-            f"────────────────────"
-        )
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT, "text": msg, "parse_mode": "HTML"},
-            timeout=5,
-        )
-        logger.info("Reminder sent for ky #%d: %s", draw_number, nums_str)
-    except Exception as e:
-        logger.warning("send_play_reminder: %s", e)
-
-
 def mode_watch():
     logger.info(f"👀  Watch mode: fetch mỗi {FETCH_INTERVAL}s, fill_gaps mỗi 600s")
 
@@ -1276,11 +1297,8 @@ def mode_watch():
     # Số kỳ Vietlott xác nhận không có — nhớ để khỏi hỏi lại mỗi vòng.
     vietlott_khong_co: set = set()
     MISSING_PRED_INTERVAL = 300  # 5 phút — #13 auto-retry missing predictions
-    REMINDER_DELAY        = 240  # 4 phút sau kỳ mới → nhắc nhở ~2 phút trước kỳ tiếp
     last_fill_time    = 0
     last_missing_time = 0
-    reminder_due_at: float = 0   # timestamp khi cần gửi reminder
-    reminder_draw:   int   = 0   # draw_number cần nhắc (kỳ sắp ra)
     hot_combo_alerted: dict = {}  # (date_vn, combo_key) → True; tự reset theo ngày
     streak_alerted:    dict = {}  # streak_key → True
     cold_alerted:      dict = {}  # num → last_alerted_draw_number
@@ -1300,6 +1318,7 @@ def mode_watch():
             if new:
                 inserted = 0
                 last_inserted_id = None
+                da_chen = []     # P260: gửi tin sau vòng lặp (1 tin/kỳ, hoặc 1 tin bắt kịp)
                 # P175: lô nhiều kỳ = watcher vừa hồi phục sau gián đoạn.
                 # Giãn ngược 6 phút/kỳ thay vì dồn hết vào một mốc.
                 _stamps = backdate_batch(datetime.now(timezone.utc), len(new))
@@ -1314,16 +1333,18 @@ def mode_watch():
                         inserted += 1
                         last_inserted_id = draw['draw_id']
                         logger.info(f"  ✅  #{draw['draw_id']} {draw['numbers']} tổng={draw.get('total')} {draw.get('size')} @ {now_utc}")
-                        send_telegram(draw)
+                        da_chen.append(draw)
                         check_and_alert_hot_combo(conn, draw, hot_combo_alerted)
 
                 # Trigger prediction + announce sau khi có kỳ mới (non-blocking)
                 if inserted > 0:
                     threading.Thread(target=trigger_prediction, daemon=True).start()
-                    # Đặt reminder 4 phút sau → nhắc nhở ~2 phút trước kỳ tiếp
-                    reminder_due_at = time.time() + REMINDER_DELAY
-                    reminder_draw   = last_inserted_id + 1
-                    logger.info("Reminder scheduled for ky #%d in %ds", reminder_draw, REMINDER_DELAY)
+                    # P260: tin mỗi kỳ — dự đoán kỳ tới đã có sẵn trong DB từ chu kỳ
+                    # trước (hệ thống dự đoán trước 2 kỳ), nên không cần chờ trigger.
+                    if len(da_chen) == 1:
+                        gui_tin_ky(conn, da_chen[0])
+                    else:
+                        gui_tin_bat_kip(conn, da_chen)
                     # #4: size streak alert
                     check_size_streak(conn, streak_alerted)
                     # #6: cold number alert
@@ -1385,12 +1406,6 @@ def mode_watch():
                 except Exception as e:
                     logger.warning("missing_pred check: %s", e)
                 last_missing_time = now
-
-            # Reminder: gửi nhắc nhở ~2 phút trước kỳ tiếp
-            if reminder_due_at > 0 and time.time() >= reminder_due_at and reminder_draw > 0:
-                _send_play_reminder(conn, reminder_draw)
-                reminder_due_at = 0
-                reminder_draw   = 0
 
         except KeyboardInterrupt:
             logger.info("Dừng (Ctrl+C)")

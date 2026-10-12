@@ -180,37 +180,6 @@ class TelegramBot:
         lines.append(SEP)
         return self._send("\n".join(lines))
 
-    # ── send_result ───────────────────────────────────────────────
-    def send_result(self, draw_number: int, actual_numbers: List[int],
-                    predicted: List[int], model_name: str,
-                    match_count: int, is_win: bool,
-                    is_win_sum: bool = False,
-                    recent_wl: List[bool] = None) -> bool:
-
-        actual_str    = "·".join(str(n) for n in actual_numbers)
-        predicted_str = "·".join(str(n) for n in predicted)
-        is_win_size   = self._size_cat(predicted) == self._size_cat(actual_numbers)
-        verdict       = "THẮNG" if is_win_size else "THUA"
-        icon          = "✅" if is_win_size else "❌"
-        size_icon     = "✅" if is_win_size else "❌"
-        sum_icon      = "✅" if is_win_sum  else "❌"
-
-        wl_line = ""
-        if recent_wl:
-            trail   = recent_wl[-7:] + [is_win_size]
-            wl_line = "\n" + "  ".join("✅" if w else "❌" for w in trail) + "  ← kỳ này"
-
-        text = (
-            f"{icon}  <b>KỲ #{draw_number}</b>  —  <b>{verdict}</b>\n"
-            f"{SEP}\n"
-            f"Kết quả:  <b>{actual_str}</b>  ({self._sum_cat(actual_numbers)})\n"
-            f"Dự đoán:  <b>{predicted_str}</b>  ({self._sum_cat(predicted)})\n"
-            f"Khớp <b>{match_count}/3</b>   ·   Size {size_icon}   ·   Tổng {sum_icon}"
-            f"{wl_line}\n"
-            f"{SEP}"
-        )
-        return self._send(text)
-
     # ── send_combo_stats ──────────────────────────────────────────
     def send_combo_stats(self, draws_df, top_n: int = 6) -> bool:
         from collections import Counter

@@ -23,7 +23,7 @@ for ten, dau in [("P94 gap alert", "PREDICTION GAP ALERT"), ("streak per-result 
 print("=== 2. prediction_service: giu ===")
 kiem("giu WIN STREAK 5/10/20", "WIN STREAK" in ps and "win_streak in (5, 10, 20, 30, 50)" in ps)
 kiem("giu THUA LIEN TIEP 5/8/10", "THUA {loss_streak} KỲ LIÊN TIẾP" in ps and "loss_streak in (5, 8, 10)" in ps)
-kiem("giu send_result moi ky (gop o P260)", "telegram.send_result(" in ps)
+kiem("P260: Cloud Run KHONG gui tin ket qua moi ky nua (watcher gui)", "send_result(" not in ps)
 kiem("WATCH van ghi log forward-test", "_alert_mgr.log(db, f'watch_{_lcombo}_{_t}'" in ps)
 kiem("khong con telegram.send_message trong khoi WATCH",
      "telegram.send_message" not in ps[ps.index("# Combo→triple forward"):ps.index("logger.info(\"Predicted draw #%d")])
@@ -31,7 +31,7 @@ kiem("khong con telegram.send_message trong khoi WATCH",
 print("=== 3. app.py ===")
 for ten in ("_check_lon_excess_alert", "_check_checkpoint_alert", "_check_triple_drought_alert", "_check_size_bias"):
     kiem(f"bo ham {ten}", f"def {ten}(" not in ap and f"{ten}(" not in ap, ten)
-for ten in ("_check_sync_lag", "_check_draw_gap_alert", "_check_vang_tong_alert", "_check_lap_lai_alert"):
+for ten in ("_check_sync_lag", "_check_draw_gap_alert", "_check_vang_tong_alert"):
     kiem(f"giu {ten}", f"def {ten}(" in ap)
 kiem("P0 health alert giu", "Bingo18 P0 Alert" in ap)
 kiem("daily-summary-evening khong gui nua (tra skipped)", "'skipped': 'P259" in ap)
