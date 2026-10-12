@@ -2340,28 +2340,8 @@ def run_prediction_cycle() -> dict:
             is_win     = (db.get_size_category(predicted) == db.get_size_category(actual_numbers)) if len(predicted) == 3 and len(actual_numbers) == 3 else False
             is_win_sum = (sum(int(x) for x in predicted) == sum(int(x) for x in actual_numbers)) if len(predicted) == 3 and len(actual_numbers) == 3 else False
 
-            # Fetch last 7 resolved results for W/L trail (exclude current draw)
-            recent_wl: list = []
-            try:
-                conn_wl = db.get_connection()
-                try:
-                    cur_wl  = conn_wl.cursor()
-                    ph_wl   = db._ph()
-                    cur_wl.execute(
-                        f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
-                        f"ORDER BY draw_number DESC LIMIT 7",
-                        (draw_number,)
-                    )
-                    recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
-                finally:
-                    conn_wl.close()
-            except Exception:
-                pass
-
-            # P169: tin dự đoán đã bỏ nên kết quả nào cũng gửi riêng
-            telegram.send_result(draw_number, actual_numbers, predicted,
-                                 model_name, match_count, is_win, is_win_sum, recent_wl)
-
+            # P260: tin kết quả mỗi kỳ do WATCHER gửi (1 tin: kết quả · THẮNG/THUA ·
+            # ra lại · dự đoán tới) — Cloud Run không gửi nữa.
             processed_results.append({
                 "draw_number": draw_number,
                 "match":       match_count,
@@ -2734,26 +2714,6 @@ def process_actual_result(draw_number: int, actual_numbers: List[int]) -> dict:
         match_count = len(set(predicted) & set(actual_numbers))
         is_win     = (db.get_size_category(predicted) == db.get_size_category(actual_numbers)) if len(predicted) == 3 and len(actual_numbers) == 3 else False
         is_win_sum = (sum(int(x) for x in predicted) == sum(int(x) for x in actual_numbers)) if len(predicted) == 3 and len(actual_numbers) == 3 else False
-
-        recent_wl: list = []
-        try:
-            conn_wl = db.get_connection()
-            try:
-                cur_wl  = conn_wl.cursor()
-                ph_wl   = db._ph()
-                cur_wl.execute(
-                    f"SELECT is_win FROM prediction_results WHERE draw_number < {ph_wl} "
-                    f"ORDER BY draw_number DESC LIMIT 7",
-                    (draw_number,)
-                )
-                recent_wl = [bool(r[0]) for r in reversed(cur_wl.fetchall())]
-            finally:
-                conn_wl.close()
-        except Exception:
-            pass
-
-        telegram.send_result(draw_number, actual_numbers, predicted,
-                             model_name, match_count, is_win, is_win_sum, recent_wl)
 
         result_info = {
             "predicted": predicted,

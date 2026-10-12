@@ -1178,10 +1178,9 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
-      - name: Cảnh báo "bộ ra lại" (P242) — lần chạy gần nhất
-        # Nguoi dung bao khong nhan duoc tin 'bo ra lai'. Ham canh bao tung nuot
-        # moi loi bang except: pass nen khong co dau vet. Nay no ghi lan chay gan
-        # nhat vao system_config; buoc nay doc ra.
+      - name: Tin mỗi kỳ (P260) — nhật ký watcher gửi
+        # P260: watcher gui 1 tin/ky (ket qua · THANG/THUA · ra lai · du doan toi)
+        # va ghi moi ky mot muc nhat ky. Buoc nay doc ra: gui hong / tut hau.
         continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
@@ -1196,20 +1195,23 @@ jobs:
           except Exception:
               print("LOI: /api/canh-bao/lap-lai khong tra JSON:", open('/tmp/cb.json').read()[:300])
               raise SystemExit(1)
-          print("=== CANH BAO 'BO RA LAI' ===")
+          print("=== TIN MOI KY (watcher gui, P260) — nhat ky ===")
+          nk = [m for m in d.get('nhat_ky', []) if isinstance(m, dict) and 'den' in m]
           print("  ky moi nhat trong DB :", d.get('ky_moi_nhat'))
-          print("  moc da xet           :", d.get('moc_da_xet'))
-          print("  lan chay gan nhat    :", json.dumps(d.get('lan_chay_gan_nhat'), ensure_ascii=False))
-          print("  lan GUI DUOC gan nhat:", json.dumps(d.get('gui_duoc_cuoi'), ensure_ascii=False))
-          print("  lan HONG gan nhat    :", json.dumps(d.get('hong_cuoi'), ensure_ascii=False))
-          if d.get('hong_cuoi'):
-              print("  >>> CO LAN GUI HONG:", d['hong_cuoi'].get('ket_qua'), d['hong_cuoi'].get('loi', ''))
-          tt = d.get('lan_chay_gan_nhat') or {}
-          if not tt:
-              print("  >>> CHUA CO LAN CHAY NAO duoc ghi — canh bao chua tung chay tu khi co P242.")
-          elif tt.get('ket_qua') in ('LOI', 'gui_telegram_THAT_BAI'):
-              print("  >>> CANH BAO DANG HONG:", tt.get('ket_qua'), tt.get('loi', ''))
-              open('/tmp/job_failed', 'a').write(f"canh bao bo ra lai: {tt.get('ket_qua')}\n")
+          print("  so muc nhat ky       :", len(nk))
+          print("  muc gan nhat         :", json.dumps(d.get('lan_chay_gan_nhat'), ensure_ascii=False))
+          print("  gui DUOC gan nhat    :", json.dumps(d.get('gui_duoc_cuoi'), ensure_ascii=False))
+          print("  gui HONG gan nhat    :", json.dumps(d.get('hong_cuoi'), ensure_ascii=False), "  tong hong:", d.get('so_hong'))
+          cuoi = d.get('lan_chay_gan_nhat') or {}
+          if not nk:
+              print("  >>> CHUA CO MUC NAO — watcher chua chay ban P260 (git pull + chay lai sync_to_supabase.py).")
+              open('/tmp/job_failed', 'a').write("tin moi ky: nhat ky trong (watcher chua cap nhat P260?)\n")
+          elif not cuoi.get('ok'):
+              print("  >>> TIN KY GAN NHAT GUI HONG")
+              open('/tmp/job_failed', 'a').write("tin moi ky: lan gan nhat gui hong\n")
+          if nk and d.get('ky_moi_nhat') and d['ky_moi_nhat'] - nk[-1]['den'] > 3:
+              print(f"  >>> NHAT KY DUNG O #{nk[-1]['den']} trong khi DB da toi #{d['ky_moi_nhat']} — watcher ban cu khong gui tin?")
+              open('/tmp/job_failed', 'a').write("tin moi ky: nhat ky tut hau so voi DB\n")
           PYEOF
           echo "canh_bao_lap_lai" >> /tmp/da_chay
 
@@ -1291,14 +1293,17 @@ jobs:
           print(f"=== NHAT KY DA BAO: {len(nk)} muc ===")
           for m in bq:
               print(f"  >>> BO QUA ky #{m['bo_qua_tu']}..#{m['bo_qua_den']} (nguoi may qua lau) luc {m['luc']}")
-          if not nk:
-              print("  (chua co — nhat ky moi bat dau tu P245; chay lai sau vai gio)")
+          if not [m for m in cb.get('nhat_ky', []) if isinstance(m, dict) and 'den' in m]:
+              print("  (chua co muc nao — watcher chua chay ban P260)")
           else:
               # Chi doi chieu ky co DU 160 ky phia truoc trong cua so 200 ky: ky dau
               # cua so khong thay lan ra truoc -> tung bao 'thua' gia (diagnose #51).
-              tu = max(min(m['den'] for m in nk), min(ky) + 160)
+              # P260: chi doi chieu ky watcher DA GUI tin (co muc nhat ky). Ky khong
+              # co muc = watcher khong chay luc do -> buoc 'Tin moi ky' va P251 bat.
+              da_xet = {m['den'] for m in cb.get('nhat_ky', []) if isinstance(m, dict) and 'den' in m}
+              tu = max(min(da_xet), min(ky) + 160)
               da = {(m['den'], m['combo']) for m in nk if m['den'] >= tu}
-              can = {k for k in le_ra if k[0] >= tu}
+              can = {k for k in le_ra if k[0] >= tu and k[0] in da_xet}
               thieu = sorted(can - da); thua = sorted(k for k in da - set(le_ra) if k[0] in ky)
               hong = [m for m in nk if not m['ok']]
               print(f"  tu ky #{tu}: le ra {len(can)}, da bao {len(da & can)}")
