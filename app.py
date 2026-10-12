@@ -3041,6 +3041,7 @@ def get_hot_cold_numbers():
 
 @app.route('/api/number_frequency')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=15)
 def get_number_frequency():
     try:
         # P188: today=1 → chỉ đếm các kỳ TRONG NGÀY HÔM NAY (giờ VN),
@@ -3082,6 +3083,7 @@ def get_number_frequency():
 
 @app.route('/api/draw-grid')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=15)
 def draw_grid():
     """P187: lưới chi tiết — mỗi hàng một kỳ, mỗi cột một số 1-6.
 
@@ -4008,6 +4010,7 @@ def sum_stats():
 
 @app.route('/api/cold-streaks')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=30)
 def cold_streaks():
     """Kỳ chưa ra cho số 1-6 và tất cả bộ 3 số (sorted combo)."""
     try:
@@ -6079,6 +6082,7 @@ def alert_log_api():
 
 @app.route('/api/watch-scoreboard')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=60)
 def watch_scoreboard():
     """P165: forward-test scoreboard cho các cầu combo→triple đang theo dõi.
 
@@ -8085,6 +8089,7 @@ def daily_summary():
 
 @app.route('/api/learning-status')
 @limiter.limit("30 per minute")
+@cache_resp(ttl=30)
 def learning_status():
     """Trả về trạng thái learning của hệ thống."""
     try:
@@ -12192,6 +12197,7 @@ def size_streak():
 
 @app.route('/api/wl-streak')
 @limiter.limit("60 per minute")
+@cache_resp(ttl=20)
 def wl_streak():
     """Win/Loss streak hiện tại từ majority_vote predictions."""
     try:
