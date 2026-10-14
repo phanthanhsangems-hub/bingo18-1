@@ -2286,6 +2286,47 @@ def _run_majority_vote(df, next_draw: int, hybrid, selector, fwbr, ensemble,
 
 
 # ── P85: Auto-explain helper ─────────────────────────────────
+def _chan_hoa(numbers, vote_info, banned: set):
+    """P262: cổng cuối — KHÔNG BAO GIỜ đưa ra dự đoán HÒA (tổng 10-11).
+
+    P142/P149 chặn HÒA ở từng tầng (vote, SizePredictor) nhưng vẫn lọt 17/1000
+    kỳ (1,7%) qua các đường khác (forced/ensemble, hot-adjust, ban-list,
+    fallback). Mỗi lần lọt là đổi 37,5% lấy 25%. Nay chặn một lần ở ngay trước
+    khi ghi DB, cho mọi mode.
+
+    Đích: SIZE đa số của vote nếu là NHỎ/LỚN; không thì phía gần hơn
+    (10 -> NHỎ 9, 11 -> LỚN 12). Đổi MỘT số đi ±1 là đủ (tổng chỉ cần lệch 1-2),
+    tránh bộ bị cấm; không có thì lấy bộ không cấm đầu tiên ở phía đích.
+    Trả (numbers, ghi_chu|None)."""
+    nums = [int(x) for x in numbers]
+    tong = sum(nums)
+    if tong <= 9 or tong >= 12 or len(nums) != 3:
+        return nums, None
+    dich = (vote_info or {}).get('majority_size')
+    if dich not in ('NHO', 'LON'):
+        dich = 'NHO' if tong == 10 else 'LON'
+    muc = (lambda t: t <= 9) if dich == 'NHO' else (lambda t: t >= 12)
+    ung_vien = []
+    for buoc in (1, 2):
+        for i in range(3):
+            for d in (-buoc, buoc):
+                v = nums[i] + d
+                if not 1 <= v <= 6:
+                    continue
+                c = sorted(nums[:i] + [v] + nums[i + 1:])
+                if muc(sum(c)) and tuple(c) not in banned and c not in ung_vien:
+                    ung_vien.append(c)
+        if ung_vien:
+            break
+    if not ung_vien:
+        ung_vien = [list(c) for c in ComboColdModel.ALL_COMBOS
+                    if muc(sum(c)) and tuple(c) not in banned]
+    if not ung_vien:
+        return nums, None
+    moi = ung_vien[0]
+    return moi, f"HOA_chan:{'-'.join(map(str, sorted(nums)))}->{'-'.join(map(str, moi))}({dich})"
+
+
 # ── Main: 1 chu kỳ dự đoán ───────────────────────────────────
 def run_prediction_cycle() -> dict:
     import time as _time
@@ -2595,6 +2636,13 @@ def run_prediction_cycle() -> dict:
 
     # Hot-Adjust: khi loss streak >= 3, điều chỉnh SIZE theo hot numbers
     numbers, _hot_adjust_note = _hot_adjust_size(numbers, df, _current_loss_streak, banned)
+
+    # P262: cổng cuối — không bao giờ ghi dự đoán HÒA, cho mọi mode
+    numbers, _hoa_note = _chan_hoa(numbers, _vote_info, banned)
+    if _hoa_note:
+        logger.info("P262 %s", _hoa_note)
+        if _vote_info is not None:
+            _vote_info['hoa_chan'] = _hoa_note
 
     # P148: log final SIZE after SizePredictor for post-checkpoint flip analysis
     if _vote_info is not None:
