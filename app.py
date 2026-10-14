@@ -12062,6 +12062,36 @@ def tong_vang_lau_nhat():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/cau/kiem-chung')
+@limiter.limit("5 per minute")
+def cau_kiem_chung_api():
+    """P265: kiểm chứng các cầu (kích hoạt → đích) trên TOÀN lịch sử. Chỉ đọc.
+    Cần X-Trigger-Secret vì tốn một lần quét toàn bảng."""
+    if not _trigger_authorized():
+        return jsonify({'error': 'unauthorized'}), 403
+    try:
+        import cau_kiem_chung as _ckc
+        from prediction_service import _WATCH_PAIRS as _cau
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT draw_number, numbers FROM draw_history "
+                        "WHERE numbers IS NOT NULL ORDER BY draw_number")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+        ky = []
+        for dn, raw in rows:
+            bo = lap_lai.parse_bo(raw)
+            if len(bo) == 3:
+                ky.append((int(dn), bo))
+        out = _ckc.kiem_chung(ky, _cau)
+        out['tong_ky'] = len(ky)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/canh-bao/lap-lai')
 @limiter.limit("30 per minute")
 def canh_bao_lap_lai_trang_thai():
