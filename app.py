@@ -6483,6 +6483,26 @@ def reset_model_config():
         return jsonify({"error": str(e)}), 500
 
 
+def _danh_gia_wr(wins: int, total: int, moc: float = 0.375) -> str:
+    """P264: tỷ lệ thắng có khác mức ngẫu nhiên (37,5%) không — khoảng Wilson 95%."""
+    if total <= 0:
+        return "chưa đủ kỳ để đánh giá"
+    import math
+    p = wins / total
+    z = 1.96
+    den = 1 + z * z / total
+    tam = (p + z * z / (2 * total)) / den
+    nua = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / den
+    lo, hi = tam - nua, tam + nua
+    if lo > moc:
+        ket = "VƯỢT mức ngẫu nhiên"
+    elif hi < moc:
+        ket = "DƯỚI mức ngẫu nhiên"
+    else:
+        ket = "KHÔNG khác mức ngẫu nhiên"
+    return f"{p*100:.1f}% (95%: {lo*100:.1f}–{hi*100:.1f}%) — {ket} (mức 37,5%)"
+
+
 @app.route('/api/weekly-summary', methods=['GET', 'POST'])
 @limiter.limit("5 per minute")
 def weekly_summary():
@@ -6552,6 +6572,8 @@ def weekly_summary():
             return jsonify({"status": "empty", "message": "Không có dữ liệu 7 ngày qua."})
 
         week_icon = "🏆" if wr >= 0.42 else ("✅" if wr >= 0.37 else "⚠️")
+        # P264: đối chiếu với mức ngẫu nhiên — mọi tuần đều phải có dòng này
+        danh_gia = _danh_gia_wr(wins, total)
         msg = (
             f"{week_icon} <b>TỔNG KẾT TUẦN {now_vn.strftime('%d/%m/%Y')}</b>\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
@@ -6559,6 +6581,7 @@ def weekly_summary():
             f"✅ Thắng SIZE: <b>{wins}</b>  ({wr*100:.1f}%)\n"
             f"🎯 Đúng tổng: <b>{sum_wins}</b>  ({sum_wr*100:.1f}%)\n"
             f"❌ Thua: <b>{losses}</b>\n"
+            f"📐 So với ngẫu nhiên: {danh_gia}\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"🌟 Ngày tốt nhất: {best_day}\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
