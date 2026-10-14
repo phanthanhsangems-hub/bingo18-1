@@ -1305,7 +1305,7 @@ jobs:
               da = {(m['den'], m['combo']) for m in nk if m['den'] >= tu}
               can = {k for k in le_ra if k[0] >= tu and k[0] in da_xet}
               thieu = sorted(can - da); thua = sorted(k for k in da - set(le_ra) if k[0] in ky)
-              hong = [m for m in nk if not m['ok']]
+              hong = [m for m in nk if not m['ok'] and m['den'] >= tu]   # chi trong cua so doi chieu
               print(f"  tu ky #{tu}: le ra {len(can)}, da bao {len(da & can)}")
               print(f"  THIEU (le ra bao ma khong co): {thieu or 'khong'}")
               print(f"  THUA  (bao ma khong dung)    : {thua or 'khong'}")
