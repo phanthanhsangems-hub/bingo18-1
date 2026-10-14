@@ -662,3 +662,14 @@ html.hep-640 #tn-table th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
 html.hep-640 #tn-table td{padding:8px 3px;font-size:12.5px}
 html.hep-640 #tn-table .mini-die{width:17px;height:17px;font-size:10px}
 .tn-them{margin:10px 0 0}
+
+/* P266: bảng bật/tắt thẻ nhanh ở góc trên phải */
+.the-nhanh{
+  position:fixed; top:64px; right:12px; z-index:60;
+  width:min(340px, calc(100vw - 24px)); max-height:70vh; overflow:auto;
+  background:var(--card); border:1px solid var(--line); border-radius:16px;
+  box-shadow:0 12px 40px rgba(31,27,23,.18); padding:12px 14px;
+}
+.the-nhanh-tieu{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px}
+.the-nhanh .cd-luoi{grid-template-columns:1fr; gap:4px 0; margin:6px 0}
+.the-nhanh-ghichu{margin:6px 0 0; font-size:11px}
