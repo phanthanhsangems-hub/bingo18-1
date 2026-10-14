@@ -1220,34 +1220,6 @@ function theNhanhKhoiTao() {
   });
 }
 
-async function cdKhoiTao() {
-  // 1) Dựng ngay từ bộ nhớ đệm — không chớp.
-  cdApDung(cdDemDoc());
-
-  const mo = $('cd-mo'), than = $('cd-than');
-  if (mo && than) {
-    mo.onclick = () => {
-      const hien = than.hidden;
-      than.hidden = !hien;
-      mo.setAttribute('aria-expanded', String(hien));
-      if (hien) cdDungBang();
-    };
-  }
-  const rs = $('cd-reset');
-  if (rs) rs.onclick = () => { cdLuu([]); cdDungBang(); };
-
-  // 2) Đối chiếu với máy chủ. Máy chủ thắng.
-  try {
-    const d = await J('/api/cai-dat/the');
-    const an = Array.isArray(d.an) ? d.an.filter(k => k in CD_TEN) : [];
-    cdDemGhi(an);
-    cdApDung(an);
-    if (than && !than.hidden) cdDungBang();
-  } catch (e) {
-    /* mất mạng -> giữ nguyên bộ nhớ đệm, thẻ vẫn dùng được */
-  }
-}
-
 // ── P233: phóng to / thu nhỏ ────────────────────────────────
 // Ba thứ người dùng yêu cầu, ba cơ chế riêng:
 //   1. cỡ chữ CẢ TRANG   -> zoom .wrap
