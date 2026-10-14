@@ -1178,6 +1178,32 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Cầu có thật không — so với các lần đích ra không có cầu (P265)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 120 -H "$H" "$BASE/api/cau/kiem-chung?cb=$TS" > /tmp/cau.json
+          python3 - <<'PYEOF'
+          import json
+          try:
+              d = json.load(open('/tmp/cau.json'))
+          except Exception:
+              print("LOI: /api/cau/kiem-chung khong tra JSON:", open('/tmp/cau.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print("LOI:", d['error']); raise SystemExit(0)
+          print(f"=== CAU KIEM CHUNG tren {d['tong_ky']} ky (nen 1/36 = {d['nen_1_36']}) ===")
+          print("  kich hoat -> dich : n_kich  trung_cau  ty_le_cau  khoang95        ty_le_khong_cau  co_y_nghia")
+          for c in d['cap']:
+              print(f"  {c['kich_hoat']} -> {c['dich']}   {c['n_kich_hoat']:>6}  {c['trung_cau']:>8}  {c['ty_le_cau']:>8.2%}  {c['khoang_95'][0]:.2%}-{c['khoang_95'][1]:.2%}  {c['ty_le_khong_cau']:>10.2%}  {c['co_y_nghia']}")
+          print()
+          print("=== TUNG DICH: co cau dung truoc vs khong ===")
+          for dich, g in sorted(d['tong_hop'].items()):
+              print(f"  {dich}: ra {g['tong_lan_dich']} lan (ty le nen {g['ty_le_nen']:.2%}) — sau cau {g['sau_cau']}, KHONG cau {g['khong_cau']}")
+          PYEOF
+
       - name: Tin mỗi kỳ (P260) — nhật ký watcher gửi
         # P260: watcher gui 1 tin/ky (ket qua · THANG/THUA · ra lai · du doan toi)
         # va ghi moi ky mot muc nhat ky. Buoc nay doc ra: gui hong / tut hau.
