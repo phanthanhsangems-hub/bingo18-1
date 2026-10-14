@@ -1183,17 +1183,40 @@ async function cdLuu(an) {
 }
 
 function cdDungBang() {
-  const l = $('cd-luoi');
-  if (!l) return;
-  l.innerHTML = Object.entries(CD_TEN).map(([k, ten]) =>
-    `<label class="cd-o"><input type="checkbox" data-cd="${k}"${
-      _cdAn.includes(k) ? '' : ' checked'}><span>${esc(ten)}</span></label>`).join('');
-  l.querySelectorAll('input[data-cd]').forEach(o => {
-    o.onchange = () => {
-      const an = [...l.querySelectorAll('input[data-cd]')]
-        .filter(x => !x.checked).map(x => x.dataset.cd);
-      cdLuu(an);
-    };
+  // P266: cùng một danh sách vẽ ở cả hai nơi (bảng chọn nhanh góc trên và
+  // phần Cài đặt ở cuối trang). Mỗi bên có hàng riêng nhưng dữ liệu chung.
+  document.querySelectorAll('.cd-luoi-dung').forEach(l => {
+    l.innerHTML = Object.entries(CD_TEN).map(([k, ten]) =>
+      `<label class="cd-o"><input type="checkbox" data-cd="${k}"${
+        _cdAn.includes(k) ? '' : ' checked'}><span>${esc(ten)}</span></label>`).join('');
+    l.querySelectorAll('input[data-cd]').forEach(o => {
+      o.onchange = () => {
+        const an = [...document.querySelectorAll('.cd-luoi-dung input[data-cd]')]
+          .filter(x => !x.checked).map(x => x.dataset.cd);
+        cdLuu(an);
+      };
+    });
+  });
+}
+
+// P266: bảng bật/tắt thẻ nhanh ở góc trên — mở/đóng, Esc hoặc bấm ra ngoài để đóng.
+function theNhanhMo(mo) {
+  const bang = $('the-nhanh'), nut = $('the-nhanh-mo');
+  if (!bang || !nut) return;
+  bang.hidden = !mo;
+  nut.setAttribute('aria-expanded', String(mo));
+  if (mo) cdDungBang();
+}
+function theNhanhKhoiTao() {
+  const nut = $('the-nhanh-mo'), dong = $('the-nhanh-dong'), bang = $('the-nhanh');
+  if (!nut || !bang) return;
+  nut.onclick = () => theNhanhMo(bang.hidden);
+  if (dong) dong.onclick = () => theNhanhMo(false);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !bang.hidden) theNhanhMo(false); });
+  document.addEventListener('click', e => {
+    if (bang.hidden) return;
+    if (bang.contains(e.target) || nut.contains(e.target)) return;
+    theNhanhMo(false);
   });
 }
 
@@ -1347,6 +1370,7 @@ async function cdKhoiTao() {
   cdApDung(cdDemDoc());
   phongApDung(phongDoc());
   theToGan();
+  theNhanhKhoiTao();   // P266
 
   const mo = $('cd-mo'), than = $('cd-than');
   if (mo && than) {
