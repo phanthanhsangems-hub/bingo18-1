@@ -15,7 +15,7 @@ Cách dùng:
   python sync_to_supabase.py --mode gaps    # bù các kỳ THIẾU Ở GIỮA
   python sync_to_supabase.py --mode watch   # chạy liên tục mỗi 60s
 """
-import argparse, logging, os, sys, time, re, threading, subprocess
+import argparse, json, logging, os, sys, time, re, threading, subprocess
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -429,6 +429,61 @@ def _ghi_nhat_ky_tin(conn, muc: list):
             pass
 
 
+# ══════════════════════════════════════════════════════════════
+#  HÀNG ĐỢI GỬI LẠI (P263): tin Telegram gửi hỏng được lưu xuống đĩa và thử lại
+#  mỗi vòng watcher, tối đa _TIN_CHO_MAX_LAN lần. Trước đây tin hỏng là mất hẳn
+#  (~12 tin/ngày khi mạng chập chờn).
+# ══════════════════════════════════════════════════════════════
+_TIN_CHO_FILE    = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tin_cho_gui.json')
+_TIN_CHO_MAX_LAN = 5
+
+
+def _doc_tin_cho() -> list:
+    try:
+        with open(_TIN_CHO_FILE, encoding='utf-8') as f:
+            v = json.load(f)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _luu_tin_cho(hang: list):
+    try:
+        tmp = _TIN_CHO_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(hang, f, ensure_ascii=False)
+        os.replace(tmp, _TIN_CHO_FILE)
+    except Exception as e:
+        logger.warning("khong luu duoc hang doi tin: %s", e)
+
+
+def _xep_tin_cho(text: str, dn: int, info, nguon: str):
+    hang = _doc_tin_cho()
+    hang.append({'text': text, 'dn': dn, 'info': info, 'nguon': nguon, 'lan': 1})
+    _luu_tin_cho(hang)
+
+
+def thu_gui_lai_tin_cho(conn=None) -> int:
+    """Thử gửi lại các tin trong hàng đợi. Trả số tin gửi được."""
+    hang = _doc_tin_cho()
+    if not hang:
+        return 0
+    con_lai, da_gui = [], 0
+    for m in hang:
+        if _tg_html(m['text']):
+            da_gui += 1
+            if conn is not None:
+                _ghi_nhat_ky_tin(conn, [lap_lai.muc_nhat_ky(m['dn'], m.get('info'), True, 'retry')])
+            logger.info("gui lai tin ky #%s thanh cong (lan %d)", m['dn'], m['lan'] + 1)
+        elif m['lan'] + 1 < _TIN_CHO_MAX_LAN:
+            m['lan'] += 1
+            con_lai.append(m)
+        else:
+            logger.error("bo tin ky #%s sau %d lan gui hong", m['dn'], _TIN_CHO_MAX_LAN)
+    _luu_tin_cho(con_lai)
+    return da_gui
+
+
 def gui_tin_ky(conn, draw: dict, nguon: str = 'watcher') -> bool:
     """Gửi tin cho kỳ vừa chèn và ghi nhật ký (P245 đối chiếu). Soạn hỏng thì
     vẫn gửi tin tối thiểu (kết quả) chứ không im lặng."""
@@ -446,6 +501,8 @@ def gui_tin_ky(conn, draw: dict, nguon: str = 'watcher') -> bool:
         nums = sorted(int(x) for x in draw['numbers'])
         tin = f"🎯 <b>KỲ #{dn}</b>\nKết quả <b>{_mo_ta(nums)}</b>"
     ok = _tg_html(tin)
+    if not ok:
+        _xep_tin_cho(tin, dn, info, nguon)
     _ghi_nhat_ky_tin(conn, [lap_lai.muc_nhat_ky(dn, info, ok, nguon)])
     logger.info("Tin ky #%d %s%s", dn, 'gui OK' if ok else 'GUI HONG', ' (ra lai)' if info else '')
     return ok
@@ -474,6 +531,8 @@ def gui_tin_bat_kip(conn, draws: list):
                     + (' 🎰' if len(set(nums)) == 1 else ''))
         muc.append((dn, info))
     ok = _tg_html('\n'.join(dong))
+    if not ok:
+        _xep_tin_cho('\n'.join(dong), int(moi['draw_id']), None, 'watcher_bat_kip')
     _ghi_nhat_ky_tin(conn, [lap_lai.muc_nhat_ky(dn, info, ok, 'watcher_bat_kip') for dn, info in muc])
     gui_tin_ky(conn, moi)
 
@@ -1314,6 +1373,8 @@ def mode_watch():
                 _loi_xt = 0
             last_id = get_last_draw_id(conn)
             new     = get_new_since(last_id)
+
+            thu_gui_lai_tin_cho(conn)   # P263: tin hỏng từ vòng trước
 
             if new:
                 inserted = 0

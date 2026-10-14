@@ -60,3 +60,4 @@ temp_*.py
 screenshots_auto/
 watcher_restart.log
 !scripts/start_watcher.bat
+tin_cho_gui.json
