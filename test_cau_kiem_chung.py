@@ -21,7 +21,7 @@ kiem("khong co cau: dich 111 ra sau cac ky khac (#10 khong sau 123)",
      r['tong_hop']['111']['khong_cau'] == 1, r['tong_hop'])
 kiem("tong lan 111 ra = 2 (#2 va #10)", r['tong_hop']['111']['tong_lan_dich'] == 2, r['tong_hop'])
 kiem("sau cau = 1", r['tong_hop']['111']['sau_cau'] == 1)
-kiem("1/36 la nen", r['nen_1_36'] == 0.0278)
+kiem("nen cua mot dich cu the = 1/216", r['nen_1_216'] == round(1/216, 5))
 kiem("it mau -> khong co y nghia", c['co_y_nghia'] is False)
 # khoang Wilson
 lo, hi = C.wilson(0, 0)

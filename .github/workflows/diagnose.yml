@@ -1194,7 +1194,7 @@ jobs:
               print("LOI: /api/cau/kiem-chung khong tra JSON:", open('/tmp/cau.json').read()[:300]); raise SystemExit(0)
           if 'error' in d:
               print("LOI:", d['error']); raise SystemExit(0)
-          print(f"=== CAU KIEM CHUNG tren {d['tong_ky']} ky (nen 1/36 = {d['nen_1_36']}) ===")
+          print(f"=== CAU KIEM CHUNG tren {d['tong_ky']} ky (nen cua mot dich = 1/216 = {d['nen_1_216']}) ===")
           print("  kich hoat -> dich : n_kich  trung_cau  ty_le_cau  khoang95        ty_le_khong_cau  co_y_nghia")
           for c in d['cap']:
               print(f"  {c['kich_hoat']} -> {c['dich']}   {c['n_kich_hoat']:>6}  {c['trung_cau']:>8}  {c['ty_le_cau']:>8.2%}  {c['khoang_95'][0]:.2%}-{c['khoang_95'][1]:.2%}  {c['ty_le_khong_cau']:>10.2%}  {c['co_y_nghia']}")
