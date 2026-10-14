@@ -6,7 +6,8 @@ Hàm thuần: nhận [(kỳ, bộ_sắp_xếp)] cũ→mới, không đụng DB.
 """
 import math
 
-NEN = 1 / 36   # xác suất một kỳ là trip bất kỳ (6 trip / 216 bộ có thứ tự)
+NEN_TRIP = 1 / 36   # xác suất một kỳ là trip BẤT KỲ (6 trip / 216 bộ)
+NEN_DICH = 1 / 216  # xác suất MỘT trip cụ thể (111, 222...) ra trong một kỳ
 
 
 def wilson(k: int, n: int, z: float = 1.96):
@@ -69,8 +70,9 @@ def kiem_chung(ky: list, cau: dict) -> dict:
                 'ty_le_khong_cau': round(ty_nen, 4),
                 'lan_dich_ngoai_cau': len(ngoai_cau),
                 'tong_lan_dich': len(tat_ca_dich),
-                # chỉ kết luận khi đủ mẫu (>=30 lần kích hoạt) VÀ khoảng 95% nằm hẳn trên nền 1/36
-                'co_y_nghia': n_kich >= 30 and lo > 1 / 36,
+                # chỉ kết luận khi đủ mẫu (>=30 lần kích hoạt) VÀ cận dưới 95% của
+                # P(đích | kích hoạt) nằm trên P(đích | không kích hoạt) — so với đích, không so với 1/36
+                'co_y_nghia': n_kich >= 30 and lo > ty_nen,
             }
             cap.append(row)
             g = theo_dich.setdefault(dich, {'tong_lan_dich': len(tat_ca_dich), 'sau_kich_hoat_cau': set()})
@@ -84,5 +86,5 @@ def kiem_chung(ky: list, cau: dict) -> dict:
         sau = len(g['sau_kich_hoat_cau'])
         tong_hop[dich] = {'tong_lan_dich': tong, 'sau_cau': sau, 'khong_cau': tong - sau,
                           'ty_le_nen': round(tong / tong_ky_co_truoc, 4) if tong_ky_co_truoc else 0.0}
-    return {'so_ky_co_truoc': tong_ky_co_truoc, 'nen_1_36': round(NEN, 4), 'cap': cap,
+    return {'so_ky_co_truoc': tong_ky_co_truoc, 'nen_1_216': round(NEN_DICH, 5), 'cap': cap,
             'tong_hop': tong_hop}
