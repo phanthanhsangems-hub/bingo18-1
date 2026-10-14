@@ -58,3 +58,5 @@ Thumbs.db
 # File tạm khi dò lỗi — máy người dùng đang có 5 cái temp_*.py chưa commit
 temp_*.py
 screenshots_auto/
+watcher_restart.log
+!scripts/start_watcher.bat
