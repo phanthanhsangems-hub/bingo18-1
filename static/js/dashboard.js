@@ -83,7 +83,7 @@ async function loadHero() {
   const conf = (p.confidence || 0) * 100;
   $('conf-val').innerHTML = `${conf.toFixed(1)}<small> %</small>`;
   $('conf-fill').style.width = Math.min(conf, 100) + '%';
-  const delta = conf - 35;
+  const delta = conf - 37.5;   // mức ngẫu nhiên đúng cho SIZE (3 viên, NHỎ/LỚN ~37,5%)
   $('conf-delta').textContent = (delta >= 0 ? '+' : '') + delta.toFixed(1) + ' điểm';
   $('conf-delta').style.color = delta >= 0 ? 'var(--win)' : 'var(--loss)';
 

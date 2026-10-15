@@ -673,3 +673,6 @@ html.hep-640 #tn-table .mini-die{width:17px;height:17px;font-size:10px}
 .the-nhanh-tieu{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px}
 .the-nhanh .cd-luoi{grid-template-columns:1fr; gap:4px 0; margin:6px 0}
 .the-nhanh-ghichu{margin:6px 0 0; font-size:11px}
+
+/* P268: ghi chú rủi ro trên thẻ dự đoán */
+.rui-ro{margin:10px 0 0; font-size:12px; color:var(--muted)}
