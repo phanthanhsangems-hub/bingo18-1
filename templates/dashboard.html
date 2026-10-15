@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p266">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p268">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -78,6 +78,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
         <span class="meta-chip" id="pred-probs" hidden></span>
         <span class="meta-chip" id="last-result" hidden></span>
       </div>
+      <p class="sub rui-ro">Kết quả Bingo18 là ngẫu nhiên: không dự đoán nào thắng ổn định hơn mức ngẫu nhiên (~37,5% với SIZE). Dùng dự đoán để theo dõi, không phải căn cứ đặt cược.</p>
     </div>
 
     <div class="hero-side">
@@ -86,9 +87,9 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
         <div class="conf-val num" id="conf-val">--<small> %</small></div>
         <div class="meter">
           <div class="meter-fill" id="conf-fill"></div>
-          <div class="meter-base" title="Baseline 35%"></div>
+          <div class="meter-base" title="Mức ngẫu nhiên 37,5%"></div>
         </div>
-        <div class="meter-note"><span>Baseline 35%</span><span id="conf-delta"></span></div>
+        <div class="meter-note"><span>Ngẫu nhiên 37,5%</span><span id="conf-delta"></span></div>
       </div>
       <div class="bet-card" id="bet-card">
         <div class="side-label">Gợi ý cược <span id="bet-badge" class="bet-badge">--</span></div>
@@ -164,7 +165,7 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
   <div class="grid2" data-nhom="1">
     <div class="card" data-the="winrate">
       <h2>Win rate 7 ngày</h2>
-      <p class="sub">Tỷ lệ đoán đúng theo ngày · nét đứt = baseline 35%</p>
+      <p class="sub">Tỷ lệ đoán đúng theo ngày · nét đứt = mức ngẫu nhiên 37,5%</p>
       <div class="chart-wrap" id="wr-chart"><span class="skeleton">Đang tải...</span></div>
     </div>
     <div class="card" data-the="size-today">
@@ -363,6 +364,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p267"></script>
+<script src="/static/js/dashboard.js?v=p268"></script>
 </body>
 </html>
