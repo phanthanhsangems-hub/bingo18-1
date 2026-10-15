@@ -1331,11 +1331,17 @@ jobs:
               da = {(m['den'], m['combo']) for m in nk if m['den'] >= tu}
               can = {k for k in le_ra if k[0] >= tu and k[0] in da_xet}
               thieu = sorted(can - da); thua = sorted(k for k in da - set(le_ra) if k[0] in ky)
-              hong = [m for m in nk if not m['ok'] and m['den'] >= tu]   # chi trong cua so doi chieu
+              # P269: tin hong chi tinh la hong khi KHONG co ban gui lai thanh cong cho cung ky
+              # (hang doi gui lai, P263 ghi them muc ok=True nguon=retry)
+              tat_ca = [m for m in cb.get('nhat_ky', []) if isinstance(m, dict) and 'den' in m]
+              da_gui_duoc = {m['den'] for m in tat_ca if m.get('ok')}
+              hong = [m for m in tat_ca if not m['ok'] and m['den'] >= tu and m['den'] not in da_gui_duoc]
+              hong_da_gui_lai = len([m for m in tat_ca if not m['ok'] and m['den'] >= tu and m['den'] in da_gui_duoc])
               print(f"  tu ky #{tu}: le ra {len(can)}, da bao {len(da & can)}")
               print(f"  THIEU (le ra bao ma khong co): {thieu or 'khong'}")
               print(f"  THUA  (bao ma khong dung)    : {thua or 'khong'}")
               print(f"  gui Telegram HONG            : {len(hong)}")
+              print(f"  gui hong nhung DA GUI LAI    : {hong_da_gui_lai}")
               # P252: moi muc THIEU -> in du lieu de biet vi sao (khong doan)
               for (dn0, c0) in thieu:
                   tr = next((gg for gg in range(1, 161) if ky.get(dn0 - gg, (None,))[0] == tuple(map(int, c0))), None)
