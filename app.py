@@ -12092,6 +12092,39 @@ def cau_kiem_chung_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ngay-trip/kiem-chung')
+@limiter.limit("5 per minute")
+def ngay_trip_kiem_chung_api():
+    """P270: ngày có trip thì số trip nóng hay lạnh (đếm không tính kỳ trip). Chỉ đọc."""
+    if not _trigger_authorized():
+        return jsonify({'error': 'unauthorized'}), 403
+    try:
+        import ngay_trip as _nt
+        from datetime import datetime as _dt, timedelta as _td
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT draw_number, numbers, draw_time FROM draw_history "
+                        "WHERE numbers IS NOT NULL ORDER BY draw_number")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+        out = []
+        for dn, raw, tm in rows:
+            bo = lap_lai.parse_bo(raw)
+            if len(bo) != 3:
+                continue
+            if isinstance(tm, str):
+                tm = _dt.strptime(tm[:19], '%Y-%m-%d %H:%M:%S')
+            ngay = (tm + _td(hours=7)).strftime('%Y-%m-%d')
+            out.append((int(dn), bo, ngay))
+        res = _nt.phan_tich(out)
+        res['tong_ky'] = len(out)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/canh-bao/lap-lai')
 @limiter.limit("30 per minute")
 def canh_bao_lap_lai_trang_thai():

@@ -1178,6 +1178,31 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Ngày có trip — số trip nóng hay lạnh (P270)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 150 -H "$H" "$BASE/api/ngay-trip/kiem-chung?cb=$TS" > /tmp/ntrip.json
+          python3 - <<'PYEOF'
+          import json
+          try:
+              d = json.load(open('/tmp/ntrip.json'))
+          except Exception:
+              print("LOI: /api/ngay-trip/kiem-chung khong tra JSON:", open('/tmp/ntrip.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print("LOI:", d['error']); raise SystemExit(0)
+          t = d['trip']; dc = d['doi_chung']
+          print(f"=== NGAY CO TRIP — {d['so_ngay_co_trip']}/{d['so_ngay']} ngay, {d['tong_ky']} ky ===")
+          print(f"  so trip duoc danh gia : {t['n']}")
+          print(f"  trip thuoc NONG (top 2): {t['ty_le_nong']:.2%}  khoang95 {t['khoang_nong'][0]:.2%}-{t['khoang_nong'][1]:.2%}")
+          print(f"  trip thuoc LANH (bot 2): {t['ty_le_lanh']:.2%}  khoang95 {t['khoang_lanh'][0]:.2%}-{t['khoang_lanh'][1]:.2%}")
+          print(f"  doi chung (so khac cung ngay): NONG {dc['ty_le_nong']:.2%} | LANH {dc['ty_le_lanh']:.2%}")
+          print(f"  nen ngau nhien        : {d['nen_ngau_nhien']:.2%}")
+          PYEOF
+
       - name: Cầu có thật không — so với các lần đích ra không có cầu (P265)
         continue-on-error: true
         env:
