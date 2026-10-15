@@ -32,6 +32,6 @@ kiem("dinh vi co dinh goc phai", '.the-nhanh{' in C and 'position:fixed' in C an
 kiem("khong tran man hinh hep", 'calc(100vw - 24px)' in C and 'max-height:70vh' in C)
 kiem("nam tren thanh (z-index > topbar)", 'z-index:60' in C)
 print("=== 5. phien ban tai file moi ===")
-kiem("css/js ?v=p266", 'dashboard.css?v=p266' in H and 'dashboard.js?v=p266' in H)
+kiem("css/js ?v=p266", 'dashboard.css?v=p266' in H and 'dashboard.js?v=p267' in H)
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

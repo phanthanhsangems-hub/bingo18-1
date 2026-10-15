@@ -1029,17 +1029,28 @@ function loadChuoiKhoangCach(by) {
   }
 }
 
-function refreshAll() {
+// P267: tách hai nhóm để giảm tải database (gói Free, mỗi endpoint mở một kết nối):
+//  - refreshKetQua: kỳ mới, dự đoán, lưới kết quả — cập nhật mỗi phút
+//  - refreshThongKe: thống kê nặng (số nóng, bộ hôm nay, cảnh báo, cầu...) — mỗi 5 phút
+// Trước đây cả hai nhóm (~10 request) cùng chạy mỗi phút, làm mọi thứ chậm hơn.
+function refreshKetQua() {
   safe(loadHero);
-  safe(loadRecent).then(() => safe(loadWatchPairs));
+  safe(loadRecent);
   safe(loadDrawGrid);
   safe(loadTiles);
+}
+function refreshThongKe() {
+  safe(loadWatchPairs);
   safe(loadSizeDist);
   safe(loadTodayCombos);
   safe(loadHotCold);
   safe(loadNumberGaps);
   safe(loadAlerts);
   safe(loadBetSignal);
+}
+function refreshAll() {
+  refreshKetQua();
+  refreshThongKe();
 }
 // P204: bảng lịch sử — gọi qua hàm riêng để vừa dùng cho setInterval vừa
 // dùng khi mở lại tab, và có ghi lại mốc thời gian cập nhật.
@@ -1071,7 +1082,7 @@ function ghiMocCapNhat() {
 }
 
 function refreshAllVaGhiMoc() {
-  refreshAll();
+  refreshKetQua();      // P267: nhóm nhanh mỗi phút; nhóm thống kê có nhịp riêng
   ghiMocCapNhat();
 }
 
@@ -1090,6 +1101,7 @@ safe(loadTripNgay);
 }
 setInterval(() => safe(loadTripNgay), 120000);
 setInterval(refreshAllVaGhiMoc, 60000);
+setInterval(refreshThongKe, 300000);   // P267: thống kê nặng 5 phút/lần
 setInterval(() => safe(loadTrend), 600000);
 setInterval(loadBangLichSu, 300000);
 
