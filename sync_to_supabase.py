@@ -153,20 +153,36 @@ def fetch_homepage() -> list:
     return []
 
 
-def fetch_detail(draw_id: int) -> dict | None:
+LIMIT = 'LIMIT'   # P271: Vietlott trả 429 — KHÔNG phải "kỳ không tồn tại", phải thử lại sau
+
+
+def fetch_detail(draw_id: int, tries: int = 3):
+    """Dict kết quả | None (kỳ không có / lỗi khác) | LIMIT (bị giới hạn tốc độ).
+
+    P271: trước đây 429 bị coi là None, và va_lo_hong_tu_vietlott ghi kỳ đó vào
+    danh sách "Vietlott không có" — vĩnh viễn đến khi khởi động lại. Đó là lý do
+    55 kỳ thiếu không tự bù được.
+    """
     url = f"{DETAIL_URL}?nocatche=1&id={draw_id:07d}"
-    try:
-        r = _session.get(url, timeout=15)
-        if r.status_code == 200:
-            results = _parse_bingo18(r.text)
-            if results:
-                result = results[0]
-                if not result.get('draw_id'):
-                    result['draw_id'] = draw_id
-                return result
-    except Exception as e:
-        logger.debug(f"Detail #{draw_id}: {e}")
-    return None
+    for lan in range(tries):
+        try:
+            r = _session.get(url, timeout=15)
+            if r.status_code == 429:
+                logger.warning("Vietlott 429 khi hỏi #%d (lần %d) — chờ rồi thử lại", draw_id, lan + 1)
+                time.sleep(20 * (lan + 1))
+                continue
+            if r.status_code == 200:
+                results = _parse_bingo18(r.text)
+                if results:
+                    result = results[0]
+                    if not result.get('draw_id'):
+                        result['draw_id'] = draw_id
+                    return result
+            return None
+        except Exception as e:
+            logger.debug(f"Detail #{draw_id}: {e}")
+            return None
+    return LIMIT
 
 
 def get_latest() -> dict | None:
@@ -1049,6 +1065,9 @@ def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
         da_bu = []
         for draw_id in thieu[:toi_da]:
             draw = fetch_detail(draw_id)
+            if draw == LIMIT:               # P271: bị giới hạn — dừng vòng, KHÔNG blacklist
+                logger.warning("vietlott-gaps: bị giới hạn tốc độ, tạm dừng đến vòng sau")
+                break
             if draw and insert_draw(conn, draw):
                 da_bu.append((draw_id, draw['numbers'], tinh_tong(draw)))
                 logger.info("  ✅ vietlott-gaps #%d %s tổng=%d",
@@ -1307,6 +1326,9 @@ def mode_gaps():
     ins = skip = err = 0
     for draw_id in gan:
         draw = fetch_detail(draw_id)
+        if draw == LIMIT:
+            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng. Chờ 10–15 phút rồi chạy lại --mode gaps.")
+            break
         if draw:
             if insert_draw(conn, draw):
                 ins += 1
@@ -1316,7 +1338,7 @@ def mode_gaps():
         else:
             err += 1
             logger.warning("  ❌  #%d: Vietlott không trả về (kỳ này có thể không tồn tại)", draw_id)
-        time.sleep(0.35)
+        time.sleep(2.0)       # P271: chậm lại — 0,35s làm Vietlott chặn 429
 
     logger.info("\n✅  Bù lỗ hổng xong!  inserted=%d  skipped=%d  errors=%d", ins, skip, err)
 
