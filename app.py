@@ -12125,6 +12125,40 @@ def ngay_trip_kiem_chung_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/thang/thong-ke')
+@limiter.limit("5 per minute")
+def thang_thong_ke_api():
+    """P272: đếm tổng 4,5,6,15,16,17 và từng trip trong một tháng (giờ VN). ?thang=YYYY-MM"""
+    if not _trigger_authorized():
+        return jsonify({'error': 'unauthorized'}), 403
+    try:
+        import re as _re
+        import thong_ke_thang as _tk
+        from datetime import datetime as _dt, timedelta as _td
+        thang = (request.args.get('thang') or '').strip()
+        if not _re.fullmatch(r'\d{4}-(0[1-9]|1[0-2])', thang):
+            return jsonify({'error': 'thang phai co dang YYYY-MM'}), 400
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT draw_number, numbers, draw_time FROM draw_history "
+                        "WHERE numbers IS NOT NULL ORDER BY draw_number")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+        out = []
+        for dn, raw, tm in rows:
+            bo = lap_lai.parse_bo(raw)
+            if len(bo) != 3:
+                continue
+            if isinstance(tm, str):
+                tm = _dt.strptime(tm[:19], '%Y-%m-%d %H:%M:%S')
+            out.append((int(dn), bo, (tm + _td(hours=7)).strftime('%Y-%m-%d')))
+        return jsonify(_tk.thong_ke(out, thang))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/canh-bao/lap-lai')
 @limiter.limit("30 per minute")
 def canh_bao_lap_lai_trang_thai():
