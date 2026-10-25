@@ -1178,6 +1178,47 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Trip vắng lâu — lần nào ra sau ≥ 900 kỳ (từ 01/08) (P273)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          NGAY=$(( ( $(date -u +%s) - $(date -u -d 2026-08-01 +%s) ) / 86400 + 1 ))
+          curl -s --max-time 150 -H "$H" "$BASE/api/trip/lich-su?ngay=$NGAY&cb=$TS" > /tmp/tvl.json
+          python3 - <<'PYEOF'
+          import json, datetime
+          try:
+              d = json.load(open('/tmp/tvl.json'))
+          except Exception:
+              print("LOI: khong tra JSON:", open('/tmp/tvl.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print("LOI:", d['error']); raise SystemExit(0)
+          def vn(t):
+              return (datetime.datetime.strptime(t, '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=7)).strftime('%d/%m %H:%M')
+          tr = [x for x in d['trip'] if x['luc_utc'] >= '2026-07-31 17:00:00']   # tu 00:00 01/08 gio VN
+          print(f"=== TRIP TU 01/08 DEN NAY: {len(tr)} lan, ky moi nhat #{d['ky_cuoi']} ===")
+          print("  Moc: moi bo 1/216 moi ky => trung binh 216 ky/lan; 900 ky ~ 1,5% kha nang vang lau nhu vay")
+          lau = [x for x in tr if (x['cung_bo_cach'] or 0) >= 900]
+          print(f"  >>> So lan trip ra sau khi VANG >= 900 ky: {len(lau)}")
+          for x in sorted(lau, key=lambda x: -x['cung_bo_cach']):
+              print(f"      #{x['draw_number']}  {x['bo']}  {vn(x['luc_utc'])}  vang {x['cung_bo_cach']} ky")
+          print("  Vang lau nhat cua tung bo trong khoang (truoc moi lan ra):")
+          for b in ('1-1-1','2-2-2','3-3-3','4-4-4','5-5-5','6-6-6'):
+              xs = [x for x in tr if x['bo'] == b and x['cung_bo_cach']]
+              if xs:
+                  m = max(xs, key=lambda x: x['cung_bo_cach'])
+                  print(f"      {b}: {len(xs)} lan ra, vang lau nhat {m['cung_bo_cach']} ky (ra lai #{m['draw_number']} {vn(m['luc_utc'])})")
+          print("  Dang vang hien tai (tu lan ra cuoi den ky moi nhat):")
+          cuoi = {}
+          for x in d['trip']:
+              cuoi[x['bo']] = x['draw_number']
+          for b in ('1-1-1','2-2-2','3-3-3','4-4-4','5-5-5','6-6-6'):
+              if b in cuoi:
+                  print(f"      {b}: {d['ky_cuoi'] - cuoi[b]} ky (lan cuoi #{cuoi[b]})")
+          PYEOF
+
       - name: Thống kê theo tháng — tổng 4,5,6,15,16,17 và trip (P272)
         continue-on-error: true
         env:

@@ -3017,7 +3017,8 @@ def trip_lich_su():
     cách lần trước bao nhiêu kỳ."""
     import ast as _ast
     try:
-        ngay = max(1, min(int(request.args.get('ngay', 10)), 60))
+        # P273: tới 100 ngày để xem được cả quý (dashboard vẫn chỉ chọn tối đa 30)
+        ngay = max(1, min(int(request.args.get('ngay', 10)), 100))
         now_utc = datetime.utcnow()
         tu = now_utc - timedelta(days=ngay)
         lui = (now_utc - timedelta(days=ngay + 30)).strftime('%Y-%m-%d %H:%M:%S')
