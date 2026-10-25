@@ -1185,14 +1185,15 @@ jobs:
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
-          for M in 2026-08 2026-09; do
+          for M in 2026-08 2026-09 2026-10; do
             curl -s --max-time 150 -H "$H" "$BASE/api/thang/thong-ke?thang=$M&cb=$TS" > /tmp/thang_$M.json
             sleep 13   # endpoint gioi han 5 lan/phut
           done
           python3 - <<'PYEOF'
           import json
           ds = {}
-          for m in ('2026-08', '2026-09'):
+          THANG = ('2026-08', '2026-09', '2026-10')
+          for m in THANG:
               try:
                   d = json.load(open(f'/tmp/thang_{m}.json'))
               except Exception:
@@ -1201,15 +1202,16 @@ jobs:
                   print(m, "LOI:", d['error']); continue
               ds[m] = d
               print(f"=== THANG {d['thang']}: {d['so_ky']} ky (#{d['tu_ky']} -> #{d['den_ky']}), thieu {d['so_ky_thieu_trong_khoang']} ky trong khoang ===")
-          if len(ds) == 2:
-              a, b = ds['2026-08'], ds['2026-09']
-              print("=== SO SANH THANG 8 vs THANG 9 (so lan | ky vong) ===")
-              print("  muc      T8 so_lan  T8 ky_vong   T9 so_lan  T9 ky_vong")
+          ms = [m for m in THANG if m in ds]
+          if len(ms) >= 2:
+              print("=== SO SANH CAC THANG (so lan / ky vong) — thang 10 tinh toi hien tai ===")
+              print("  muc       " + "".join(f"{m:>18}" for m in ms))
+              a = ds[ms[0]]
               for t in a['tong']:
-                  print(f"  tong {t:>3}  {a['tong'][t]['so_lan']:>8}  {a['tong'][t]['ky_vong']:>9}   {b['tong'][t]['so_lan']:>8}  {b['tong'][t]['ky_vong']:>9}")
+                  print(f"  tong {t:>3}  " + "".join(f"{ds[m]['tong'][t]['so_lan']:>8} / {ds[m]['tong'][t]['ky_vong']:>6}" for m in ms))
               for t in a['trip']:
-                  print(f"  trip {t}  {a['trip'][t]['so_lan']:>8}  {a['trip'][t]['ky_vong']:>9}   {b['trip'][t]['so_lan']:>8}  {b['trip'][t]['ky_vong']:>9}")
-              print(f"  TONG TRIP {a['tong_trip']:>7}  {a['ky_vong_tong_trip']:>9}   {b['tong_trip']:>8}  {b['ky_vong_tong_trip']:>9}")
+                  print(f"  trip {t}  " + "".join(f"{ds[m]['trip'][t]['so_lan']:>8} / {ds[m]['trip'][t]['ky_vong']:>6}" for m in ms))
+              print(f"  TONG TRIP " + "".join(f"{ds[m]['tong_trip']:>8} / {ds[m]['ky_vong_tong_trip']:>6}" for m in ms))
           PYEOF
 
       - name: Ngày có trip — số trip nóng hay lạnh (P270)
