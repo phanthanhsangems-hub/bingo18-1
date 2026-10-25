@@ -1178,30 +1178,38 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
-      - name: Thống kê tháng 9 — tổng 4,5,6,15,16,17 và trip (P272)
+      - name: Thống kê theo tháng — tổng 4,5,6,15,16,17 và trip (P272)
         continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
-          curl -s --max-time 150 -H "$H" "$BASE/api/thang/thong-ke?thang=2026-09&cb=$TS" > /tmp/thang.json
+          for M in 2026-08 2026-09; do
+            curl -s --max-time 150 -H "$H" "$BASE/api/thang/thong-ke?thang=$M&cb=$TS" > /tmp/thang_$M.json
+            sleep 13   # endpoint gioi han 5 lan/phut
+          done
           python3 - <<'PYEOF'
           import json
-          try:
-              d = json.load(open('/tmp/thang.json'))
-          except Exception:
-              print("LOI: khong tra JSON:", open('/tmp/thang.json').read()[:300]); raise SystemExit(0)
-          if 'error' in d:
-              print("LOI:", d['error']); raise SystemExit(0)
-          print(f"=== THANG {d['thang']}: {d['so_ky']} ky (#{d['tu_ky']} -> #{d['den_ky']}), thieu {d['so_ky_thieu_trong_khoang']} ky trong khoang ===")
-          print("  tong   so_lan   ky_vong   xac_suat")
-          for t, g in d['tong'].items():
-              print(f"  {t:>4}   {g['so_lan']:>6}   {g['ky_vong']:>7}   {g['xac_suat_ly_thuyet']:.2%}")
-          print("  trip   so_lan   ky_vong")
-          for t, g in d['trip'].items():
-              print(f"  {t}   {g['so_lan']:>6}   {g['ky_vong']:>7}")
-          print(f"  TONG TRIP: {d['tong_trip']} lan (ky vong {d['ky_vong_tong_trip']})")
+          ds = {}
+          for m in ('2026-08', '2026-09'):
+              try:
+                  d = json.load(open(f'/tmp/thang_{m}.json'))
+              except Exception:
+                  print(m, "LOI: khong tra JSON:", open(f'/tmp/thang_{m}.json').read()[:200]); continue
+              if 'error' in d:
+                  print(m, "LOI:", d['error']); continue
+              ds[m] = d
+              print(f"=== THANG {d['thang']}: {d['so_ky']} ky (#{d['tu_ky']} -> #{d['den_ky']}), thieu {d['so_ky_thieu_trong_khoang']} ky trong khoang ===")
+          if len(ds) == 2:
+              a, b = ds['2026-08'], ds['2026-09']
+              print("=== SO SANH THANG 8 vs THANG 9 (so lan | ky vong) ===")
+              print("  muc      T8 so_lan  T8 ky_vong   T9 so_lan  T9 ky_vong")
+              for t in a['tong']:
+                  print(f"  tong {t:>3}  {a['tong'][t]['so_lan']:>8}  {a['tong'][t]['ky_vong']:>9}   {b['tong'][t]['so_lan']:>8}  {b['tong'][t]['ky_vong']:>9}")
+              for t in a['trip']:
+                  print(f"  trip {t}  {a['trip'][t]['so_lan']:>8}  {a['trip'][t]['ky_vong']:>9}   {b['trip'][t]['so_lan']:>8}  {b['trip'][t]['ky_vong']:>9}")
+              print(f"  TONG TRIP {a['tong_trip']:>7}  {a['ky_vong_tong_trip']:>9}   {b['tong_trip']:>8}  {b['ky_vong_tong_trip']:>9}")
           PYEOF
 
       - name: Ngày có trip — số trip nóng hay lạnh (P270)
