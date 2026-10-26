@@ -1186,6 +1186,10 @@ jobs:
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
           curl -s --max-time 150 -H "$H" "$BASE/api/thang/truoc-tong?thang=2026-10&tong=4,17&cb=$TS" > /tmp/ttg.json
+          for M in 2026-08 2026-09; do
+            sleep 13
+            curl -s --max-time 150 -H "$H" "$BASE/api/thang/truoc-tong?thang=$M&tong=4,17&cb=$TS" > /tmp/ttg_$M.json
+          done
           python3 - <<'PYEOF'
           import json
           try:
@@ -1206,6 +1210,20 @@ jobs:
               print("    " + "  ".join(f"{b['bo']}:{b['so_lan']}/{b['ky_vong']}" for b in x['bo_truoc']))
               print("  Tong ky truoc (so lan / ky vong):")
               print("    " + "  ".join(f"{s['tong']}:{s['so_lan']}/{s['ky_vong']}" for s in x['tong_truoc']))
+          # Kiem lai cap noi o thang 10 (bo 256 truoc tong 4/17) tren thang 8, 9
+          for m in ('2026-08', '2026-09'):
+              try:
+                  e = json.load(open(f'/tmp/ttg_{m}.json'))
+              except Exception:
+                  print(m, "LOI: khong tra JSON"); continue
+              if 'error' in e:
+                  print(m, "LOI:", e['error']); continue
+              print(f"\n=== {m}: {e['so_ky']} ky ===")
+              for t in sorted((k for k in e if k.isdigit()), key=int):
+                  x = e[t]
+                  top = "  ".join(f"{b['bo']}:{b['so_lan']}/{b['ky_vong']}" for b in x['bo_truoc'][:8])
+                  b256 = next((f"{b['so_lan']}/{b['ky_vong']}" for b in x['bo_truoc'] if b['bo'] == '256'), '0')
+                  print(f"  TONG {t}: {x['so_lan']} lan | 256 truoc: {b256} | nhieu nhat: {top}")
           PYEOF
 
       - name: Trip 444/666 ra nhiều bất thường? — kiểm định (P274)
