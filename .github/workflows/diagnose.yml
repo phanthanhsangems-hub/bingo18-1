@@ -1178,14 +1178,14 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
-      - name: Tháng 10 — kỳ ngay trước tổng 4 và tổng 7 ra bộ nào (P275)
+      - name: Tháng 10 — kỳ ngay trước tổng 4 và tổng 17 ra bộ nào (P275)
         continue-on-error: true
         env:
           TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
         run: |
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
-          curl -s --max-time 150 -H "$H" "$BASE/api/thang/truoc-tong?thang=2026-10&tong=4,7&cb=$TS" > /tmp/ttg.json
+          curl -s --max-time 150 -H "$H" "$BASE/api/thang/truoc-tong?thang=2026-10&tong=4,17&cb=$TS" > /tmp/ttg.json
           python3 - <<'PYEOF'
           import json
           try:
@@ -1194,8 +1194,8 @@ jobs:
               print("LOI: khong tra JSON:", open('/tmp/ttg.json').read()[:300]); raise SystemExit(0)
           if 'error' in d:
               print("LOI:", d['error']); raise SystemExit(0)
-          print(f"=== THANG {d['thang']}: {d['so_ky']} ky — KY NGAY TRUOC TONG 4 / TONG 7 ===")
-          for t in ('4', '7'):
+          print(f"=== THANG {d['thang']}: {d['so_ky']} ky — KY NGAY TRUOC TONG 4 / TONG 17 ===")
+          for t in sorted((k for k in d if k.isdigit()), key=int):
               x = d[t]
               print(f"\n##### TONG {t}: {x['so_lan']} lan (thieu ky truoc: {x['thieu_ky_truoc']}) #####")
               print("  Danh sach (ky truoc -> ky ra tong):")
