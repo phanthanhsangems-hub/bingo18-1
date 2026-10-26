@@ -1178,6 +1178,36 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Tháng 10 — kỳ ngay trước tổng 4 và tổng 7 ra bộ nào (P275)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 150 -H "$H" "$BASE/api/thang/truoc-tong?thang=2026-10&tong=4,7&cb=$TS" > /tmp/ttg.json
+          python3 - <<'PYEOF'
+          import json
+          try:
+              d = json.load(open('/tmp/ttg.json'))
+          except Exception:
+              print("LOI: khong tra JSON:", open('/tmp/ttg.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print("LOI:", d['error']); raise SystemExit(0)
+          print(f"=== THANG {d['thang']}: {d['so_ky']} ky — KY NGAY TRUOC TONG 4 / TONG 7 ===")
+          for t in ('4', '7'):
+              x = d[t]
+              print(f"\n##### TONG {t}: {x['so_lan']} lan (thieu ky truoc: {x['thieu_ky_truoc']}) #####")
+              print("  Danh sach (ky truoc -> ky ra tong):")
+              for e in x['danh_sach']:
+                  tr = f"#{e['ky']-1} {e['bo_truoc']} (tong {e['tong_truoc']})" if e['bo_truoc'] else f"#{e['ky']-1} THIEU"
+                  print(f"    {tr}  ->  #{e['ky']} {e['bo']}")
+              print("  Bo ky truoc, nhieu -> it (so lan / ky vong neu ngau nhien):")
+              print("    " + "  ".join(f"{b['bo']}:{b['so_lan']}/{b['ky_vong']}" for b in x['bo_truoc']))
+              print("  Tong ky truoc (so lan / ky vong):")
+              print("    " + "  ".join(f"{s['tong']}:{s['so_lan']}/{s['ky_vong']}" for s in x['tong_truoc']))
+          PYEOF
+
       - name: Trip 444/666 ra nhiều bất thường? — kiểm định (P274)
         continue-on-error: true
         env:
