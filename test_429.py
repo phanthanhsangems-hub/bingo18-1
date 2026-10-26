@@ -36,5 +36,16 @@ body = src[i:j]
 kiem("va_lo_hong: LIMIT -> break truoc khi khong_co.add", body.index('== LIMIT') < body.index('khong_co.add'))
 kiem("mode_gaps: LIMIT -> dung + bao ro", "giới hạn tốc độ (429)" in src and src.index('== LIMIT') < src.index('err += 1'))
 kiem("mode_gaps cho 2 giay moi ky", 'time.sleep(2.0)' in src)
+print("=== 5. get_new_since: LIMIT khong bi doc nhu dict (P276) ===")
+with mock.patch.object(S, 'fetch_homepage', return_value=[]), \
+     mock.patch.object(S, 'fetch_detail', side_effect=[{'draw_id': 11, 'numbers': [1, 2, 3]}, S.LIMIT, {'draw_id': 13, 'numbers': [4, 5, 6]}]) as fd:
+    try:
+        kq = S.get_new_since(10); loi = None
+    except Exception as e:
+        kq, loi = None, e
+kiem("khong nem loi", loi is None, loi)
+kiem("giu ky lay duoc truoc khi bi chan", kq == [{'draw_id': 11, 'numbers': [1, 2, 3]}], kq)
+kiem("dung hoi ngay khi LIMIT", fd.call_count == 2, fd.call_count)
+kiem("moi cho goi fetch_detail deu xu ly LIMIT", src.count('fetch_detail(') - 1 <= open('sync_to_supabase.py', encoding='utf-8').read().count('== LIMIT'))
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
