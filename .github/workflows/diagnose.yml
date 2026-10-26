@@ -1178,6 +1178,39 @@ jobs:
           PYEOF
           echo "nhat_ky_phieu" >> /tmp/da_chay
 
+      - name: Trip 444/666 ra nhiều bất thường? — kiểm định (P274)
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          curl -s --max-time 150 -H "$H" "$BASE/api/trip/kiem-dinh?tu=2026-08-01&cb=$TS" > /tmp/tkd.json
+          python3 - <<'PYEOF'
+          import json
+          try:
+              d = json.load(open('/tmp/tkd.json'))
+          except Exception:
+              print("LOI: khong tra JSON:", open('/tmp/tkd.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print("LOI:", d['error']); raise SystemExit(0)
+          print("=== KIEM DINH TRIP (moi bo 1/216 moi ky; dang ngo neu p < %.4f = 0,05/6) ===" % d['nguong_dang_ngo'])
+          print("  Du lieu:", d['du_lieu'])
+          def in_khoang(ten, k):
+              print(f"\n  [{ten}] {k['so_ky']} ky (#{k['tu_ky']}..#{k['den_ky']}), tong trip {k['tong_trip']} / ky vong {k['ky_vong_tong_trip']} (p nhieu hon {k['p_tong_trip_nhieu_hon']})")
+              for b, v in k['bo'].items():
+                  dau = '  <<< DANG NGO' if v['dang_ngo'] else ''
+                  print(f"      {b}: {v['so_lan']:>4} lan / ky vong {v['ky_vong']:>6}  (x{v['ti_le']})  p={v['p_nhieu_hon']}{dau}")
+              print(f"      Giua 6 bo trip: chi2={k['chi2_giua_6_trip']} p={k['p_giua_6_trip']}")
+              print(f"      Mat xuc xac (moi 16,667%): " + '  '.join(f"{m}:{x['ty_le_pct']}%" for m, x in k['mat'].items()) + f"  p={k['p_mat']}")
+          in_khoang('TOAN BO LICH SU', d['toan_bo'])
+          in_khoang('TU ' + d['tu_ngay'], d['tu_moc'])
+          for m, k in d['theo_thang'].items():
+              in_khoang('THANG ' + m, k)
+          if '30_ngay' in d:
+              in_khoang('30 NGAY (tu ' + d['30_ngay']['tu_ngay'] + ')', d['30_ngay'])
+          PYEOF
+
       - name: Trip vắng lâu — lần nào ra sau ≥ 900 kỳ (từ 01/08) (P273)
         continue-on-error: true
         env:

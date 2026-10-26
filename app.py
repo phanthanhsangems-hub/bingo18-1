@@ -12160,6 +12160,50 @@ def thang_thong_ke_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/trip/kiem-dinh')
+@limiter.limit("5 per minute")
+def trip_kiem_dinh_api():
+    """P274: từng bộ trip có ra nhiều bất thường không (Poisson + chi-bình phương),
+    kèm kiểm tra dữ liệu trùng/thiếu kỳ. ?tu=YYYY-MM-DD (giờ VN, mặc định 2026-08-01)"""
+    if not _trigger_authorized():
+        return jsonify({'error': 'unauthorized'}), 403
+    try:
+        import re as _re
+        import trip_kiem_dinh as _tkd
+        from datetime import datetime as _dt, timedelta as _td
+        tu = (request.args.get('tu') or '2026-08-01').strip()
+        if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', tu):
+            return jsonify({'error': 'tu phai co dang YYYY-MM-DD'}), 400
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT draw_number, numbers, draw_time FROM draw_history "
+                        "WHERE numbers IS NOT NULL ORDER BY draw_number")
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+        theo_dn, trung, hong = {}, 0, 0
+        for dn, raw, tm in rows:
+            bo = lap_lai.parse_bo(raw)
+            if len(bo) != 3 or not all(1 <= v <= 6 for v in bo):
+                hong += 1
+                continue
+            if isinstance(tm, str):
+                tm = _dt.strptime(tm[:19], '%Y-%m-%d %H:%M:%S')
+            if int(dn) in theo_dn:
+                trung += 1
+                continue
+            theo_dn[int(dn)] = (int(dn), bo, (tm + _td(hours=7)).strftime('%Y-%m-%d'))
+        out = list(theo_dn.values())
+        kq = _tkd.phan_tich(out, tu)
+        dns = sorted(theo_dn)
+        kq['du_lieu'] = {'so_dong': len(rows), 'trung_ky': trung, 'dong_hong': hong,
+                         'thieu_ky': (dns[-1] - dns[0] + 1 - len(dns)) if dns else 0}
+        return jsonify(kq)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/canh-bao/lap-lai')
 @limiter.limit("30 per minute")
 def canh_bao_lap_lai_trang_thai():
