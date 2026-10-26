@@ -211,6 +211,11 @@ def get_new_since(last_id: int) -> list:
 
     for _ in range(5):
         detail = fetch_detail(next_id)
+        if detail == LIMIT:
+            # P276: 'LIMIT' là chuỗi (truthy) — trước đây lọt vào nhánh dưới và
+            # detail['numbers'] ném "string indices must be integers". Vòng sau thử lại.
+            logger.warning("Poll #%d: Vietlott đang giới hạn tốc độ (429) — để vòng sau", next_id)
+            break
         if detail:
             polled.append(detail)
             logger.info(f"Poll ✅ #{next_id}: {detail['numbers']}")
@@ -1255,6 +1260,9 @@ def mode_bulk():
     ins = skip = err = 0
     for draw_id in range(last_id + 1, latest_id + 1):
         draw = fetch_detail(draw_id)
+        if draw == LIMIT:
+            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng ở #%d. Chờ 10–15 phút rồi chạy lại.", draw_id)
+            break
         if draw:
             ok = insert_draw(conn, draw)
             if ok:
