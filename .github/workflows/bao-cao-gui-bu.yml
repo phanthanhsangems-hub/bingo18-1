@@ -17,10 +17,16 @@ on:
 permissions:
   contents: read
 
+# Lịch tự chạy và lần bấm tay có thể chồng nhau — xếp hàng, không chạy song
+# song, để hai lần cùng thấy "chưa gửi" rồi cùng gửi.
+concurrency:
+  group: bao-cao-gui-bu
+  cancel-in-progress: false
+
 jobs:
   gui-bu:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 25
     steps:
       - name: Gửi bù nếu hôm qua chưa có báo cáo
         env:
@@ -31,22 +37,25 @@ jobs:
           NGAY="${NGAY_TAY:-$(TZ=Asia/Ho_Chi_Minh date -d yesterday +%F)}"
           echo "Ngay can kiem: $NGAY  (bay gio $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN)"
           CODE=000
-          for LAN in 1 2 3; do
+          # Supabase chập chờn (rớt SSL) — thử 5 lần, mỗi lần một kết nối mới.
+          for LAN in 1 2 3 4 5; do
             CODE=$(curl -s -o /tmp/r.json -w '%{http_code}' --max-time 170 -X POST \
                    -H "X-Trigger-Secret: $TRIGGER_SECRET" \
                    "$BASE/api/daily-summary?ngay=$NGAY&bu=1") || CODE=000
             echo "Lan $LAN: HTTP $CODE  $(head -c 300 /tmp/r.json 2>/dev/null)"
             [ "$CODE" = "200" ] && break
-            sleep 60
+            sleep 45
           done
           ST=$(python3 -c "import json;print(json.load(open('/tmp/r.json')).get('status',''))" 2>/dev/null || echo "")
+          echo "::notice title=ket-qua::${ST:-loi}"
           case "$ST" in
             da_gui) echo "OK: bao cao $NGAY da gui tu truoc (23:55), khong gui lai." ;;
             ok)     echo "OK: DA GUI BU bao cao $NGAY." ;;
             empty)  echo "Ngay $NGAY khong co ket qua du doan nao — khong co gi de bao cao." ;;
             *)
               echo "CHUA GUI DUOC bao cao $NGAY (status='$ST', HTTP $CODE)."
-              # chi bao do o lan cuoi trong ngay (06:20 VN) — truoc do con lan sau
+              # chi bao do (GitHub gui email) o lan tu chay cuoi trong ngay (06:20 VN);
+              # bam tay thi doc ket qua o notice "ket-qua", khong gui email moi lan hong
               H=$(date -u +%H)
-              if [ "$H" = "23" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi ;;
+              if [ "$H" = "23" ] && [ "${{ github.event_name }}" = "schedule" ]; then exit 1; fi ;;
           esac
