@@ -1421,6 +1421,14 @@ jobs:
           if nk and d.get('ky_moi_nhat') and d['ky_moi_nhat'] - nk[-1]['den'] > 3:
               print(f"  >>> NHAT KY DUNG O #{nk[-1]['den']} trong khi DB da toi #{d['ky_moi_nhat']} — watcher ban cu khong gui tin?")
               open('/tmp/job_failed', 'a').write("tin moi ky: nhat ky tut hau so voi DB\n")
+          # P278: ky KHONG co muc nao = watcher khong gui tin ky do (vd #193353 21:55
+          # 27/10 — dung luc Supabase bat dau rot). Truoc day chi bat khi lech > 3 ky.
+          if nk and d.get('ky_moi_nhat'):
+              dens = {m['den'] for m in nk}
+              tu0 = max(min(dens), d['ky_moi_nhat'] - 160)
+              vang = sorted(set(range(tu0, d['ky_moi_nhat'] + 1)) - dens)
+              print(f"  ky KHONG co tin (#{tu0}..#{d['ky_moi_nhat']}): {vang[-20:] if vang else 'khong'}"
+                    + (f"  (tong {len(vang)})" if len(vang) > 20 else ""))
           PYEOF
           echo "canh_bao_lap_lai" >> /tmp/da_chay
 
