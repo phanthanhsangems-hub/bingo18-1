@@ -6646,6 +6646,14 @@ def _da_gui_bao_cao(cur):
         r = cur.fetchone()
         return r[0] if r else None
     except Exception:
+        # Kết nối đã chết (Supabase rớt SSL) thì phải ném ra — nuốt đi thì truy
+        # vấn kế tiếp chỉ báo "cursor already closed", che mất lỗi thật.
+        if getattr(getattr(cur, 'connection', None), 'closed', 0):
+            raise
+        try:
+            cur.connection.rollback()
+        except Exception:
+            pass
         return None
 
 
