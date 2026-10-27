@@ -1,0 +1,75 @@
+name: Kiểm tra báo cáo cuối ngày
+
+# P277: báo cáo 23:55 không tới. Kiểm nhanh (~1 phút) thay vì cả diagnose:
+#   1. Cloud Scheduler: job daily-summary có chạy, lần cuối trả mã gì
+#   2. Log Cloud Run của /api/daily-summary (cần roles/logging.viewer)
+#   3. Dữ liệu: số kỳ và số kết quả dự đoán từng ngày gần đây — ngày không có
+#      kết quả thì endpoint trả "empty" và KHÔNG gửi gì
+on:
+  workflow_dispatch:
+
+jobs:
+  kiem-tra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cloud Scheduler
+        continue-on-error: true
+        run: |
+          echo "===== GIO HIEN TAI: $(date -u '+%F %T') UTC / $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN ====="
+          for LOC in asia-southeast1 us-central1 asia-east1; do
+            echo "--- location $LOC ---"
+            gcloud scheduler jobs list --location $LOC --project bingo18-predictor \
+              --format="table(name.basename(), schedule, timeZone, state, lastAttemptTime, status.code, httpTarget.uri)" 2>&1 | head -20 || true
+          done
+          echo
+          J=$(gcloud scheduler jobs list --location asia-southeast1 --project bingo18-predictor --format="value(name)" 2>/dev/null | grep -i "daily-summary" | grep -vi evening | head -1)
+          if [ -n "$J" ]; then
+            echo "===== CHI TIET $J ====="
+            gcloud scheduler jobs describe "$J" --location asia-southeast1 --project bingo18-predictor \
+              --format="yaml(schedule, timeZone, state, lastAttemptTime, scheduleTime, status, attemptDeadline, retryConfig, httpTarget.uri, httpTarget.httpMethod, httpTarget.headers)" 2>&1 \
+              | sed -E 's/(X-Trigger-Secret|X-Admin-Key): .*/\1: ***/'
+          fi
+
+      - name: Log Cloud Run cua daily-summary (2 ngay)
+        continue-on-error: true
+        run: |
+          gcloud logging read \
+            'resource.type="cloud_run_revision" AND resource.labels.service_name="bingo18" AND (httpRequest.requestUrl:"daily-summary" OR textPayload:"daily_summary" OR textPayload:"daily-summary")' \
+            --project bingo18-predictor --limit 40 --freshness 2d \
+            --format="value(timestamp, severity, httpRequest.status, httpRequest.latency, httpRequest.requestUrl, textPayload)" 2>&1 | head -60 || true
+
+      - name: Du lieu tung ngay
+        continue-on-error: true
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          echo "--- health ---"
+          curl -s --max-time 30 "$BASE/api/health" | head -c 600; echo
+          curl -s --max-time 60 -H "$H" "$BASE/api/daily-trend?days=6&cb=$TS" > /tmp/trend.json
+          curl -s --max-time 60 -H "$H" "$BASE/api/daily-wincal?days=6&cb=$TS" > /tmp/wincal.json
+          python3 - <<'PYEOF'
+          import json
+          for f, k in (('/tmp/trend.json', 'trend'), ('/tmp/wincal.json', 'days')):
+              try:
+                  d = json.load(open(f))
+              except Exception:
+                  print(f, "LOI:", open(f).read()[:300]); continue
+              print(f"=== {f} ===")
+              if 'error' in d:
+                  print("  LOI:", d['error']); continue
+              for r in sorted(d.get(k, []), key=lambda r: r['date']):
+                  print(f"  {r['date']}: {r['total']} ket qua, {r['wins']} thang")
+          print("(daily-trend dem theo NGAY GHI ket qua = dung bo loc cua bao cao 23:55;"
+                " ngay = 0 thi bao cao tra 'empty' va khong gui)")
+          PYEOF
