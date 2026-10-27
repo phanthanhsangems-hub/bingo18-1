@@ -55,9 +55,10 @@ jobs:
           BASE="https://bingo18-633959711537.asia-southeast1.run.app"
           H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
           echo "--- health ---"
-          curl -s --max-time 30 "$BASE/api/health" | head -c 600; echo
-          curl -s --max-time 60 -H "$H" "$BASE/api/daily-trend?days=6&cb=$TS" > /tmp/trend.json
-          curl -s --max-time 60 -H "$H" "$BASE/api/daily-wincal?days=6&cb=$TS" > /tmp/wincal.json
+          curl -s --max-time 30 "$BASE/api/health" | head -c 600 || echo "(health qua 30s — app treo khi ket noi DB)"; echo
+          curl -s --max-time 30 -H "$H" "$BASE/api/canh-bao/lap-lai?cb=$TS" -o /dev/null -w "lap-lai (truy van DB nhe): HTTP %{http_code} %{time_total}s\n" || true
+          curl -s --max-time 60 -H "$H" "$BASE/api/daily-trend?days=6&cb=$TS" > /tmp/trend.json || true
+          curl -s --max-time 60 -H "$H" "$BASE/api/daily-wincal?days=6&cb=$TS" > /tmp/wincal.json || true
           python3 - <<'PYEOF'
           import json
           for f, k in (('/tmp/trend.json', 'trend'), ('/tmp/wincal.json', 'days')):
