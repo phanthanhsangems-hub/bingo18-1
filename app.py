@@ -6634,6 +6634,44 @@ def combo_stats():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+# P277: ngày gần nhất đã GỬI ĐƯỢC báo cáo cuối ngày — workflow gửi bù hỏi cái này
+# (?bu=1) để không gửi trùng khi 23:55 đã thành công.
+_BAO_CAO_KEY = 'bao_cao_cuoi_ngay_da_gui'
+
+
+def _da_gui_bao_cao(cur):
+    ph = '%s' if USE_POSTGRES else '?'
+    try:
+        cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}", (_BAO_CAO_KEY,))
+        r = cur.fetchone()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+
+def _ghi_da_gui_bao_cao(date_str: str):
+    """Chỉ tiến lên: gửi bù ngày cũ không được ghi đè ngày mới hơn đã gửi."""
+    ph = '%s' if USE_POSTGRES else '?'
+    try:
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cu = _da_gui_bao_cao(cur)
+            if cu and cu >= date_str:
+                return
+            cur.execute(
+                f"INSERT INTO system_config (config_key, config_value, description) VALUES ({ph}, {ph}, {ph}) "
+                f"ON CONFLICT (config_key) DO UPDATE SET config_value = EXCLUDED.config_value, "
+                f"updated_at = CURRENT_TIMESTAMP",
+                (_BAO_CAO_KEY, date_str, 'P277: ngay gan nhat da gui bao cao cuoi ngay'))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger('daily_summary').warning("ghi da gui bao cao: %s", e)
+
+
 @app.route('/api/daily-summary', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 def daily_summary():
@@ -6651,19 +6689,38 @@ def daily_summary():
         # Query cho hôm nay theo giờ Việt Nam (UTC+7)
         vn_tz = timezone(timedelta(hours=7))
         now_vn = datetime.now(vn_tz)
-        date_str = now_vn.strftime('%Y-%m-%d')
+        # P277: ?ngay=YYYY-MM-DD (cần secret) để GỬI BÙ báo cáo một ngày đã qua —
+        # 23:55 hôm 27/10 Cloud Run không kết nối được Supabase nên báo cáo mất hẳn.
+        # ?bu=1: chỉ gửi nếu ngày đó CHƯA gửi được (workflow gửi bù gọi nhiều lần).
+        import re as _re
+        _ngay = (request.args.get('ngay') or '').strip()
+        if _ngay:
+            if not _trigger_authorized():
+                return jsonify({'error': 'unauthorized'}), 403
+            if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', _ngay):
+                return jsonify({'error': 'ngay phai co dang YYYY-MM-DD'}), 400
+            ngay_vn = datetime.strptime(_ngay, '%Y-%m-%d').replace(tzinfo=vn_tz)
+        else:
+            ngay_vn = now_vn
+        date_str = ngay_vn.strftime('%Y-%m-%d')
+        _D  = f"DATE '{date_str}'"     # đã kiểm regex ở trên -> an toàn khi chèn SQL
+        _Dl = f"'{date_str}'"
 
         conn = db.get_connection()
         cur  = conn.cursor()
 
+        if request.args.get('bu') == '1' and _da_gui_bao_cao(cur) == date_str:
+            conn.close()
+            return jsonify({'status': 'da_gui', 'date': date_str})
+
         _TODAY_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
-            "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"
-        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours')"
+            f"= {_D}"
+        ) if _USE_PG else f"date(pr.created_at, '+7 hours') = {_Dl}"
         _YEST_FILTER = (
             "(pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date "
-            "= (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - INTERVAL '1 day'"
-        ) if _USE_PG else "date(pr.created_at, '+7 hours') = date('now', '+7 hours', '-1 day')"
+            f"= {_D} - INTERVAL '1 day'"
+        ) if _USE_PG else f"date(pr.created_at, '+7 hours') = date({_Dl}, '-1 day')"
 
         # ── Tổng kết hôm nay (dùng is_win_size cho SIZE win) ──────
         cur.execute(f"""
@@ -6685,7 +6742,7 @@ def daily_summary():
         if total == 0:
             conn.close()
             return jsonify({"status": "empty",
-                            "message": f"Hôm nay ({date_str}) chưa có prediction nào.",
+                            "message": f"Ngày {date_str} chưa có prediction nào.",
                             "total_predictions": 0})
 
         # ── Hôm qua (so sánh) ─────────────────────────────────────
@@ -6707,7 +6764,7 @@ def daily_summary():
             "WHEN SUM(v::int) OVER () <= 11 THEN 'HOA' ELSE 'LON' END"
         )
         if _USE_PG:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     CASE WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 9  THEN 'NHO'
                          WHEN (SELECT SUM(v::int) FROM json_array_elements_text(p.predicted_numbers::json) v) <= 11 THEN 'HOA'
@@ -6716,8 +6773,7 @@ def daily_summary():
                     SUM(CASE WHEN COALESCE(pr.is_win_size, pr.is_win, FALSE) THEN 1 ELSE 0 END)
                 FROM prediction_results pr
                 JOIN predictions p ON p.id = pr.prediction_id
-                WHERE (pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                WHERE {_TODAY_FILTER}
                 GROUP BY pred_size ORDER BY COUNT(*) DESC
             """)
             size_rows = {r[0]: (r[1], r[2] or 0) for r in cur.fetchall()}
@@ -6901,7 +6957,7 @@ def daily_summary():
         # ── Combo bộ 3 số ra ≥2 lần hôm nay ─────────────────────────
         combo_freq_today: list = []
         if _USE_PG:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT
                     array_to_string(
                         ARRAY(SELECT v::int FROM jsonb_array_elements_text(numbers::jsonb) v ORDER BY v::int),
@@ -6910,14 +6966,14 @@ def daily_summary():
                     COUNT(*) AS freq
                 FROM draw_history
                 WHERE (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                      = {_D}
                 GROUP BY combo
                 HAVING COUNT(*) >= 2
                 ORDER BY freq DESC, combo
             """)
             combo_freq_today = [(r[0], r[1]) for r in cur.fetchall()]
         else:
-            cur.execute("SELECT numbers FROM draw_history WHERE date(draw_time, '+7 hours') = date('now', '+7 hours')")
+            cur.execute(f"SELECT numbers FROM draw_history WHERE date(draw_time, '+7 hours') = {_Dl}")
             import json as _json2
             _cf = {}
             for (nums_raw,) in cur.fetchall():
@@ -6935,33 +6991,32 @@ def daily_summary():
         # ── Query draws hôm nay để xuất Excel ────────────────────
         _draws_today = []
         if _USE_PG:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT draw_number,
                        draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh',
                        numbers
                 FROM draw_history
                 WHERE (draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                      = {_D}
                 ORDER BY draw_number ASC
             """)
             _draws_today = cur.fetchall()
             # Fallback: lấy từ prediction_results nếu draw_history trống
             if not _draws_today:
-                cur.execute("""
+                cur.execute(f"""
                     SELECT pr.draw_number,
                            pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh',
                            pr.actual_numbers
                     FROM prediction_results pr
-                    WHERE (pr.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                          = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                    WHERE {_TODAY_FILTER}
                     ORDER BY pr.draw_number ASC
                 """)
                 _draws_today = cur.fetchall()
         else:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT draw_number, datetime(draw_time, '+7 hours'), numbers
                 FROM draw_history
-                WHERE date(draw_time, '+7 hours') = date('now', '+7 hours')
+                WHERE date(draw_time, '+7 hours') = {_Dl}
                 ORDER BY draw_number ASC
             """)
             _draws_today = cur.fetchall()
@@ -7151,7 +7206,7 @@ def daily_summary():
         def _esc(s): return _html.escape(str(s)) if s else ''
 
         msg = (
-            f"{status_icon} <b>TỔNG KẾT {now_vn.strftime('%d/%m/%Y')}</b>\n"
+            f"{status_icon} <b>TỔNG KẾT {ngay_vn.strftime('%d/%m/%Y')}</b>{' (gửi bù)' if _ngay else ''}\n"
             f"━━━━━━━━━━━━━━━━━━━\n"
             f"📊 Tổng: <b>{total} kỳ</b>  |  Thắng SIZE: <b>{wins}</b>  Thua: <b>{losses}</b>\n"
             f"🎯 Win rate: <b>{win_rate*100:.1f}%</b>  {diff_str}\n"
@@ -7180,6 +7235,8 @@ def daily_summary():
         # Gửi Telegram
         tg = TelegramBot()
         sent = tg.send_message(msg)
+        if sent:
+            _ghi_da_gui_bao_cao(date_str)
 
         # ── Build & gửi Excel file ────────────────────────────────
         excel_sent = False
@@ -7362,7 +7419,7 @@ def daily_summary():
                 excel_bytes = buf.getvalue()
 
                 filename = f"Bingo18_{date_str}.xlsx"
-                caption = (f"📊 Dữ liệu kỳ quay ngày <b>{now_vn.strftime('%d/%m/%Y')}</b>"
+                caption = (f"📊 Dữ liệu kỳ quay ngày <b>{ngay_vn.strftime('%d/%m/%Y')}</b>"
                            f" · {len(_draws_today)} kỳ\n"
                            f"Sheet <b>Thống kê tổng</b>: tổng 3–18 ra bao nhiêu lần,"
                            f" so với kỳ vọng.")

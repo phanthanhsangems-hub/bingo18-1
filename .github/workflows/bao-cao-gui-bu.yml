@@ -1,0 +1,52 @@
+name: Gửi bù báo cáo cuối ngày
+
+# P277: báo cáo 23:55 (Cloud Scheduler) mất hẳn nếu đúng lúc đó Supabase không
+# kết nối được — như đêm 27/10. Job này hỏi lại sau nửa đêm: ngày hôm qua đã
+# GỬI ĐƯỢC chưa (?bu=1 — app tự kiểm, không gửi trùng), chưa thì gửi bù.
+# 17:20, 19:20, 23:20 UTC = 00:20, 02:20, 06:20 giờ VN. Lần cuối vẫn hỏng thì
+# job đỏ -> GitHub gửi email cho chủ repo.
+on:
+  schedule:
+    - cron: '20 17,19,23 * * *'
+  workflow_dispatch:
+    inputs:
+      ngay:
+        description: 'Ngày VN cần gửi bù (YYYY-MM-DD), bỏ trống = hôm qua'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  gui-bu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Gửi bù nếu hôm qua chưa có báo cáo
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+          NGAY_TAY: ${{ github.event.inputs.ngay }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          NGAY="${NGAY_TAY:-$(TZ=Asia/Ho_Chi_Minh date -d yesterday +%F)}"
+          echo "Ngay can kiem: $NGAY  (bay gio $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN)"
+          CODE=000
+          for LAN in 1 2 3; do
+            CODE=$(curl -s -o /tmp/r.json -w '%{http_code}' --max-time 170 -X POST \
+                   -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+                   "$BASE/api/daily-summary?ngay=$NGAY&bu=1") || CODE=000
+            echo "Lan $LAN: HTTP $CODE  $(head -c 300 /tmp/r.json 2>/dev/null)"
+            [ "$CODE" = "200" ] && break
+            sleep 60
+          done
+          ST=$(python3 -c "import json;print(json.load(open('/tmp/r.json')).get('status',''))" 2>/dev/null || echo "")
+          case "$ST" in
+            da_gui) echo "OK: bao cao $NGAY da gui tu truoc (23:55), khong gui lai." ;;
+            ok)     echo "OK: DA GUI BU bao cao $NGAY." ;;
+            empty)  echo "Ngay $NGAY khong co ket qua du doan nao — khong co gi de bao cao." ;;
+            *)
+              echo "CHUA GUI DUOC bao cao $NGAY (status='$ST', HTTP $CODE)."
+              # chi bao do o lan cuoi trong ngay (06:20 VN) — truoc do con lan sau
+              H=$(date -u +%H)
+              if [ "$H" = "23" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi ;;
+          esac
