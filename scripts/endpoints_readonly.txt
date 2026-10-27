@@ -120,7 +120,6 @@
 /api/sum-stats
 /api/sum-today
 /api/system-health-badge
-/api/test-telegram
 /api/time_analysis
 /api/today-combos
 /api/today-draws
@@ -150,3 +149,6 @@
 /sw.js
 /api/tong/vang-lau-nhat
 /api/trip/lich-su
+#
+# /api/test-telegram DA GO (P278) — no GUI THAT mot tin "🔧 Bingo18 test — bot
+# hoat dong!" vao Telegram nguoi dung, nen moi lan chay diagnose la mot tin rac.
