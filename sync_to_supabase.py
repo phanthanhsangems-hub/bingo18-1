@@ -47,7 +47,36 @@ DB_CONFIG = {
     'password':        os.environ.get('DB_PASSWORD', ''),
     'sslmode':         'require',
     'connect_timeout': 15,
+    # P279: watcher giu MOT ket noi dung mai. Supabase rot ket noi im lang (28/10
+    # 12:49) thi lenh dang chay cho tra loi MAI MAI — Windows mac dinh 2 tieng moi
+    # do ra ket noi chet — watcher dung im khong bao loi. Keepalive: ~1 phut.
+    'keepalives':          1,
+    'keepalives_idle':     30,
+    'keepalives_interval': 10,
+    'keepalives_count':    3,
 }
+
+# P279: canh gac — vong lap watch khong xong mot vong trong ngan nay giay = treo
+# (DB, mang, Telegram... bat cu cho nao). Chi tu thoat khi chay qua
+# scripts/start_watcher.bat (dat BINGO_WATCHDOG=1) vi bat se khoi dong lai;
+# chay tay thi chi ghi loi, khong tu tat.
+WATCHDOG_GIAY = 1200
+_NHIP = [time.time()]
+
+
+def _canh_gac():
+    while True:
+        time.sleep(30)
+        tre = time.time() - _NHIP[0]
+        if tre <= WATCHDOG_GIAY:
+            continue
+        if os.environ.get('BINGO_WATCHDOG') == '1':
+            logger.error("WATCHDOG: vong lap watch dung %d phut — thoat de start_watcher.bat chay lai", tre // 60)
+            logging.shutdown()
+            os._exit(75)
+        logger.error("WATCHDOG: vong lap watch dung %d phut — dong cua so nay va chay lai "
+                     "(nen chay bang scripts\\start_watcher.bat de tu khoi dong lai)", tre // 60)
+        _NHIP[0] = time.time()      # khong bao lai moi 30s
 TABLE          = '"public"."draw_history"'
 FETCH_INTERVAL = 10   # giây
 
@@ -1381,6 +1410,7 @@ def _run_sync_predictions(limit: int = 50, min_draw: int = 0):
 
 def mode_watch():
     logger.info(f"👀  Watch mode: fetch mỗi {FETCH_INTERVAL}s, fill_gaps mỗi 600s")
+    threading.Thread(target=_canh_gac, daemon=True, name='canh-gac').start()
 
     FILL_GAPS_INTERVAL    = 600  # 10 phút
     # Số kỳ Vietlott xác nhận không có — nhớ để khỏi hỏi lại mỗi vòng.
@@ -1397,6 +1427,7 @@ def mode_watch():
 
     _loi_xt = 0   # so lan loi xac thuc DB lien tiep (lui dan, xem khoi except)
     while True:
+        _NHIP[0] = time.time()
         try:
             if conn is None:
                 conn = get_conn()
@@ -1517,6 +1548,7 @@ def mode_watch():
                 _loi_xt += 1
                 _cho = min(60 * 2 ** (_loi_xt - 1), 900)
                 logger.error(f"Loi xac thuc DB lan {_loi_xt} — kiem tra DB_PASSWORD/DB_PORT=6543 trong .env. Cho {_cho}s truoc khi thu lai.")
+                _NHIP[0] = time.time() + _cho    # cho co chu dich, khong phai treo
                 time.sleep(_cho)
         except Exception as e:
             logger.error(f"Lỗi: {e}")

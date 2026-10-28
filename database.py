@@ -167,7 +167,12 @@ class DatabaseManager:
         import psycopg2
         for i in range(lan_thu):
             try:
-                return psycopg2.connect(config.DATABASE_URL, connect_timeout=10)
+                # P279: keepalive — Supabase rot ket noi im lang thi truy van
+                # dang cho bi treo toi khi Cloud Run cat request (/api/health
+                # treo > 40s luc 13:21 28/10). Bat keepalive: ~35s la do ra.
+                return psycopg2.connect(config.DATABASE_URL, connect_timeout=10,
+                                        keepalives=1, keepalives_idle=20,
+                                        keepalives_interval=5, keepalives_count=3)
             except psycopg2.OperationalError as e:
                 het_slot = 'EMAXCONNSESSION' in str(e) or 'max clients' in str(e)
                 if not het_slot or i == lan_thu - 1:
