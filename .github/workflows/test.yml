@@ -46,6 +46,7 @@ jobs:
           python test_gui_bu_bao_cao.py
           python test_canh_gac.py
           python test_khoi_dong_khong_khoa.py
+          python test_gio_ky_bu.py
           python test_canh_bao.py
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py
