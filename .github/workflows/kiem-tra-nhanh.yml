@@ -1,0 +1,90 @@
+name: Kiểm tra nhanh app
+
+# P279: "app bị đứng" — kiểm nhanh (~2 phút) đúng những gì dashboard gọi, thay
+# vì cả diagnose 20 phút:
+#   1. health: DB, độ trễ, kỳ mới nhất cách bây giờ bao lâu (watcher còn chạy?)
+#   2. các kỳ hôm nay: giờ ra từng kỳ — chỗ đứt = lúc watcher dừng
+#   3. tin mỗi kỳ watcher gửi lần cuối lúc nào
+#   4. thời gian trả lời từng endpoint mà dashboard gọi (2 lượt)
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kiem-tra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Kiểm tra
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          H="X-Trigger-Secret: $TRIGGER_SECRET"; TS=$(date +%s)
+          echo "===== BAY GIO: $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN ====="
+          curl -s --max-time 40 "$BASE/api/health" > /tmp/h.json || true
+          curl -s --max-time 60 -H "$H" "$BASE/api/today-draws?cb=$TS" > /tmp/td.json || true
+          curl -s --max-time 40 -H "$H" "$BASE/api/canh-bao/lap-lai?cb=$TS" > /tmp/cb.json || true
+          python3 - <<'PYEOF'
+          import json, datetime
+          def doc(f):
+              try: return json.load(open(f))
+              except Exception: return {'_loi': open(f).read()[:200] if open(f).read() else '(rong / qua thoi gian)'}
+          h = doc('/tmp/h.json')
+          print("=== HEALTH ===")
+          if '_loi' in h:
+              print("  LOI:", h['_loi'])
+          else:
+              c = h.get('components', {})
+              print("  DB      :", c.get('database'))
+              print("  dong bo :", c.get('sync'))
+              print("  du doan :", c.get('prediction_gap'))
+          td = doc('/tmp/td.json')
+          print("\n=== KY HOM NAY (gio VN luc ghi vao DB) ===")
+          if '_loi' in td or 'error' in td:
+              print("  LOI:", td.get('_loi') or td.get('error'))
+          else:
+              ds = sorted(td.get('draws', []), key=lambda r: r['draw_number'])
+              print(f"  {len(ds)} ky, tu #{ds[0]['draw_number'] if ds else '-'} den #{ds[-1]['draw_number'] if ds else '-'}")
+              for r in ds[-12:]:
+                  print(f"    #{r['draw_number']} {r['draw_time']} {r['numbers']}")
+              # cho dut: hai ky lien tiep cach > 9 phut, hoac nhay so ky
+              def phut(t):
+                  return int(t[:2]) * 60 + int(t[3:5]) if t else None
+              for a, b in zip(ds, ds[1:]):
+                  pa, pb = phut(a['draw_time']), phut(b['draw_time'])
+                  if b['draw_number'] - a['draw_number'] > 1 or (pa is not None and pb is not None and pb - pa > 9):
+                      print(f"  >>> DUT: #{a['draw_number']} {a['draw_time']} -> #{b['draw_number']} {b['draw_time']}")
+              bay_gio = datetime.datetime.utcnow() + datetime.timedelta(hours=7)
+              if ds and ds[-1]['draw_time'] and 6 <= bay_gio.hour < 22:
+                  tre = bay_gio.hour * 60 + bay_gio.minute - phut(ds[-1]['draw_time'])
+                  print(f"  ky moi nhat cach bay gio {tre} phut (binh thuong <= 8) -> {'OK' if tre <= 8 else 'WATCHER KHONG DUA KY MOI VAO'}")
+          cb = doc('/tmp/cb.json')
+          print("\n=== TIN MOI KY (watcher) ===")
+          if '_loi' in cb:
+              print("  LOI:", cb['_loi'])
+          else:
+              m = cb.get('lan_chay_gan_nhat') or {}
+              luc = m.get('luc')
+              if luc:
+                  vn = datetime.datetime.strptime(luc, '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=7)
+                  print(f"  lan gui gan nhat: ky #{m.get('den')} luc {vn:%d/%m %H:%M} VN, ok={m.get('ok')}")
+          PYEOF
+          echo
+          echo "=== THOI GIAN TRA LOI CAC ENDPOINT DASHBOARD GOI (giay, ma) ==="
+          for LUOT in 1 2; do
+            echo "--- luot $LUOT ---"
+            for p in /api/next_prediction /api/board-stats /api/today-draws /api/draw-grid /api/sum-stats \
+                     /api/triple-stats /api/pair-stats /api/number_frequency /api/learning-status /api/wl-streak \
+                     /api/watch-scoreboard /api/cold-streaks /api/recent-outcomes /api/today-wr /api/today-combos \
+                     /api/daily-trend /api/bet-signal /api/alert-log /api/trip/lich-su /api/cai-dat/the; do
+              OUT=$(curl -s -o /dev/null -w '%{time_total} %{http_code}' --max-time 30 -H "$H" "$BASE$p?cb=$TS$LUOT") || true
+              T=${OUT%% *}; C=${OUT##* }
+              DAU=""; awk "BEGIN{exit !($T > 5)}" && DAU="  <<< CHAM"
+              [ "$C" = "000" ] && DAU="  <<< TREO (qua 30s)"
+              case "$C" in 5*) DAU="  <<< LOI";; esac
+              printf "  %6.2f  %s  %s%s\n" "$T" "$C" "$p" "$DAU"
+            done
+          done
