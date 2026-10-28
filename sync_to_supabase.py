@@ -172,13 +172,32 @@ def _parse_bingo18(html: str) -> list:
     return results
 
 
+_VL_BAO = {'loai': None, 'luc': 0.0}
+
+
+def _bao_vietlott(loai: str, msg: str):
+    """P280: Vietlott tra loi la thi GHI RA — truoc day non-200 bi bo qua im lang,
+    watcher cu bao "Khong co ky moi" trong khi Vietlott da co 7 ky moi (28/10 13:3x).
+    Chi in khi loai loi doi hoac moi 60s, khoi tran man hinh moi 10s."""
+    now = time.time()
+    if loai != _VL_BAO['loai'] or now - _VL_BAO['luc'] >= 60:
+        logger.warning("Vietlott: %s", msg)
+        _VL_BAO.update(loai=loai, luc=now)
+
+
 def fetch_homepage() -> list:
     try:
         r = _session.get(HOME_URL, timeout=15)
         if r.status_code == 200:
-            return _parse_bingo18(r.text)
+            kq = _parse_bingo18(r.text)
+            if not kq:
+                _bao_vietlott('home-rong', f"trang chu HTTP 200 nhung khong doc duoc ky nao "
+                                           f"({len(r.text)} ky tu) — trang doi giao dien / trang chan bot?")
+            return kq
+        _bao_vietlott(f'home-{r.status_code}', f"trang chu tra HTTP {r.status_code}"
+                      + (" (bi gioi han toc do)" if r.status_code == 429 else ""))
     except Exception as e:
-        logger.warning(f"Homepage fetch: {e}")
+        _bao_vietlott('home-loi', f"trang chu loi ket noi: {e}")
     return []
 
 
@@ -207,9 +226,11 @@ def fetch_detail(draw_id: int, tries: int = 3):
                     if not result.get('draw_id'):
                         result['draw_id'] = draw_id
                     return result
+            else:
+                _bao_vietlott(f'detail-{r.status_code}', f"trang ky #{draw_id} tra HTTP {r.status_code}")
             return None
         except Exception as e:
-            logger.debug(f"Detail #{draw_id}: {e}")
+            _bao_vietlott('detail-loi', f"trang ky #{draw_id} loi ket noi: {e}")
             return None
     return LIMIT
 
@@ -265,7 +286,15 @@ def get_new_since(last_id: int) -> list:
 # ══════════════════════════════════════════════════════════════
 
 def get_conn():
-    return psycopg2.connect(**DB_CONFIG)
+    conn = psycopg2.connect(**DB_CONFIG)
+    # P280: watcher giu MOT ket noi dung mai. Khong autocommit thi moi cau SELECT
+    # mo mot transaction va GIU khoa doc toi lan commit sau ("idle in transaction").
+    # Cloud Run khoi dong instance moi chay ALTER TABLE predictions -> cho khoa do
+    # -> MOI truy van khac vao bang xep hang sau no -> ca app dung; 28/10 13:40
+    # Postgres bao "deadlock detected" khi watcher chen #193427. Autocommit: moi
+    # cau xong la nha khoa. Watcher khong co thao tac nao can gom nhieu cau.
+    conn.autocommit = True
+    return conn
 
 
 _VN_TZ         = ZoneInfo("Asia/Ho_Chi_Minh")

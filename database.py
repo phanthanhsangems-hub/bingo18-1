@@ -120,6 +120,43 @@ def _pg_to_sqlite(sql):
         return sql          # dịch hỏng thì để SQLite tự báo lỗi, đừng nuốt
 
 
+# ── P280: không chạy DDL mỗi lần Cloud Run mở instance mới ──────────────
+# init_database() chạy ~20 câu CREATE INDEX / ALTER TABLE ... IF NOT EXISTS ở
+# MỖI lần khởi động, trong MỘT transaction. "IF NOT EXISTS" không miễn khoá:
+# ALTER TABLE vẫn xin AccessExclusiveLock trên predictions trước khi biết cột
+# đã có. Chỉ cần một phiên khác đang giữ khoá đọc (watcher "idle in
+# transaction") là câu ALTER phải chờ — và trong lúc chờ, MỌI truy vấn khác
+# vào bảng đó xếp hàng sau nó: cả app đứng. 28/10 13:40 Postgres còn báo
+# "deadlock detected" khi watcher chèn kỳ #193427.
+# Giờ: hỏi catalog trước (không cần khoá bảng), đủ hết thì bỏ qua DDL. Còn
+# thiếu thì mới chạy, với lock_timeout 3s để không bao giờ chặn cả app.
+# Danh sách phải khớp DDL trong init_database — test_khoi_dong_khong_khoa.py kiểm.
+_PG_BANG = ('draw_history', 'predictions', 'prediction_results', 'model_stats',
+            'markov_transitions', 'cold_numbers', 'system_config', 'alert_log')
+_PG_CHI_MUC = ('idx_draw_number', 'idx_draw_time', 'idx_pred_draw', 'idx_pred_time',
+               'idx_pred_model', 'idx_presult_pid', 'idx_presult_create', 'idx_markov_from',
+               'idx_pred_draw_model', 'idx_presult_win_draw', 'idx_draw_numbers_gin',
+               'idx_alertlog_time', 'idx_alertlog_key', 'idx_presult_pid_uniq')
+_PG_COT = (('prediction_results', 'is_win_size'), ('prediction_results', 'is_win_sum'),
+           ('model_stats', 'sum_win_rate'), ('predictions', 'vote_breakdown'),
+           ('predictions', 'win_prob'))
+
+
+def _pg_schema_du(cur) -> bool:
+    """Schema đã đủ chưa — chỉ đọc catalog, không đụng khoá bảng nào."""
+    cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+    bang = {r[0] for r in cur.fetchall()}
+    cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'public'")
+    chi_muc = {r[0] for r in cur.fetchall()}
+    cur.execute("SELECT table_name, column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public'")
+    cot = {(r[0], r[1]) for r in cur.fetchall()}
+    cur.execute("SELECT 1 FROM pg_views WHERE schemaname = 'public' AND viewname = 'predictions_vn'")
+    co_view = cur.fetchone() is not None
+    return (set(_PG_BANG) <= bang and set(_PG_CHI_MUC) <= chi_muc
+            and set(_PG_COT) <= cot and co_view)
+
+
 class DatabaseManager:
 
     def __init__(self):
@@ -207,12 +244,39 @@ class DatabaseManager:
         return "%s" if USE_POSTGRES else "?"
 
     # ── Schema init ───────────────────────────────────────────
+    @staticmethod
+    def _pg_backfill_is_win_sum(cur):
+        # Backfill is_win_sum only when rows still need it (skip full scan on warm starts)
+        cur.execute("SELECT 1 FROM prediction_results WHERE is_win_sum IS NULL LIMIT 1")
+        if cur.fetchone():
+            cur.execute("""
+                UPDATE prediction_results pr
+                SET is_win_sum = (
+                    (SELECT SUM(elem::integer)
+                     FROM json_array_elements_text(p.predicted_numbers::json) AS elem)
+                    =
+                    (SELECT SUM(elem::integer)
+                     FROM json_array_elements_text(pr.actual_numbers::json) AS elem)
+                )
+                FROM predictions p
+                WHERE p.id = pr.prediction_id
+                  AND pr.is_win_sum IS NULL
+            """)
+
     def init_database(self):
         conn = self.get_connection()
         try:
             cur = conn.cursor()
 
             if USE_POSTGRES:
+                # P280: chờ khoá quá 3s thì bỏ — thà init hỏng (đã có schema,
+                # app vẫn chạy) còn hơn xếp hàng chặn mọi truy vấn khác.
+                cur.execute("SET LOCAL lock_timeout = '3s'")
+                if _pg_schema_du(cur):
+                    self._pg_backfill_is_win_sum(cur)
+                    conn.commit()
+                    logger.info("Schema Postgres da du — bo qua DDL luc khoi dong (P280)")
+                    return
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS draw_history (
                         id            SERIAL PRIMARY KEY,
@@ -374,22 +438,7 @@ class DatabaseManager:
                 ]:
                     cur.execute(ddl)
 
-                # Backfill is_win_sum only when rows still need it (skip full scan on warm starts)
-                cur.execute("SELECT 1 FROM prediction_results WHERE is_win_sum IS NULL LIMIT 1")
-                if cur.fetchone():
-                    cur.execute("""
-                        UPDATE prediction_results pr
-                        SET is_win_sum = (
-                            (SELECT SUM(elem::integer)
-                             FROM json_array_elements_text(p.predicted_numbers::json) AS elem)
-                            =
-                            (SELECT SUM(elem::integer)
-                             FROM json_array_elements_text(pr.actual_numbers::json) AS elem)
-                        )
-                        FROM predictions p
-                        WHERE p.id = pr.prediction_id
-                          AND pr.is_win_sum IS NULL
-                    """)
+                self._pg_backfill_is_win_sum(cur)
 
             else:  # SQLite
                 cur.execute("""
