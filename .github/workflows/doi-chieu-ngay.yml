@@ -1,0 +1,94 @@
+name: Đối chiếu một ngày với GitHub
+
+# P282: "hôm nay ra 4 trip 666 — có bất thường không". Đối chiếu TỪNG KỲ của một
+# ngày trong DB với nguồn độc lập (vietvudanh/vietlott-data, lấy từ Vietlott):
+# thiếu / thừa / khác số, giờ ghi lệch (kỳ bù bị 07:00), trip trong ngày.
+on:
+  workflow_dispatch:
+    inputs:
+      ngay:
+        description: 'Ngày VN (YYYY-MM-DD), bỏ trống = hôm nay'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  doi-chieu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Đối chiếu
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+          NGAY_TAY: ${{ github.event.inputs.ngay }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          NGAY="${NGAY_TAY:-$(TZ=Asia/Ho_Chi_Minh date +%F)}"
+          echo "Ngay: $NGAY   (bay gio $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN)"
+          curl -s --max-time 90 -o /tmp/gh.jsonl \
+            "https://raw.githubusercontent.com/vietvudanh/vietlott-data/main/data/bingo18.jsonl"
+          read TU DEN < <(python3 -c "
+          import json
+          ids=[int(json.loads(l)['id']) for l in open('/tmp/gh.jsonl') if l.strip() and json.loads(l)['date']=='$NGAY']
+          print(min(ids)-3 if ids else 0, max(ids)+40 if ids else 0)")
+          echo "Khoang ky hoi DB: #$TU..#$DEN"
+          curl -s --max-time 60 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+            "$BASE/api/today-draws?tu=$TU&den=$DEN&cb=$(date +%s)" > /tmp/db.json
+          NGAY="$NGAY" python3 - <<'PYEOF'
+          import json, os, math
+          from collections import Counter
+          ngay = os.environ['NGAY']
+          gh = {}
+          for l in open('/tmp/gh.jsonl'):
+              if l.strip():
+                  r = json.loads(l)
+                  if r['date'] == ngay:
+                      gh[int(r['id'])] = tuple(sorted(r['result']))
+          try:
+              db_j = json.load(open('/tmp/db.json'))
+          except Exception:
+              print("LOI: DB khong tra JSON:", open('/tmp/db.json').read()[:300]); raise SystemExit(1)
+          if 'error' in db_j:
+              print("LOI DB:", db_j['error']); raise SystemExit(1)
+          db = {x['draw_number']: x for x in db_j['draws']}
+          # chi giu ky DB thuoc ngay nay: trong khoang GitHub; sau max GitHub thi lay tiep
+          # khi gio con tang dan (gio quay vong ve 06:xx = da sang ngay hom sau)
+          gmax = max(gh) if gh else 0
+          dbn = {k: v for k, v in db.items() if k in gh}
+          cuoi = db.get(gmax, {}).get('draw_time') or ''
+          for k in sorted(x for x in db if x > gmax):
+              t = db[k].get('draw_time') or ''
+              if t < cuoi:
+                  break
+              dbn[k] = db[k]; cuoi = t
+          print(f"\n=== {ngay}: DB {len(dbn)} ky (#{min(dbn) if dbn else '-'}..#{max(dbn) if dbn else '-'}), "
+                f"GitHub {len(gh)} ky (#{min(gh) if gh else '-'}..#{gmax}) ===")
+          if gh and gmax < max(dbn or [0]):
+              print(f"  (GitHub chua cap nhat het ngay: chi toi #{gmax}; ky sau do chi doi chieu duoc trong DB)")
+          chung = sorted(set(gh) & set(dbn))
+          khac = [(k, gh[k], tuple(sorted(dbn[k]['numbers']))) for k in chung if gh[k] != tuple(sorted(dbn[k]['numbers']))]
+          thieu_db = sorted(set(gh) - set(dbn))
+          print(f"  Trung khop so: {len(chung) - len(khac)}/{len(chung)} ky chung")
+          print(f"  KHAC SO (GitHub vs DB): {khac or 'khong'}")
+          print(f"  DB THIEU (GitHub co): {thieu_db or 'khong'}")
+          ds = sorted(dbn)
+          lo = [k for k in range(ds[0], ds[-1] + 1) if k not in dbn] if ds else []
+          print(f"  Lo hong so ky trong DB: {lo or 'khong'}")
+          # gio ghi lech
+          gio = [(k, dbn[k]['draw_time']) for k in ds]
+          lech = [(k, t) for i, (k, t) in enumerate(gio) if i and t and gio[i-1][1] and t <= gio[i-1][1]]
+          print(f"  Gio ghi LECH thu tu (ky bu bi 07:00...): {lech or 'khong'}")
+          # trip
+          print("\n=== TRIP TRONG NGAY (DB) ===")
+          trip = [(k, dbn[k]['draw_time'], dbn[k]['numbers']) for k in ds if len(set(dbn[k]['numbers'])) == 1]
+          for t in trip:
+              xn = 'GitHub xac nhan' if t[0] in gh and len(set(gh[t[0]])) == 1 else ('GitHub chua co' if t[0] not in gh else 'GitHub KHAC')
+              print(f"    #{t[0]} {t[1]}  {t[2]}   ({xn})")
+          c = Counter(t[2][0] for t in trip)
+          n = len(dbn); lam = n / 216
+          print(f"  Tong {len(trip)} trip / ky vong {n/36:.1f} ({n} ky)")
+          for v, m in sorted(c.items()):
+              p = 1 - sum(math.exp(-lam) * lam**k / math.factorial(k) for k in range(m))
+              print(f"    {v}{v}{v}: {m} lan — ky vong {lam:.2f}, P(>= {m} lan trong ngay) = {p:.3%}")
+          PYEOF
