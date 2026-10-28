@@ -52,9 +52,16 @@ jobs:
           if 'error' in db_j:
               print("LOI DB:", db_j['error']); raise SystemExit(1)
           db = {x['draw_number']: x for x in db_j['draws']}
-          # chi giu ky DB thuoc ngay nay: trong khoang GitHub, hoac sau max GitHub ma gio >= 06:00
+          # chi giu ky DB thuoc ngay nay: trong khoang GitHub; sau max GitHub thi lay tiep
+          # khi gio con tang dan (gio quay vong ve 06:xx = da sang ngay hom sau)
           gmax = max(gh) if gh else 0
-          dbn = {k: v for k, v in db.items() if k in gh or (k > gmax and v.get('draw_time') and v['draw_time'] >= '06:00')}
+          dbn = {k: v for k, v in db.items() if k in gh}
+          cuoi = db.get(gmax, {}).get('draw_time') or ''
+          for k in sorted(x for x in db if x > gmax):
+              t = db[k].get('draw_time') or ''
+              if t < cuoi:
+                  break
+              dbn[k] = db[k]; cuoi = t
           print(f"\n=== {ngay}: DB {len(dbn)} ky (#{min(dbn) if dbn else '-'}..#{max(dbn) if dbn else '-'}), "
                 f"GitHub {len(gh)} ky (#{min(gh) if gh else '-'}..#{gmax}) ===")
           if gh and gmax < max(dbn or [0]):
