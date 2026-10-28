@@ -1,0 +1,36 @@
+name: Sửa giờ kỳ bù
+
+# P283: kỳ bù lỗ hổng từng bị ghi 00:00 UTC (07:00 VN). Watcher bản mới tự sửa mỗi
+# 10 phút; job này sửa phía server để không phụ thuộc máy người dùng đã cập nhật
+# chưa. Mỗi giờ trong giờ quay (07:20-22:20 VN) + bấm tay.
+on:
+  schedule:
+    - cron: '20 0-15 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sua:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Sửa
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          curl -s --max-time 60 -X POST -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+            "https://bingo18-633959711537.asia-southeast1.run.app/api/sua-gio-ky?n=600" > /tmp/r.json || true
+          python3 -c "
+          import json
+          try:
+              d = json.load(open('/tmp/r.json'))
+          except Exception:
+              print('LOI:', open('/tmp/r.json').read()[:300]); raise SystemExit(0)
+          if 'error' in d:
+              print('LOI:', d['error']); raise SystemExit(0)
+          print('Da sua', d['so_ky_sua'], 'ky')
+          for x in d['ky']:
+              print('  #%s  %s -> %s (gio VN)' % (x['ky'], x['gio_cu_vn'], x['gio_moi_vn']))
+          "

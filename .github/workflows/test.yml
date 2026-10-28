@@ -48,6 +48,7 @@ jobs:
           python test_khoi_dong_khong_khoa.py
           python test_gio_ky_bu.py
           python test_today_draws_khoang.py
+          python test_sua_gio_ky.py
           python test_canh_bao.py
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py

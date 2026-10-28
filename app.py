@@ -12235,6 +12235,42 @@ def thang_thong_ke_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/sua-gio-ky', methods=['POST'])
+@limiter.limit("5 per minute")
+def sua_gio_ky_api():
+    """P283: sua gio ky BU bi ghi 00:00 UTC (07:00 VN) bang noi suy tu ky ke ben.
+    Watcher ban moi tu lam moi 10 phut; endpoint nay de sua ngay ca khi may nguoi
+    dung con chay watcher cu. ?n=300 (so ky gan nhat, toi da 2000), ?thu=1 chi xem."""
+    if not _trigger_authorized():
+        return jsonify({'error': 'unauthorized'}), 403
+    try:
+        import gio_ky as _gk
+        n = max(10, min(request.args.get('n', 300, type=int), 2000))
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT draw_number, draw_time FROM draw_history "
+                        f"ORDER BY draw_number DESC LIMIT {ph}", (n,))
+            rows = [(int(r[0]), r[1] if not isinstance(r[1], str)
+                     else datetime.strptime(r[1][:19], '%Y-%m-%d %H:%M:%S')) for r in cur.fetchall()]
+            sua = _gk.tim_gio_le(rows)
+            chi_xem = request.args.get('thu') == '1'
+            if not chi_xem:
+                for dn, _, moi in sua:
+                    cur.execute(f"UPDATE draw_history SET draw_time = {ph} WHERE draw_number = {ph}",
+                                (moi.strftime('%Y-%m-%d %H:%M:%S'), dn))
+                conn.commit()
+        finally:
+            conn.close()
+        vn = lambda t: (t + timedelta(hours=7)).strftime('%d/%m %H:%M')
+        return jsonify({'so_ky_sua': len(sua), 'chi_xem': chi_xem,
+                        'ky': [{'ky': dn, 'gio_cu_vn': vn(cu), 'gio_moi_vn': vn(moi)}
+                               for dn, cu, moi in sua]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/thang/truoc-tong')
 @limiter.limit("5 per minute")
 def thang_truoc_tong_api():

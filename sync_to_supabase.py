@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 import psycopg2
 from vietlott_fetcher import fetch_from_github
 import lap_lai
+import gio_ky
 
 logging.basicConfig(
     level=logging.INFO,
@@ -360,23 +361,9 @@ def tinh_tong(draw: dict) -> int:
     return draw.get('total') or sum(draw['numbers'])
 
 
-def _noi_suy(truoc, sau, dn: int):
-    """P281: gio cho ky `dn` tu ky gan nhat phia truoc / phia sau (dn, datetime)."""
-    if truoc and sau and sau[1] > truoc[1]:
-        return truoc[1] + (sau[1] - truoc[1]) * ((dn - truoc[0]) / (sau[0] - truoc[0]))
-    if truoc:
-        return truoc[1] + timedelta(minutes=_DRAW_INTERVAL * (dn - truoc[0]))
-    if sau:
-        return sau[1] - timedelta(minutes=_DRAW_INTERVAL * (sau[0] - dn))
-    return None
-
-
 def gio_noi_suy(conn, dn: int):
-    """P281: ky BU (lo hong) lay gio tu hai ky ke ben trong DB.
-
-    Trang chi tiet Vietlott va file GitHub chi co NGAY, khong co gio -> truoc day
-    ky bu bi ghi 00:00 UTC = 07:00 sang gio VN (28/10: #193428-#193430, #193432
-    hien 07:00 xen giua 13:42 va 14:02). Tra chuoi UTC hoac None."""
+    """P281: ky BU (lo hong) lay gio tu hai ky ke ben trong DB (xem gio_ky.py).
+    Tra chuoi UTC hoac None."""
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} WHERE draw_number < %s "
@@ -385,7 +372,7 @@ def gio_noi_suy(conn, dn: int):
         cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} WHERE draw_number > %s "
                     f"ORDER BY draw_number ASC LIMIT 1", (dn,))
         sau = cur.fetchone()
-        t = _noi_suy(truoc, sau, dn)
+        t = gio_ky.noi_suy(truoc, sau, dn)
         return t.strftime('%Y-%m-%d %H:%M:%S') if t else None
     except Exception as e:
         logger.debug("gio_noi_suy #%s: %s", dn, e)
@@ -393,27 +380,13 @@ def gio_noi_suy(conn, dn: int):
 
 
 def sua_gio_le(conn, lookback: int = 300) -> int:
-    """P281: ky co gio KHONG tang dan (som hon ky truoc no) = gio ghi sai — sua
-    bang noi suy. Chay moi vong fill_gaps nen tu lanh nhung ky da bi ghi 07:00."""
+    """P281: ky co gio KHONG tang dan = gio ghi sai -> sua bang noi suy. Chay moi
+    vong fill_gaps nen tu lanh nhung ky da bi ghi 07:00."""
     try:
-        cur = conn.cursor()
-        cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} "
-                    f"ORDER BY draw_number DESC LIMIT %s", (lookback,))
-        ky = sorted(cur.fetchall())
-        sua = 0
-        for i in range(1, len(ky)):
-            if ky[i][1] > ky[i - 1][1]:
-                continue
-            sau = next((k for k in ky[i + 1:] if k[1] > ky[i - 1][1]), None)
-            moi = _noi_suy(ky[i - 1], sau, ky[i][0])
-            if not moi:
-                continue
-            cur.execute(f"UPDATE {TABLE} SET draw_time = %s WHERE draw_number = %s",
-                        (moi.strftime('%Y-%m-%d %H:%M:%S'), ky[i][0]))
-            logger.info("sua gio #%d: %s -> %s (UTC)", ky[i][0], ky[i][1], moi.strftime('%H:%M'))
-            ky[i] = (ky[i][0], moi)
-            sua += 1
-        return sua
+        sua = gio_ky.sua_gio_le(conn.cursor(), table=TABLE, lookback=lookback)
+        for dn, cu, moi in sua:
+            logger.info("sua gio #%d: %s -> %s (UTC)", dn, cu, moi.strftime('%H:%M'))
+        return len(sua)
     except Exception as e:
         logger.warning("sua_gio_le: %s", e)
         return 0
