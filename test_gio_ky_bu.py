@@ -6,6 +6,7 @@ from unittest import mock
 os.environ.setdefault('DATABASE_URL', '')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sync_to_supabase as S
+import gio_ky
 DAT = HONG = 0
 def kiem(t, ok, ct=''):
     global DAT, HONG
@@ -15,11 +16,11 @@ def kiem(t, ok, ct=''):
 u = lambda h, m: DT(2026, 10, 28, h, m)      # gio UTC
 
 print("=== 1. NOI SUY ===")
-kiem("giua hai ky: chia deu", S._noi_suy((193427, u(6, 42)), (193431, u(6, 58)), 193429) == u(6, 50))
-kiem("chi co ky truoc: +6 phut/ky", S._noi_suy((193421, u(5, 49)), None, 193423) == u(6, 1))
-kiem("chi co ky sau: -6 phut/ky", S._noi_suy(None, (193431, u(6, 58)), 193430) == u(6, 52))
-kiem("ky sau KHONG muon hon ky truoc -> bo ky sau", S._noi_suy((10, u(6, 42)), (12, u(0, 0)), 11) == u(6, 48))
-kiem("khong co gi -> None", S._noi_suy(None, None, 5) is None)
+kiem("giua hai ky: chia deu", gio_ky.noi_suy((193427, u(6, 42)), (193431, u(6, 58)), 193429) == u(6, 50))
+kiem("chi co ky truoc: +6 phut/ky", gio_ky.noi_suy((193421, u(5, 49)), None, 193423) == u(6, 1))
+kiem("chi co ky sau: -6 phut/ky", gio_ky.noi_suy(None, (193431, u(6, 58)), 193430) == u(6, 52))
+kiem("ky sau KHONG muon hon ky truoc -> bo ky sau", gio_ky.noi_suy((10, u(6, 42)), (12, u(0, 0)), 11) == u(6, 48))
+kiem("khong co gi -> None", gio_ky.noi_suy(None, None, 5) is None)
 
 class Cur:
     def __init__(s, ky): s.ky = dict(ky); s.r = []; s.upd = []
