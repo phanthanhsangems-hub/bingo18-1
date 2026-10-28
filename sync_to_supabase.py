@@ -360,6 +360,65 @@ def tinh_tong(draw: dict) -> int:
     return draw.get('total') or sum(draw['numbers'])
 
 
+def _noi_suy(truoc, sau, dn: int):
+    """P281: gio cho ky `dn` tu ky gan nhat phia truoc / phia sau (dn, datetime)."""
+    if truoc and sau and sau[1] > truoc[1]:
+        return truoc[1] + (sau[1] - truoc[1]) * ((dn - truoc[0]) / (sau[0] - truoc[0]))
+    if truoc:
+        return truoc[1] + timedelta(minutes=_DRAW_INTERVAL * (dn - truoc[0]))
+    if sau:
+        return sau[1] - timedelta(minutes=_DRAW_INTERVAL * (sau[0] - dn))
+    return None
+
+
+def gio_noi_suy(conn, dn: int):
+    """P281: ky BU (lo hong) lay gio tu hai ky ke ben trong DB.
+
+    Trang chi tiet Vietlott va file GitHub chi co NGAY, khong co gio -> truoc day
+    ky bu bi ghi 00:00 UTC = 07:00 sang gio VN (28/10: #193428-#193430, #193432
+    hien 07:00 xen giua 13:42 va 14:02). Tra chuoi UTC hoac None."""
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} WHERE draw_number < %s "
+                    f"ORDER BY draw_number DESC LIMIT 1", (dn,))
+        truoc = cur.fetchone()
+        cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} WHERE draw_number > %s "
+                    f"ORDER BY draw_number ASC LIMIT 1", (dn,))
+        sau = cur.fetchone()
+        t = _noi_suy(truoc, sau, dn)
+        return t.strftime('%Y-%m-%d %H:%M:%S') if t else None
+    except Exception as e:
+        logger.debug("gio_noi_suy #%s: %s", dn, e)
+        return None
+
+
+def sua_gio_le(conn, lookback: int = 300) -> int:
+    """P281: ky co gio KHONG tang dan (som hon ky truoc no) = gio ghi sai — sua
+    bang noi suy. Chay moi vong fill_gaps nen tu lanh nhung ky da bi ghi 07:00."""
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} "
+                    f"ORDER BY draw_number DESC LIMIT %s", (lookback,))
+        ky = sorted(cur.fetchall())
+        sua = 0
+        for i in range(1, len(ky)):
+            if ky[i][1] > ky[i - 1][1]:
+                continue
+            sau = next((k for k in ky[i + 1:] if k[1] > ky[i - 1][1]), None)
+            moi = _noi_suy(ky[i - 1], sau, ky[i][0])
+            if not moi:
+                continue
+            cur.execute(f"UPDATE {TABLE} SET draw_time = %s WHERE draw_number = %s",
+                        (moi.strftime('%Y-%m-%d %H:%M:%S'), ky[i][0]))
+            logger.info("sua gio #%d: %s -> %s (UTC)", ky[i][0], ky[i][1], moi.strftime('%H:%M'))
+            ky[i] = (ky[i][0], moi)
+            sua += 1
+        return sua
+    except Exception as e:
+        logger.warning("sua_gio_le: %s", e)
+        return 0
+
+
 def insert_draw(conn, draw: dict) -> bool:
     try:
         cur      = conn.cursor()
@@ -1131,6 +1190,8 @@ def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
             if draw == LIMIT:               # P271: bị giới hạn — dừng vòng, KHÔNG blacklist
                 logger.warning("vietlott-gaps: bị giới hạn tốc độ, tạm dừng đến vòng sau")
                 break
+            if draw and draw != LIMIT:
+                draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')
             if draw and insert_draw(conn, draw):
                 da_bu.append((draw_id, draw['numbers'], tinh_tong(draw)))
                 logger.info("  ✅ vietlott-gaps #%d %s tổng=%d",
@@ -1230,11 +1291,12 @@ def fill_gaps(conn, lookback: int = 500) -> int:
             total = sum(nums)
             cat = "NHO" if total <= 9 else ("HOA" if total <= 11 else "LON")
             date_str = (draw.get("draw_time") or "")[:10]
-            if date_str and date_str in date_offsets and dn in date_offsets[date_str]:
+            draw_time = gio_noi_suy(conn, dn)          # P281: uu tien noi suy tu ky ke ben
+            if not draw_time and date_str and date_str in date_offsets and dn in date_offsets[date_str]:
                 pos = date_offsets[date_str][dn]
                 base = datetime.strptime(date_str, "%Y-%m-%d")
                 draw_time = (base + timedelta(minutes=pos * 6)).strftime("%Y-%m-%d %H:%M:%S")
-            else:
+            elif not draw_time:
                 draw_time = draw.get("draw_time") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             try:
                 cur.execute(
@@ -1322,6 +1384,7 @@ def mode_bulk():
             logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng ở #%d. Chờ 10–15 phút rồi chạy lại.", draw_id)
             break
         if draw:
+            draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')
             ok = insert_draw(conn, draw)
             if ok:
                 ins += 1
@@ -1396,6 +1459,7 @@ def mode_gaps():
             logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng. Chờ 10–15 phút rồi chạy lại --mode gaps.")
             break
         if draw:
+            draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')
             if insert_draw(conn, draw):
                 ins += 1
                 logger.info("  ✅  #%d  %s  tổng=%d", draw_id, draw['numbers'], tinh_tong(draw))
@@ -1529,6 +1593,7 @@ def mode_watch():
                         args=(len(da_bu) + 10, min(d[0] for d in da_bu)),
                         daemon=True,
                     ).start()
+                sua_gio_le(conn)       # P281: ky bu bi ghi gio sai (07:00) -> sua
                 last_fill_time = now
 
             # #13: auto-retry draws thiếu prediction mỗi 5 phút
