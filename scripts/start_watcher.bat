@@ -6,6 +6,8 @@ REM   powercfg /change standby-timeout-ac 0
 REM   powercfg /change hibernate-timeout-ac 0
 REM Chay ngay khong can dang xuat:  schtasks /Run /TN Bingo18Watcher
 cd /d "%~dp0\.."
+REM P279: watcher tu thoat khi vong lap dung > 20 phut, vong :loop chay lai
+set BINGO_WATCHDOG=1
 :loop
 echo [%date% %time%] khoi dong watcher>> watcher_restart.log
 python sync_to_supabase.py --mode watch
