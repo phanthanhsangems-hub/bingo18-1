@@ -11606,10 +11606,21 @@ def today_draws():
         s = sum(nums)
         return 'HOA' if 10 <= s <= 11 else ('NHO' if s <= 9 else 'LON')
     try:
+        # P282: ?tu=&den= (so ky, toi da 400) — doi chieu mot ngay da qua voi
+        # nguon ngoai (GitHub) theo SO KY, khong theo gio ghi (gio ky bu co the lech).
+        _tu, _den = request.args.get('tu', type=int), request.args.get('den', type=int)
+        if _tu is not None or _den is not None:
+            if _tu is None or _den is None or not (0 <= _den - _tu <= 400):
+                return jsonify({'error': 'tu/den phai co ca hai, den - tu trong 0..400'}), 400
+            ph = '%s' if USE_POSTGRES else '?'
+            _loc = f"d.draw_number BETWEEN {ph} AND {ph}"
+            _tham = (_tu, _den)
+        else:
+            _loc, _tham = None, ()
         conn = db.get_connection()
         cur  = conn.cursor()
         if USE_POSTGRES:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT d.draw_number,
                        d.numbers,
                        d.size_category,
@@ -11622,21 +11633,20 @@ def today_draws():
                 LEFT JOIN predictions p
                   ON p.draw_number = d.draw_number AND p.model_name = 'majority_vote'
                 LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE (d.draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
-                      = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+                WHERE {_loc or "(d.draw_time AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Ho_Chi_Minh')::date = (NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date"}
                 ORDER BY d.draw_number DESC
-            """)
+            """, _tham)
         else:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT d.draw_number, d.numbers, d.size_category, d.draw_time,
                        p.predicted_numbers, COALESCE(p.win_prob, p.confidence) AS confidence, pr.is_win_size, pr.match_count
                 FROM draw_history d
                 LEFT JOIN predictions p
                   ON p.draw_number = d.draw_number AND p.model_name = 'majority_vote'
                 LEFT JOIN prediction_results pr ON pr.prediction_id = p.id
-                WHERE date(d.draw_time) = date('now')
+                WHERE {_loc or "date(d.draw_time) = date('now')"}
                 ORDER BY d.draw_number DESC
-            """)
+            """, _tham)
         rows = cur.fetchall()
         conn.close()
         results = []
