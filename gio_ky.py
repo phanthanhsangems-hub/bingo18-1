@@ -91,7 +91,7 @@ def sua_theo_lich(ky: list, nguong_phut: int = NGUONG_PHUT) -> list:
     """ky: [(dn, datetime UTC naive)]. Ngay VN cua moi khoi 159 ky = ngay chiem
     da so trong khoi (ky ghi sai gio thuong van cung ngay: 07:00, +1h55...).
     Khoi khong co ngay nao chiem > 1/2, hoac it hon KY_DUNG_TOI_THIEU ky dang
-    trung lich, thi bo qua (lich doi / du lieu la).
+    trung lich (tru khi ngay lien truoc da tin duoc va du 159 ky), thi bo qua.
     Tra [(dn, gio_cu, gio_moi)] cho ky lech lich qua `nguong_phut`."""
     from collections import Counter, defaultdict
     theo_khoi = defaultdict(list)
@@ -99,14 +99,21 @@ def sua_theo_lich(ky: list, nguong_phut: int = NGUONG_PHUT) -> list:
         if t is not None and dn >= KY_HIEU_LUC:
             theo_khoi[khoi(dn)].append((dn, t))
     sua = []
-    for _, ds in sorted(theo_khoi.items()):
+    tin_truoc = None        # (so khoi, ngay) cua khoi lien truoc DA tin duoc va du 159 ky
+    for b, ds in sorted(theo_khoi.items()):
         dem = Counter((t + LECH_VN).date() for _, t in ds)
         ngay, n = dem.most_common(1)[0]
         if n * 2 <= len(ds):
+            tin_truoc = None
             continue
         dung = sum(1 for dn, t in ds if abs((t - gio_lich(dn, ngay)).total_seconds()) <= nguong_phut * 60)
-        if dung < KY_DUNG_TOI_THIEU:
+        # Ngay hom truoc dung neo va du 159 ky (khong quay thieu) -> neo hom nay
+        # chac chan con dung, ke ca khi ca ngay bi ghi lech (30/10: 0/159 ky trung lich).
+        noi_tiep = tin_truoc is not None and tin_truoc[0] == b - 1 and tin_truoc[1] < ngay
+        if dung < KY_DUNG_TOI_THIEU and not noi_tiep:
+            tin_truoc = None
             continue
+        tin_truoc = (b, ngay) if len(ds) == KY_MOI_NGAY else None
         for dn, t in sorted(ds):
             moi = gio_lich(dn, ngay)
             if abs((t - moi).total_seconds()) > nguong_phut * 60:

@@ -70,6 +70,13 @@ kiem("(doi chung) cach cu 'tang dan' day lech ca loat", len(cu) > 5, len(cu))
 print("=== 3c. AN TOAN ===")
 lech = [(dn, lich(dn) + TD(minutes=6 * 14)) for dn in range(193672, 193700)]   # neo lech 14 vi tri
 kiem("ca khoi khong ky nao trung lich -> bo qua", G.sua_theo_lich(lech) == [])
+hom_qua = [(dn, G.gio_lich(dn, date(2026, 10, 29)) + TD(minutes=1)) for dn in range(193513, 193672)]
+ca_ngay_lech = [(dn, lich(dn) + TD(minutes=115)) for dn in range(193672, 193831)]     # 30/10 that
+sua = G.sua_theo_lich(hom_qua + ca_ngay_lech)
+kiem("ca ngay lech nhung hom qua du 159 ky dung lich -> sua ca 159 ky",
+     len(sua) == 159 and all(x[0] >= 193672 for x in sua), len(sua))
+kiem("#193830 ve 21:54 VN", any(x[0] == 193830 and x[2] == DT(2026, 10, 30, 14, 54) for x in sua))
+kiem("hom qua thieu ky -> KHONG noi tiep (bo qua)", G.sua_theo_lich(hom_qua[:150] + ca_ngay_lech) == [])
 cu_xa = [(150000, u(0, 0)), (150001, u(0, 0)), (150002, u(5, 0))]
 kiem("ky truoc 03/04/2026 -> khong sua", G.sua_theo_lich(cu_xa) == [])
 

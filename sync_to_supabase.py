@@ -379,7 +379,7 @@ def gio_noi_suy(conn, dn: int):
         return None
 
 
-def sua_gio_le(conn, lookback: int = 300) -> int:
+def sua_gio_le(conn, lookback: int = 500) -> int:
     """P284: ky lech LICH QUAY > 4 phut -> dua ve dung lich (gio_ky.sua_theo_lich).
     Chay moi vong fill_gaps nen tu lanh ky bi ghi 07:00 / ghi muon."""
     try:
