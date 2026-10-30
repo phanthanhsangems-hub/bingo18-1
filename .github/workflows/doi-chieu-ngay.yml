@@ -75,13 +75,20 @@ jobs:
           ds = sorted(dbn)
           lo = [k for k in range(ds[0], ds[-1] + 1) if k not in dbn] if ds else []
           print(f"  Lo hong so ky trong DB: {lo or 'khong'}")
-          # gio ghi lech
-          gio = [(k, dbn[k]['draw_time']) for k in ds]
-          lech = [(k, t) for i, (k, t) in enumerate(gio) if i and t and gio[i-1][1] and t <= gio[i-1][1]]
-          print(f"  Gio ghi LECH thu tu (ky bu bi 07:00...): {lech or 'khong'}")
+          # P284: gio ghi so voi LICH QUAY (159 ky/ngay, ky dau 06:06, cach 6 phut;
+          # neo #193354 = ky dau 28/10/2026). Ghi song tre 0-2 phut la binh thuong.
+          def lich(k):
+              p = 6 * 60 + 6 + 6 * ((k - 193354) % 159)
+              return f"{p // 60:02d}:{p % 60:02d}"
+          def phut(t): return int(t[:2]) * 60 + int(t[3:5])
+          lech = [(k, dbn[k]['draw_time'], lich(k)) for k in ds
+                  if dbn[k].get('draw_time') and abs(phut(dbn[k]['draw_time']) - phut(lich(k))) > 4]
+          print(f"  Gio ghi LECH LICH QUAY > 4 phut (ky, ghi, lich): {len(lech)} ky "
+                + (str(lech[:15]) + (' ...' if len(lech) > 15 else '') if lech else '— khong'))
           # trip
           print("\n=== TRIP TRONG NGAY (DB) ===")
           trip = [(k, dbn[k]['draw_time'], dbn[k]['numbers']) for k in ds if len(set(dbn[k]['numbers'])) == 1]
+          trip = [(k, lich(k) + ' (lich)', n) for k, _, n in trip]
           for t in trip:
               xn = 'GitHub xac nhan' if t[0] in gh and len(set(gh[t[0]])) == 1 else ('GitHub chua co' if t[0] not in gh else 'GitHub KHAC')
               print(f"    #{t[0]} {t[1]}  {t[2]}   ({xn})")
