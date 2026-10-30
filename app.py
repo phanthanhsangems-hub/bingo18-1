@@ -12238,7 +12238,7 @@ def thang_thong_ke_api():
 @app.route('/api/sua-gio-ky', methods=['POST'])
 @limiter.limit("5 per minute")
 def sua_gio_ky_api():
-    """P283: sua gio ky BU bi ghi 00:00 UTC (07:00 VN) bang noi suy tu ky ke ben.
+    """P283/P284: dua gio ky lech ve DUNG LICH QUAY (159 ky/ngay, 06:06 + 6 phut x i).
     Watcher ban moi tu lam moi 10 phut; endpoint nay de sua ngay ca khi may nguoi
     dung con chay watcher cu. ?n=300 (so ky gan nhat, toi da 2000), ?thu=1 chi xem."""
     if not _trigger_authorized():
@@ -12254,7 +12254,7 @@ def sua_gio_ky_api():
                         f"ORDER BY draw_number DESC LIMIT {ph}", (n,))
             rows = [(int(r[0]), r[1] if not isinstance(r[1], str)
                      else datetime.strptime(r[1][:19], '%Y-%m-%d %H:%M:%S')) for r in cur.fetchall()]
-            sua = _gk.tim_gio_le(rows)
+            sua = _gk.sua_theo_lich(rows)      # P284: theo lich quay, khong "tang dan"
             chi_xem = request.args.get('thu') == '1'
             if not chi_xem:
                 for dn, _, moi in sua:

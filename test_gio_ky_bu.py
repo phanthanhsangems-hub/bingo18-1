@@ -43,18 +43,35 @@ class Conn:
 print("=== 2. KY BU LAY GIO TU KY KE BEN ===")
 cur = Cur({193421: u(5, 49), 193427: u(6, 42)})
 g = S.gio_noi_suy(Conn(cur), 193424)
-kiem("#193424 nam giua 12:49 va 13:42 VN (khong phai 07:00)", g == '2026-10-28 06:15:30', g)
+kiem("#193424 theo lich quay: 13:06 VN (khong phai 07:00)", g == '2026-10-28 06:06:00', g)
 
-print("=== 3. TU SUA KY DA GHI 07:00 (du lieu that 28/10) ===")
+print("=== 3. TU SUA THEO LICH QUAY (du lieu that 28/10) ===")
 that = {193427: u(6, 42), 193428: u(0, 0), 193429: u(0, 0), 193430: u(0, 0), 193431: u(6, 57),
         193432: u(0, 0), 193433: u(7, 2), 193434: u(7, 6)}
 cur = Cur(that)
 n = S.sua_gio_le(Conn(cur))
-kiem("sua dung 4 ky bi 07:00", sorted(k for k, _ in cur.upd) == [193428, 193429, 193430, 193432], cur.upd)
-ds = sorted(cur.ky.items())
-kiem("sau khi sua gio tang dan", all(b[1] > a[1] for a, b in zip(ds, ds[1:])), ds)
-kiem("khong dung vao ky dung", cur.ky[193431] == u(6, 57) and cur.ky[193433] == u(7, 2))
+kiem("sua ky lech lich (4 ky 07:00 + 2 ky ghi muon)", sorted(k for k, _ in cur.upd) == [193427, 193428, 193429, 193430, 193431, 193432], cur.upd)
+kiem("#193428 ve 13:30 VN", cur.ky[193428] == u(6, 30), cur.ky[193428])
+kiem("khong dung vao ky dung lich", cur.ky[193433] == u(7, 2) and cur.ky[193434] == u(7, 6))
 kiem("chay lai -> khong sua gi nua", S.sua_gio_le(Conn(cur)) == 0)
+
+print("=== 3b. KHONG LECH DAY CHUYEN (loi P281 ngay 30/10) ===")
+import gio_ky as G
+from datetime import date
+lich = lambda dn: G.gio_lich(dn, date(2026, 10, 30))
+ky = [(dn, lich(dn) + TD(minutes=1)) for dn in range(193672, 193700)]   # ghi song: tre 1 phut
+ky[10] = (193682, DT(2026, 10, 30, 2, 1))                               # 09:01 VN, that 07:06
+sua = G.sua_theo_lich(ky)
+kiem("chi sua dung ky ghi muon #193682", [x[0] for x in sua] == [193682], sua)
+kiem("#193682 ve 07:06 VN", sua and sua[0][2] == DT(2026, 10, 30, 0, 6), sua)
+cu = S.gio_ky.tim_gio_le(ky)
+kiem("(doi chung) cach cu 'tang dan' day lech ca loat", len(cu) > 5, len(cu))
+
+print("=== 3c. AN TOAN ===")
+lech = [(dn, lich(dn) + TD(minutes=6 * 14)) for dn in range(193672, 193700)]   # neo lech 14 vi tri
+kiem("ca khoi khong ky nao trung lich -> bo qua", G.sua_theo_lich(lech) == [])
+cu_xa = [(150000, u(0, 0)), (150001, u(0, 0)), (150002, u(5, 0))]
+kiem("ky truoc 03/04/2026 -> khong sua", G.sua_theo_lich(cu_xa) == [])
 
 print("=== 4. MOI CHO BU KY DEU NOI SUY ===")
 src = open('sync_to_supabase.py', encoding='utf-8').read()

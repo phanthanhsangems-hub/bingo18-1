@@ -372,7 +372,7 @@ def gio_noi_suy(conn, dn: int):
         cur.execute(f"SELECT draw_number, draw_time FROM {TABLE} WHERE draw_number > %s "
                     f"ORDER BY draw_number ASC LIMIT 1", (dn,))
         sau = cur.fetchone()
-        t = gio_ky.noi_suy(truoc, sau, dn)
+        t = gio_ky.gio_cho_ky_bu(dn, truoc, sau)    # P284: theo lich quay
         return t.strftime('%Y-%m-%d %H:%M:%S') if t else None
     except Exception as e:
         logger.debug("gio_noi_suy #%s: %s", dn, e)
@@ -380,8 +380,8 @@ def gio_noi_suy(conn, dn: int):
 
 
 def sua_gio_le(conn, lookback: int = 300) -> int:
-    """P281: ky co gio KHONG tang dan = gio ghi sai -> sua bang noi suy. Chay moi
-    vong fill_gaps nen tu lanh nhung ky da bi ghi 07:00."""
+    """P284: ky lech LICH QUAY > 4 phut -> dua ve dung lich (gio_ky.sua_theo_lich).
+    Chay moi vong fill_gaps nen tu lanh ky bi ghi 07:00 / ghi muon."""
     try:
         sua = gio_ky.sua_gio_le(conn.cursor(), table=TABLE, lookback=lookback)
         for dn, cu, moi in sua:
