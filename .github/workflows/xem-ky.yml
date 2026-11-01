@@ -1,0 +1,39 @@
+name: Xem kỳ trong DB
+
+# P285: in từng kỳ (số, tổng, giờ) trong một khoảng số kỳ, lấy thẳng từ DB —
+# để xem phần trong ngày mà nguồn GitHub chưa cập nhật.
+on:
+  workflow_dispatch:
+    inputs:
+      tu:
+        description: 'Từ kỳ'
+        required: true
+      den:
+        description: 'Đến kỳ (tối đa tu+400)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  xem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Xem
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+          TU: ${{ github.event.inputs.tu }}
+          DEN: ${{ github.event.inputs.den }}
+        run: |
+          case "$TU$DEN" in *[!0-9]*) echo "tu/den phai la so"; exit 1;; esac
+          curl -s --max-time 60 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+            "https://bingo18-633959711537.asia-southeast1.run.app/api/today-draws?tu=$TU&den=$DEN&cb=$(date +%s)" > /tmp/k.json
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/k.json'))
+          if 'error' in d: print('LOI:', d['error']); raise SystemExit(1)
+          for x in sorted(d['draws'], key=lambda x: x['draw_number']):
+              print('KY', x['draw_number'], x['draw_time'], ''.join(map(str, sorted(x['numbers']))), sum(x['numbers']))
+          print('SO KY', len(d['draws']))
+          "
