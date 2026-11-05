@@ -39,12 +39,11 @@ jobs:
           JSON
           if [ "$CHE_DO" = "that" ]; then DRY="--no-dry-run"; else DRY="--dry-run"; fi
           echo "Che do: $CHE_DO ($DRY)"
-          LOI=0
           for R in "bingo18-images asia-southeast1" "cloud-run-source-deploy asia-southeast1" "gcr.io us" "asia.gcr.io asia"; do
             set -- $R
             echo "=== $1 ($2) ==="
-            if gcloud artifacts repositories set-cleanup-policies "$1" --location="$2" \
-                 --project bingo18-predictor --policy=/tmp/policy.json $DRY 2>&1 | tail -5; then :; else LOI=1; fi
+            gcloud artifacts repositories set-cleanup-policies "$1" --location="$2" \
+              --project bingo18-predictor --policy=/tmp/policy.json $DRY 2>&1 | tail -5 || true
             gcloud artifacts repositories describe "$1" --location="$2" --project bingo18-predictor \
               --format="value(cleanupPolicyDryRun,sizeBytes)" 2>&1 | head -2
           done
