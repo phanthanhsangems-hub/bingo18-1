@@ -167,6 +167,7 @@ async function loadRecent() {
 
   // topbar: kỳ mới nhất + sync lag
   const latest = rows[0];
+  baoKyMoi(latest);                // P286: thay SSE
   _lastDraw = {
     draw_number: latest.draw_number,
     combo: [...(latest.numbers || [])].sort().join(''),
@@ -539,34 +540,19 @@ function bindTips() {
   });
 }
 
-// ── SSE live updates ──────────────────────────────────────────
-let sse = null;
-let sseBackoff = 5000;             // P173: lùi dần khi server từ chối
-const SSE_BACKOFF_MAX = 120000;
-function connectSSE() {
-  try {
-    if (sse) sse.close();
-    sse = new EventSource('/api/sse/draws');
-    sse.onopen = () => { sseBackoff = 5000; };   // nối được thì reset
-    sse.onmessage = e => {
-      try {
-        const d = JSON.parse(e.data);
-        if (d.type === 'new_draw') {
-          toast(`🎲 Kỳ #${d.draw_number}: ${(d.numbers || []).join('·')} — ${SZ_VI[d.size_category] || ''}`);
-          refreshAll();
-        }
-      } catch { /* heartbeat */ }
-    };
-    // Server đóng sau ~4 phút (bình thường) HOẶC trả 503 khi đủ 5 client.
-    // Trường hợp 503 mà cứ thử lại mỗi 5s thì thành tự DDoS chính mình,
-    // nên nhân đôi thời gian chờ tới tối đa 2 phút. Dashboard vẫn cập nhật
-    // nhờ vòng refresh 60s, chỉ mất tin đẩy tức thì.
-    sse.onerror = () => {
-      sse.close();
-      setTimeout(connectSSE, sseBackoff);
-      sseBackoff = Math.min(sseBackoff * 2, SSE_BACKOFF_MAX);
-    };
-  } catch { /* SSE unsupported */ }
+// ── Kỳ mới: phát hiện trong vòng làm mới 60s (P286, thay SSE) ─────
+// SSE giữ request mở 24/24 nên Cloud Run tính tiền 24/24 (~2,4 triệu đ/tháng).
+// loadRecent chạy mỗi phút: thấy số kỳ tăng thì báo + nạp nhóm thống kê,
+// đúng việc SSE từng làm, chỉ trễ tối đa ~1 phút.
+let _kyDaThay = null;
+function baoKyMoi(latest) {
+  const dn = latest && latest.draw_number;
+  if (!dn) return;
+  if (_kyDaThay !== null && dn > _kyDaThay) {
+    toast(`🎲 Kỳ #${dn}: ${(latest.numbers || []).join('·')} — ${SZ_VI[latest.size_category] || ''}`);
+    refreshThongKe();
+  }
+  _kyDaThay = Math.max(_kyDaThay || 0, dn);
 }
 
 // ── Bet signal + Kelly stake ──────────────────────────────────
@@ -1099,11 +1085,14 @@ safe(loadTripNgay);
   if (_tnSel) _tnSel.addEventListener('change', () => safe(loadTripNgay));
   if (_tnThem) _tnThem.addEventListener('click', () => { _tnMoHet = !_tnMoHet; safe(loadTripNgay); });
 }
-setInterval(() => safe(loadTripNgay), 120000);
-setInterval(refreshAllVaGhiMoc, 60000);
-setInterval(refreshThongKe, 300000);   // P267: thống kê nặng 5 phút/lần
-setInterval(() => safe(loadTrend), 600000);
-setInterval(loadBangLichSu, 300000);
+// P286: tab ẩn (thu nhỏ, chuyển tab, khoá máy) thì KHÔNG gọi máy chủ — mỗi
+// request làm Cloud Run tính tiền. Hiện lại thì visibilitychange nạp ngay.
+const khiHien = fn => () => { if (document.visibilityState === 'visible') fn(); };
+setInterval(khiHien(() => safe(loadTripNgay)), 120000);
+setInterval(khiHien(refreshAllVaGhiMoc), 60000);
+setInterval(khiHien(refreshThongKe), 300000);   // P267: thống kê nặng 5 phút/lần
+setInterval(khiHien(() => safe(loadTrend)), 600000);
+setInterval(khiHien(loadBangLichSu), 300000);
 
 // P204: trình duyệt điện thoại ĐÓNG BĂNG setInterval khi tab chạy nền hoặc
 // khoá máy. Mở lại app là thấy dữ liệu của lúc rời đi — có thể cũ hàng chục
@@ -1116,10 +1105,7 @@ document.addEventListener('visibilitychange', () => {
   refreshAllVaGhiMoc();
   // Bảng lịch sử nặng hơn và server cache 300s — chỉ nạp lại khi đã quá cũ
   if (Date.now() - _lanCuoiTaiBangTong > 120000) loadBangLichSu();
-  if (typeof connectSSE === 'function') connectSSE();   // SSE cũng bị ngắt khi nền
 });
-
-connectSSE();
 
 // ── P232: bật/tắt từng thẻ trên dashboard ───────────────────
 // Máy chủ là nguồn sự thật (lưu ở system_config) nên điện thoại và máy tính

@@ -9,6 +9,12 @@ on:
       - '.github/workflows/morning-digest.yml'
       - 'sync_to_supabase.py'
       - '.github/sync-requirements.txt'
+      # P286: sửa workflow / test / script không đổi gì trong image (.dockerignore
+      # bỏ test_*.py, scripts/) — trước đây vẫn build + deploy lại, mỗi lần thêm
+      # ~190 MB vào kho image và một lượt Cloud Build.
+      - '.github/workflows/**'
+      - 'test_*.py'
+      - 'scripts/**'
 
 jobs:
   deploy:
