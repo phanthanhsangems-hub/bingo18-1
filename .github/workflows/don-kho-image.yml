@@ -1,0 +1,51 @@
+name: Dọn kho image (Artifact Registry)
+
+# P287: kho image ~137 GB (~$13,6/tháng) vì không bao giờ xoá image cũ. Đặt
+# CHÍNH SÁCH TỰ DỌN: mỗi image giữ 10 bản mới nhất, bản cũ hơn 1 ngày ngoài 10
+# bản đó thì xoá. Google tự chạy policy (khoảng 1 lần/ngày), không xoá ngay.
+# Người dùng chọn cách này ngày 05/11/2026 (cấp quyền Repository Administrator
+# cho github-deploy). che_do=thu -> dry run (chỉ ghi log sẽ xoá gì).
+on:
+  workflow_dispatch:
+    inputs:
+      che_do:
+        description: 'thu = dry run, that = áp dụng'
+        required: true
+        default: 'thu'
+
+permissions:
+  contents: read
+
+jobs:
+  don:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Đặt chính sách tự dọn
+        env:
+          CHE_DO: ${{ github.event.inputs.che_do }}
+        run: |
+          cat > /tmp/policy.json <<'JSON'
+          [
+            {"name": "giu-10-ban-moi-nhat", "action": {"type": "Keep"},
+             "mostRecentVersions": {"keepCount": 10}},
+            {"name": "xoa-ban-cu", "action": {"type": "Delete"},
+             "condition": {"tagState": "any", "olderThan": "1d"}}
+          ]
+          JSON
+          if [ "$CHE_DO" = "that" ]; then DRY="--no-dry-run"; else DRY="--dry-run"; fi
+          echo "Che do: $CHE_DO ($DRY)"
+          for R in "bingo18-images asia-southeast1" "cloud-run-source-deploy asia-southeast1" "gcr.io us" "asia.gcr.io asia"; do
+            set -- $R
+            echo "=== $1 ($2) ==="
+            gcloud artifacts repositories set-cleanup-policies "$1" --location="$2" \
+              --project bingo18-predictor --policy=/tmp/policy.json $DRY 2>&1 | tail -5 || true
+            gcloud artifacts repositories describe "$1" --location="$2" --project bingo18-predictor \
+              --format="value(cleanupPolicyDryRun,sizeBytes)" 2>&1 | head -2
+          done
+          echo
+          echo "Kiem tra quyen (neu thay PERMISSION_DENIED o tren = chua cap quyen Repository Administrator)."
