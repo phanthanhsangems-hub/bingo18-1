@@ -15,7 +15,7 @@ from collections import Counter
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from flask import (Flask, jsonify, request, send_from_directory, make_response,
-                   render_template, Response, stream_with_context,
+                   render_template, Response,
                    session, redirect, url_for)
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -8432,106 +8432,19 @@ def combo_comeback():
         return jsonify({"error": str(e)}), 500
 
 
-# ── SSE: live draw stream ─────────────────────────────────────
-# P173: mỗi client SSE giữ 1 thread gunicorn + 1 connection Postgres suốt
-# 240 giây. gunicorn chạy --workers 1 --threads 8, nên tab dashboard thứ 8
-# sẽ chiếm nốt thread cuối và CHẶN toàn bộ API còn lại — kể cả /api/predict
-# do Cloud Scheduler gọi. Chặn ở 5 client, chừa 3 thread cho request thường.
-# Client bị từ chối vẫn chạy bình thường nhờ vòng refresh 60s có sẵn.
-_SSE_MAX_CLIENTS  = 5
-_SSE_SLOT_TTL     = 300      # > _SSE_MAX_LIFETIME (240s) — slot già hơn thế là rác
-_sse_slots: list  = []       # timestamp lúc nhận mỗi client đang mở
-_sse_lock         = _threading.Lock()
-
-
+# ── SSE: ĐÃ BỎ (P286) ───────────────────────────────────────────
+# Mỗi tab dashboard giữ một luồng SSE 240 giây, tự nối lại sau 5 giây, và cứ 6
+# giây truy vấn DB một lần. Cloud Run tính tiền SUỐT thời gian có request đang
+# chạy, nên chỉ một tab để mở là instance bị tính tiền ~24/24 — hoá đơn GCP
+# tháng 10 ~2,4 triệu đ, gần như toàn bộ là phần này. Dashboard đã có vòng làm
+# mới 60s (P267) và giờ tự phát hiện kỳ mới trong vòng đó.
+# Giữ route để tab CŨ (JS chưa tải lại) không bị 404: trả 204 ngay — theo chuẩn
+# EventSource, 204 là "ngừng nối lại"; JS cũ có lùi dần tới 2 phút nên mỗi lần
+# thử chỉ tốn vài mili giây, không đụng DB.
 @app.route('/api/sse/draws')
 @limiter.limit("30 per minute")
 def sse_draws():
-    """Server-Sent Events: push new draws to dashboard in real-time (poll DB every 6s)."""
-    _slot = _time.time()
-    with _sse_lock:
-        # Nếu client ngắt trước khi generator kịp chạy thì khối finally không
-        # bao giờ được gọi và slot rò vĩnh viễn. Mỗi stream sống tối đa 240s,
-        # nên bất kỳ slot nào quá 300s chắc chắn là rác — dọn trước khi đếm.
-        _cut = _slot - _SSE_SLOT_TTL
-        _sse_slots[:] = [t for t in _sse_slots if t > _cut]
-        if len(_sse_slots) >= _SSE_MAX_CLIENTS:
-            return Response(
-                'retry: 60000\nevent: busy\ndata: {"error":"too_many_sse_clients"}\n\n',
-                status=503,
-                mimetype='text/event-stream',
-                headers={'Cache-Control': 'no-cache', 'Retry-After': '60'},
-            )
-        _sse_slots.append(_slot)
-
-    def generate():
-        conn = None
-        try:
-            conn = db.get_connection()
-            cur  = conn.cursor()
-            cur.execute("SELECT MAX(draw_number) FROM draw_history")
-            row = cur.fetchone()
-            last_id = int(row[0]) if row and row[0] else 0
-            cur.close()
-
-            hb = 0  # heartbeat counter
-            _sse_start = _time.time()
-            _SSE_MAX_LIFETIME = 240  # graceful close before Cloud Run's 300s timeout
-            while _time.time() - _sse_start < _SSE_MAX_LIFETIME:
-                try:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT draw_number, numbers, size_category, sum_value, draw_time "
-                        "FROM draw_history WHERE draw_number > %s ORDER BY draw_number",
-                        (last_id,)
-                    )
-                    rows = cur.fetchall()
-                    cur.close()
-                    for dn, numbers, size_cat, sum_val, draw_time in rows:
-                        nums = json.loads(numbers) if isinstance(numbers, str) else numbers
-                        payload = json.dumps({
-                            "type": "new_draw",
-                            "draw_number": dn,
-                            "numbers": nums,
-                            "size_category": size_cat,
-                            "sum_value": sum_val,
-                            "draw_time": str(draw_time),
-                        })
-                        yield f"data: {payload}\n\n"
-                        last_id = dn
-                except Exception:
-                    try:
-                        conn = db.get_connection()
-                    except Exception:
-                        pass
-
-                hb += 1
-                if hb >= 5:  # ~30s heartbeat
-                    yield ": ping\n\n"
-                    hb = 0
-                _time.sleep(6)
-            # graceful close — client will reconnect after 5s
-            yield "retry: 5000\n\n"
-        except GeneratorExit:
-            pass
-        finally:
-            try:
-                if conn:
-                    conn.close()
-            except Exception:
-                pass
-            # P173: nhả slot dù thoát kiểu gì (client đóng tab, hết 240s, lỗi)
-            with _sse_lock:
-                try:
-                    _sse_slots.remove(_slot)
-                except ValueError:
-                    pass
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype='text/event-stream',
-        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
-    )
+    return Response(status=204, headers={'Cache-Control': 'no-store'})
 
 
 # ── Model win rate breakdown ───────────────────────────────────
