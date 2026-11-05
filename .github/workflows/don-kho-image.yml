@@ -22,10 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # checkout PHAI truoc auth: checkout xoa workspace, mat file dang nhap
+      - uses: actions/checkout@v4
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
-      - uses: actions/checkout@v4
       - name: Xoá image cũ
         run: bash scripts/don_image.sh "${{ github.event.inputs.che_do }}" 10

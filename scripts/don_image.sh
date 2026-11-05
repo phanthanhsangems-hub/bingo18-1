@@ -12,7 +12,7 @@ echo "Che do: $CHE_DO | giu $GIU ban moi nhat moi image | dang chay: $DANG_CHAY"
 TONG_XOA=0
 for KHO in asia-southeast1-docker.pkg.dev/$P/bingo18-images \
            asia-southeast1-docker.pkg.dev/$P/cloud-run-source-deploy \
-           gcr.io/$P asia.gcr.io/$P; do
+           us-docker.pkg.dev/$P/gcr.io asia-docker.pkg.dev/$P/asia.gcr.io; do
   echo "=== $KHO ==="
   gcloud artifacts docker images list "$KHO" --include-tags --sort-by=~updateTime \
     --format='value(package,version,tags)' --project $P > /tmp/ds.txt 2>/tmp/loi.txt || { head -3 /tmp/loi.txt; continue; }
