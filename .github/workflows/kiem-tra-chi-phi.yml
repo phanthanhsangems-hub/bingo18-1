@@ -1,0 +1,91 @@
+name: Kiểm tra chi phí Google Cloud
+
+# P286: hoá đơn GCP tháng 10 ~2,4 triệu đ. Đọc cấu hình THẬT của các thứ tính
+# tiền (chỉ đọc, không đổi gì): Cloud Run (CPU/RAM/min instances/CPU luôn bật),
+# kho image Artifact Registry, số lần Cloud Build, Cloud Scheduler.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kiem-tra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cloud Run — cấu hình tính tiền
+        continue-on-error: true
+        run: |
+          P="--region asia-southeast1 --project bingo18-predictor"
+          echo "===== SERVICE ====="
+          gcloud run services describe bingo18 $P --format=json > /tmp/svc.json
+          python3 - <<'PYEOF'
+          import json
+          s = json.load(open('/tmp/svc.json'))
+          t = s['spec']['template']
+          a = {**s['metadata'].get('annotations', {}), **t['metadata'].get('annotations', {})}
+          c = t['spec']['containers'][0]
+          lim = (c.get('resources') or {}).get('limits', {})
+          print("  CPU            :", lim.get('cpu'))
+          print("  RAM            :", lim.get('memory'))
+          print("  min instances  :", a.get('autoscaling.knative.dev/minScale', '0 (mac dinh)'))
+          print("  max instances  :", a.get('autoscaling.knative.dev/maxScale'), "| service:", s['metadata'].get('annotations', {}).get('run.googleapis.com/maxScale'))
+          print("  CPU luon bat   :", a.get('run.googleapis.com/cpu-throttling', '(mac dinh true = chi tinh khi co request)'),
+                " <- 'false' = TINH TIEN CPU 24/24")
+          print("  startup boost  :", a.get('run.googleapis.com/startup-cpu-boost'))
+          print("  concurrency    :", t['spec'].get('containerConcurrency'))
+          print("  timeout        :", t['spec'].get('timeoutSeconds'))
+          print("  execution env  :", a.get('run.googleapis.com/execution-environment'))
+          print("  session affin. :", a.get('run.googleapis.com/sessionAffinity'))
+          PYEOF
+          echo "===== SO REVISION ====="
+          gcloud run revisions list --service bingo18 $P --format="value(name)" | wc -l
+          echo "===== REVISION DANG CO MIN INSTANCES (giu may song) ====="
+          gcloud run revisions list --service bingo18 $P --limit 400 \
+            --format="value(name,metadata.annotations['autoscaling.knative.dev/minScale'],status.conditions[0].status)" \
+            | awk '$2 != "" && $2 != "0"' | head -20
+
+      - name: Artifact Registry — dung lượng kho image
+        continue-on-error: true
+        run: |
+          gcloud artifacts repositories list --project bingo18-predictor \
+            --format="table(name.basename(), format, location, sizeBytes.size(units_in=1,units_out=1073741824,precision=2):label=GB)" || true
+          for R in bingo18-images cloud-run-source-deploy; do
+            echo "--- $R ---"
+            gcloud artifacts docker images list asia-southeast1-docker.pkg.dev/bingo18-predictor/$R \
+              --include-tags --format=json 2>/dev/null > /tmp/img_$R.json || { echo "(khong doc duoc)"; continue; }
+            python3 -c "
+          import json
+          x = json.load(open('/tmp/img_$R.json'))
+          tot = sum(int(i.get('metadata', {}).get('imageSizeBytes', 0) or i.get('imageSizeBytes', 0) or 0) for i in x)
+          print('  so image:', len(x), '| tong kich thuoc (cong don tung image):', round(tot/2**30, 1), 'GB')
+          if x:
+              lon = max(x, key=lambda i: int(i.get('metadata', {}).get('imageSizeBytes', 0) or 0))
+              print('  image lon nhat:', round(int(lon.get('metadata', {}).get('imageSizeBytes', 0) or 0)/2**20), 'MB')
+          "
+          done
+
+      - name: Cloud Build — số lần build 40 ngày qua
+        continue-on-error: true
+        run: |
+          gcloud builds list --project bingo18-predictor --limit 1000 \
+            --filter="createTime>-P40D" --format="value(createTime,status,timing.BUILD.endTime)" > /tmp/b.txt || true
+          echo "so build: $(wc -l < /tmp/b.txt)"
+          gcloud builds list --project bingo18-predictor --limit 3 --format="table(id,createTime,duration(),status,options.machineType)" || true
+
+      - name: Cloud Scheduler
+        continue-on-error: true
+        run: |
+          gcloud scheduler jobs list --location asia-southeast1 --project bingo18-predictor \
+            --format="table(name.basename(),schedule,state,httpTarget.uri)" || true
+
+      - name: Billing (cần quyền billing.viewer — có thể bị từ chối)
+        continue-on-error: true
+        run: |
+          gcloud billing projects describe bingo18-predictor || true
