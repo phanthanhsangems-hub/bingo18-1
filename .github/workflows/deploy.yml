@@ -86,6 +86,13 @@ jobs:
       # x-cloud-trace-context lẫn "server: Google Frontend") nên không bao
       # giờ tới container — smoke test đầu tiên vì thế báo động giả trong
       # khi app hoàn toàn khoẻ. /api/health đi đúng vào Flask.
+      # P287: kho image tung len ~147 GB (~$14,7/thang) vi khong bao gio xoa.
+      # Moi lan deploy xong giu 10 ban moi nhat. Loi (thieu quyen...) khong lam
+      # hong deploy.
+      - name: Dọn image cũ (giữ 10 bản mới nhất)
+        continue-on-error: true
+        run: bash scripts/don_image.sh that 10 2>&1 | tail -15
+
       - name: Smoke test — app phải thật sự phục vụ được
         # P235: bản cũ chỉ hỏi "có phải JSON không", nên deploy #161 báo ĐẠT
         # trong khi /api/health trả HTTP 503 với database.connected=false.
