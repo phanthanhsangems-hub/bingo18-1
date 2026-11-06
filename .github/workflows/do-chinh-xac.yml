@@ -1,0 +1,77 @@
+name: Đo độ chính xác dự đoán
+
+# P289: "hệ thống dự đoán đúng tổng bao nhiêu %". Lấy từng kỳ (dự đoán
+# majority_vote + kết quả thật) qua /api/today-draws?tu=&den= theo từng khúc
+# 400 kỳ, rồi so với MỨC ĐOÁN BỪA: đoán tổng s thì trúng với xác suất
+# (số cách ra s)/216 — đoán 9 hay 12 dễ trúng hơn đoán 3 hay 18.
+on:
+  workflow_dispatch:
+    inputs:
+      so_ky:
+        description: 'Số kỳ gần nhất cần đo (tối đa 8000)'
+        required: false
+        default: '4000'
+
+permissions:
+  contents: read
+
+jobs:
+  do:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Đo
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+          SO_KY: ${{ github.event.inputs.so_ky }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app"
+          case "${SO_KY:-4000}" in *[!0-9]*) echo "so_ky phai la so"; exit 1;; esac
+          N=$(( ${SO_KY:-4000} > 8000 ? 8000 : ${SO_KY:-4000} ))
+          CUOI=$(curl -s --max-time 30 "$BASE/api/health" | python3 -c "import json,sys; print(json.load(sys.stdin)['components']['sync']['last_draw_number'])")
+          echo "Ky moi nhat: #$CUOI, do $N ky"
+          TU=$((CUOI - N + 1)); : > /tmp/all.jsonl
+          while [ $TU -le $CUOI ]; do
+            DEN=$((TU + 399)); [ $DEN -gt $CUOI ] && DEN=$CUOI
+            curl -s --max-time 60 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+              "$BASE/api/today-draws?tu=$TU&den=$DEN&cb=$(date +%s)" >> /tmp/all.jsonl; echo >> /tmp/all.jsonl
+            TU=$((DEN + 1)); sleep 1.2
+          done
+          python3 - <<'PYEOF'
+          import json, math
+          from collections import Counter
+          W = Counter(a + b + c for a in range(1, 7) for b in range(1, 7) for c in range(1, 7))
+          rows = {}
+          for l in open('/tmp/all.jsonl'):
+              l = l.strip()
+              if not l: continue
+              d = json.loads(l)
+              if 'error' in d: print('LOI:', d['error']); continue
+              for x in d['draws']:
+                  if x.get('pred_numbers') and x.get('numbers'):
+                      rows[x['draw_number']] = x
+          ks = sorted(rows)
+          def do(ten, ds):
+              n = len(ds)
+              if not n: return
+              trung = sum(1 for x in ds if sum(x['pred_numbers']) == sum(x['numbers']))
+              kv = sum(W[sum(x['pred_numbers'])] / 216 for x in ds)
+              var = sum((W[sum(x['pred_numbers'])] / 216) * (1 - W[sum(x['pred_numbers'])] / 216) for x in ds)
+              z = (trung - kv) / math.sqrt(var) if var else 0
+              size = [x for x in ds if x.get('is_win') is not None]
+              sw = sum(1 for x in size if x['is_win'])
+              bo = sum(1 for x in ds if sorted(x['pred_numbers']) == sorted(x['numbers']))
+              print(f"\n=== {ten}: {n} ky (#{ds[0]['draw_number']}..#{ds[-1]['draw_number']}) ===")
+              print(f"  DUNG TONG     : {trung}/{n} = {trung/n:.2%}   | doan bua cung tong do: {kv/n:.2%}   | z = {z:+.2f}")
+              print(f"  DUNG SIZE     : {sw}/{len(size)} = {sw/max(len(size),1):.2%}   | doan bua: 37.50%")
+              print(f"  DUNG CA BO SO : {bo}/{n} = {bo/n:.3%}")
+          do(f"{len(ks)} KY GAN NHAT", [rows[k] for k in ks])
+          do("1000 KY GAN NHAT (~6 ngay)", [rows[k] for k in ks[-1000:]])
+          do("300 KY GAN NHAT (~2 ngay)", [rows[k] for k in ks[-300:]])
+          ds = [rows[k] for k in ks]
+          print("\n=== TONG DU DOAN: so lan doan / so lan dung / ty le dung vs doan bua ===")
+          c = Counter(sum(x['pred_numbers']) for x in ds)
+          for s in sorted(c):
+              ok = sum(1 for x in ds if sum(x['pred_numbers']) == s and sum(x['numbers']) == s)
+              print(f"  tong {s:2d}: doan {c[s]:4d} lan, dung {ok:3d} = {ok/c[s]:6.2%} (doan bua {W[s]/216:6.2%})")
+          PYEOF
