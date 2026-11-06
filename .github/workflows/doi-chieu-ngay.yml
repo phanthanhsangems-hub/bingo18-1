@@ -31,7 +31,7 @@ jobs:
           read TU DEN < <(python3 -c "
           import json
           ids=[int(json.loads(l)['id']) for l in open('/tmp/gh.jsonl') if l.strip() and json.loads(l)['date']=='$NGAY']
-          print(min(ids)-3 if ids else 0, max(ids)+40 if ids else 0)")
+          print(min(ids)-3 if ids else 0, min(ids)+170 if ids else 0)")
           echo "Khoang ky hoi DB: #$TU..#$DEN"
           curl -s --max-time 60 -H "X-Trigger-Secret: $TRIGGER_SECRET" \
             "$BASE/api/today-draws?tu=$TU&den=$DEN&cb=$(date +%s)" > /tmp/db.json
