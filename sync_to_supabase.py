@@ -1186,7 +1186,7 @@ def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
                 khong_co.add(draw_id)
                 logger.warning("  ❌ vietlott-gaps #%d: nguồn không có, sẽ không hỏi lại",
                                draw_id)
-            time.sleep(0.35)
+            time.sleep(2.0)    # P290c: 0,35s = 10 request/4 giay -> Vietlott chan 429 nhieu gio (07/11)
         return da_bu
     except Exception as e:
         logger.error("vietlott-gaps lỗi: %s", e)
@@ -1361,13 +1361,13 @@ def mode_bulk():
         return
 
     if missing > 200:
-        logger.warning(f"⚠️  Cần sync {missing} kỳ, sẽ mất khoảng {missing * 0.4 / 60:.1f} phút...")
+        logger.warning(f"⚠️  Cần sync {missing} kỳ, sẽ mất khoảng {missing * 2.1 / 60:.1f} phút...")
 
     ins = skip = err = 0
     for draw_id in range(last_id + 1, latest_id + 1):
         draw = fetch_detail(draw_id)
         if draw == LIMIT:
-            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng ở #%d. Chờ 10–15 phút rồi chạy lại.", draw_id)
+            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng ở #%d. Chờ ít nhất 30 phút rồi chạy lại.", draw_id)
             break
         if draw:
             draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')
@@ -1380,7 +1380,7 @@ def mode_bulk():
         else:
             err += 1
             logger.warning(f"  ❌  #{draw_id}: không fetch được")
-        time.sleep(0.35)
+        time.sleep(2.0)       # P290c: 0,35s lam Vietlott chan 429
 
     logger.info(f"\n✅  Bulk sync xong!  inserted={ins}  skipped={skip}  errors={err}")
     conn.close()
