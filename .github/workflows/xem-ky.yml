@@ -34,6 +34,8 @@ jobs:
           d = json.load(open('/tmp/k.json'))
           if 'error' in d: print('LOI:', d['error']); raise SystemExit(1)
           for x in sorted(d['draws'], key=lambda x: x['draw_number']):
-              print('KY', x['draw_number'], x['draw_time'], ''.join(map(str, sorted(x['numbers']))), sum(x['numbers']))
-          print('SO KY', len(d['draws']))
+              pr = x.get('pred_numbers')
+              print('KY', x['draw_number'], x['draw_time'], ''.join(map(str, sorted(x['numbers']))), sum(x['numbers']),
+                    'du_doan', ''.join(map(str, sorted(pr))) if pr else '---- (CHUA CO)')
+          print('SO KY', len(d['draws']), '| chua co du doan:', [x['draw_number'] for x in d['draws'] if not x.get('pred_numbers')])
           "
