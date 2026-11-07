@@ -47,5 +47,39 @@ kiem("khong nem loi", loi is None, loi)
 kiem("giu ky lay duoc truoc khi bi chan", kq == [{'draw_id': 11, 'numbers': [1, 2, 3]}], kq)
 kiem("dung hoi ngay khi LIMIT", fd.call_count == 2, fd.call_count)
 kiem("moi cho goi fetch_detail deu xu ly LIMIT", src.count('fetch_detail(') - 1 <= open('sync_to_supabase.py', encoding='utf-8').read().count('== LIMIT'))
+print("=== 6. P290: tries=1 gap 429 -> LIMIT ngay, khong ngu ===")
+with mock.patch.object(S, '_session') as ss, mock.patch('time.sleep') as ngu:
+    ss.get.return_value = R(429)
+    kq = S.fetch_detail(5, tries=1)
+kiem("tra LIMIT", kq == S.LIMIT, kq)
+kiem("khong ngu", ngu.call_count == 0, ngu.call_count)
+with mock.patch.object(S, '_session') as ss, mock.patch('time.sleep') as ngu:
+    ss.get.return_value = R(429)
+    S.fetch_detail(5)
+kiem("tries=3: chi ngu giua cac lan (2 lan, khong ngu sau lan cuoi)", ngu.call_count == 2, ngu.call_count)
+print("=== 7. P290: va_lo_hong gap 429 -> nghi 30 phut, khong hoi lai ===")
+class Cur:
+    def __init__(s): s.q = None
+    def execute(s, sql, params=None): s.q = sql
+    def fetchone(s): return (100,)
+    def fetchall(s): return [(d,) for d in range(-200, 101) if d not in (95, 96)]
+class Conn:
+    def cursor(s): return Cur()
+    def rollback(s): pass
+S._VIETLOTT_NGHI[0] = 0.0
+khong_co = set()
+with mock.patch.object(S, 'fetch_detail', return_value=S.LIMIT) as fd:
+    kq1 = S.va_lo_hong_tu_vietlott(Conn(), khong_co)
+    kq2 = S.va_lo_hong_tu_vietlott(Conn(), khong_co)
+kiem("lan 1 tra [] va khong blacklist", kq1 == [] and not khong_co, (kq1, khong_co))
+kiem("hoi Vietlott dung 1 lan, voi tries=1", fd.call_count == 1 and fd.call_args.kwargs.get('tries') == 1,
+     (fd.call_count, fd.call_args))
+kiem("dat moc nghi ~30 phut", 1700 < S._VIETLOTT_NGHI[0] - __import__('time').time() <= 1800, S._VIETLOTT_NGHI[0])
+kiem("vong 2 trong luc nghi: khong hoi", kq2 == [] and fd.call_count == 1, fd.call_count)
+S._VIETLOTT_NGHI[0] = 0.0
+with mock.patch.object(S, 'fetch_detail', return_value=None) as fd, mock.patch('time.sleep'):
+    S.va_lo_hong_tu_vietlott(Conn(), khong_co)
+kiem("het nghi -> hoi lai ca 2 ky thieu", fd.call_count == 2, fd.call_count)
+S._VIETLOTT_NGHI[0] = 0.0
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

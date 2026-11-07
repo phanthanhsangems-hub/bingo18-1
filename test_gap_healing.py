@@ -65,7 +65,7 @@ def chay(hi, co, co_o_vietlott, khong_co=None, toi_da=10, lookback=300):
     conn = FakeConn(hi, co)
     da_hoi = []
 
-    def fake_fetch_detail(dn):
+    def fake_fetch_detail(dn, tries=3):
         da_hoi.append(dn)
         if dn in co_o_vietlott:
             return {'draw_id': dn, 'numbers': co_o_vietlott[dn],
