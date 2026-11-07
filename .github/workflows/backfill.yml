@@ -20,6 +20,11 @@ on:
     # Chay lai moi ngay thi lo hong tu lanh ngay khi nguon co du lieu,
     # khong phai doi nguoi de y.
     - cron: '0 3 * * *'
+    # P290: mirror cap nhat 2 lan/ngay, ~00:00 UTC va ~12:00 UTC (do process_time
+    # 01-07/11). Lo hong ban ngay (07/11: #194970-#195012, 08:42-12:54 VN) chi
+    # vao mirror luc 12:00 UTC — chay 03:00 hom sau thi DB thung gan mot ngay.
+    # 12:20 UTC = 19:20 VN: bu ngay sau lan cap nhat chieu.
+    - cron: '20 12 * * *'
 
 jobs:
   backfill:
@@ -79,6 +84,17 @@ jobs:
           echo "HTTP $CODE"
           head -c 600 /tmp/kq.json; echo
           [ "$CODE" = "200" ] || { echo "That bai — xem thong bao o tren."; exit 1; }
+
+      - name: Sửa giờ các kỳ vừa bù theo lịch quay
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+        run: |
+          # P290: sync-github ghi gio = ngay 00:00 UTC (07:00 VN) cho ky bu. Job
+          # 'Sua gio ky bu' se sua, nhung lich GitHub hay tre hang gio — sua luon o day.
+          curl -s --max-time 60 -X POST -H "X-Trigger-Secret: $TRIGGER_SECRET" \
+            "https://bingo18-633959711537.asia-southeast1.run.app/api/sua-gio-ky?n=600" > /tmp/sg.json || true
+          python3 -c "import json; d=json.load(open('/tmp/sg.json')); print('Da sua gio', d.get('so_ky_sua'), 'ky', d.get('error') or '')" \
+            || { echo "Khong doc duoc ket qua sua gio:"; head -c 300 /tmp/sg.json; echo; }
 
       - name: Đếm lại SAU khi bù
         env:
