@@ -217,8 +217,9 @@ def fetch_detail(draw_id: int, tries: int = 3):
         try:
             r = _session.get(url, timeout=15)
             if r.status_code == 429:
-                logger.warning("Vietlott 429 khi hỏi #%d (lần %d) — chờ rồi thử lại", draw_id, lan + 1)
-                time.sleep(20 * (lan + 1))
+                logger.warning("Vietlott 429 khi hỏi #%d (lần %d/%d)", draw_id, lan + 1, tries)
+                if lan + 1 < tries:          # P290: lần cuối thì khỏi ngủ — chỉ làm treo vòng gọi
+                    time.sleep(20 * (lan + 1))
                 continue
             if r.status_code == 200:
                 results = _parse_bingo18(r.text)
@@ -1117,6 +1118,14 @@ def mode_morning_digest():
 #  FILL GAPS (GitHub source)
 # ══════════════════════════════════════════════════════════════
 
+# P290: 07/11 Vietlott trả 429 cho trang chi tiết kỳ suốt nhiều giờ (trang chủ vẫn
+# bình thường). Mỗi vòng 10 phút watcher hỏi 3 lần, ngủ 20+40+60s = 2 phút — vòng
+# lấy kỳ mới bị treo theo, mà hỏi dồn còn kéo dài lệnh chặn. Nay: hỏi 1 lần, gặp 429
+# thì nghỉ hẳn phần bù-từ-Vietlott 30 phút. Kỳ thiếu vẫn được bù từ mirror GitHub.
+NGHI_SAU_429 = 1800
+_VIETLOTT_NGHI = [0.0]   # time.time() đến lúc được hỏi lại
+
+
 def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
                            toi_da: int = 10) -> list:
     """Bù kỳ thiếu bằng cách hỏi THẲNG Vietlott, sau khi fill_gaps() đã thử GitHub.
@@ -1136,6 +1145,8 @@ def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
 
     toi_da: trần mỗi vòng, để một lỗ hổng lớn không làm treo vòng lặp watch.
     """
+    if time.time() < _VIETLOTT_NGHI[0]:
+        return []
     try:
         cur = conn.cursor()
         cur.execute(f"SELECT MAX(draw_number) FROM {TABLE};")
@@ -1159,9 +1170,11 @@ def va_lo_hong_tu_vietlott(conn, khong_co: set, lookback: int = 300,
 
         da_bu = []
         for draw_id in thieu[:toi_da]:
-            draw = fetch_detail(draw_id)
+            draw = fetch_detail(draw_id, tries=1)
             if draw == LIMIT:               # P271: bị giới hạn — dừng vòng, KHÔNG blacklist
-                logger.warning("vietlott-gaps: bị giới hạn tốc độ, tạm dừng đến vòng sau")
+                _VIETLOTT_NGHI[0] = time.time() + NGHI_SAU_429
+                logger.warning("vietlott-gaps: Vietlott 429 — nghỉ %d phút rồi hỏi lại "
+                               "(kỳ thiếu vẫn được bù từ GitHub)", NGHI_SAU_429 // 60)
                 break
             if draw and draw != LIMIT:
                 draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')
@@ -1429,7 +1442,7 @@ def mode_gaps():
     for draw_id in gan:
         draw = fetch_detail(draw_id)
         if draw == LIMIT:
-            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng. Chờ 10–15 phút rồi chạy lại --mode gaps.")
+            logger.error("⛔  Vietlott đang giới hạn tốc độ (429) — dừng. Chờ ít nhất 30 phút (có lúc vài giờ) rồi chạy lại --mode gaps.")
             break
         if draw:
             draw['draw_date'] = gio_noi_suy(conn, draw_id) or draw.get('draw_date')

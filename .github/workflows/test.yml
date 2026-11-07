@@ -53,3 +53,4 @@ jobs:
           python test_canh_bao.py
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py
+          python test_429.py
