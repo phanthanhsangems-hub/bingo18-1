@@ -72,6 +72,13 @@ jobs:
             echo
           done
 
+      # P291b: 15/11 app chet vi BILLING_DISABLED — doc thang trang thai thanh toan
+      # (can resourcemanager.projects.get + Cloud Billing API; loi thi bo qua).
+      - name: Trạng thái thanh toán của dự án
+        run: |
+          gcloud billing projects describe $PROJECT \
+            --format="yaml(billingEnabled, billingAccountName)" 2>&1 | head -20 || true
+
       - name: Khởi động lại (revision mới, cùng image)
         if: ${{ github.event.inputs.khoi_dong_lai == 'yes' }}
         run: |
