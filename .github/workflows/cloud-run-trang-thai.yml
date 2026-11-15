@@ -1,0 +1,94 @@
+name: Cloud Run — trạng thái / khởi động lại
+
+# P291: 15/11 từ ~06:50 VN mọi endpoint trả 503 (health 500, trang lỗi của
+# Google chứ không phải JSON của Flask) — tức container không lên/không nhận
+# request. Diagnose đầy đủ mất ~20 phút và phần lớn bước quét endpoint vô ích
+# khi app chết. Job này chỉ: xem điều kiện service/revision, thử đọc log, gọi
+# thử, và (tuỳ chọn) khởi động lại = tạo revision mới CÙNG image.
+#
+# Khởi động lại dùng --update-env-vars (KHÔNG BAO GIỜ --set-env-vars: lệnh đó
+# xoá sạch DATABASE_URL, TELEGRAM_*, secret... của service).
+on:
+  workflow_dispatch:
+    inputs:
+      khoi_dong_lai:
+        description: 'Khởi động lại (tạo revision mới cùng image)? yes/no'
+        required: false
+        default: 'no'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-run-trang-thai
+  cancel-in-progress: false
+
+jobs:
+  cloud-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SVC: bingo18
+      REGION: asia-southeast1
+      PROJECT: bingo18-predictor
+      BASE: https://bingo18-633959711537.asia-southeast1.run.app
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Trạng thái service + revision
+        run: |
+          echo "===== BAY GIO: $(TZ=Asia/Ho_Chi_Minh date '+%F %T') VN ====="
+          echo "===== SERVICE: dieu kien ====="
+          gcloud run services describe $SVC --region $REGION --project $PROJECT \
+            --format="yaml(status.conditions, status.latestCreatedRevisionName, status.latestReadyRevisionName, status.traffic, spec.template.spec.containers[0].image, spec.template.spec.containers[0].resources, spec.template.metadata.annotations)" || true
+          echo
+          echo "===== 6 REVISION GAN NHAT ====="
+          gcloud run revisions list --service $SVC --region $REGION --project $PROJECT --limit 6 \
+            --format="table(metadata.name, metadata.creationTimestamp, status.conditions[0].status:label=READY, status.conditions[0].reason, status.conditions[0].message)" || true
+          echo
+          REV=$(gcloud run services describe $SVC --region $REGION --project $PROJECT --format="value(status.latestCreatedRevisionName)" || true)
+          echo "===== REVISION MOI NHAT ($REV): tat ca dieu kien ====="
+          [ -n "$REV" ] && gcloud run revisions describe "$REV" --region $REGION --project $PROJECT \
+            --format="yaml(status.conditions, metadata.creationTimestamp)" || true
+
+      - name: Log container 3 giờ qua (cần roles/logging.viewer)
+        run: |
+          gcloud logging read \
+            'resource.type="cloud_run_revision" AND resource.labels.service_name="bingo18" AND severity>=WARNING' \
+            --project $PROJECT --limit 40 --freshness 3h \
+            --format="value(timestamp, severity, textPayload, jsonPayload.message)" 2>&1 | head -80 || true
+
+      - name: Gọi thử
+        run: |
+          for p in /api/health /healthz; do
+            echo "--- $p ---"
+            curl -s -i --max-time 40 "$BASE$p?cb=$(date +%s)" | head -15 || true
+            echo
+          done
+
+      - name: Khởi động lại (revision mới, cùng image)
+        if: ${{ github.event.inputs.khoi_dong_lai == 'yes' }}
+        run: |
+          gcloud run services update $SVC --region $REGION --project $PROJECT \
+            --update-env-vars KHOI_DONG_LAI_LUC=$(date -u +%Y%m%dT%H%M%SZ) --quiet
+          echo
+          gcloud run revisions list --service $SVC --region $REGION --project $PROJECT --limit 2 \
+            --format="table(metadata.name, status.conditions[0].status:label=READY, status.conditions[0].message)" || true
+
+      - name: Gọi lại sau khởi động
+        if: ${{ github.event.inputs.khoi_dong_lai == 'yes' }}
+        run: |
+          for i in 1 2 3 4 5 6 7 8; do
+            CODE=$(curl -s -o /tmp/h.json -w '%{http_code}' --max-time 40 "$BASE/api/health?cb=$(date +%s)") || CODE=000
+            echo "lan $i: HTTP $CODE  $(head -c 300 /tmp/h.json | tr '\n' ' ')"
+            [ "$CODE" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "Sau khi khoi dong lai van chua tra 200."
+          exit 1
