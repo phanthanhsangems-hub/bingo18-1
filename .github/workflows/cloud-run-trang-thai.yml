@@ -15,6 +15,10 @@ on:
         description: 'Khởi động lại (tạo revision mới cùng image)? yes/no'
         required: false
         default: 'no'
+      cho_phut:
+        description: 'Chờ app sống lại tối đa N phút (0 = không chờ). Đạt = 3 lần liền health 200'
+        required: false
+        default: '0'
 
 permissions:
   contents: read
@@ -26,7 +30,7 @@ concurrency:
 jobs:
   cloud-run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     env:
       SVC: bingo18
       REGION: asia-southeast1
@@ -98,4 +102,25 @@ jobs:
             sleep 20
           done
           echo "Sau khi khoi dong lai van chua tra 200."
+          exit 1
+
+      # P291c: 15/11 sau khi bat lai thanh toan, control plane nhan ngay (deploy
+      # revision OK, health 200 mot lan) nhung data plane van tra 503 "not
+      # available yet" them mot luc. Cho o day thay vi dispatch tay moi vai phut.
+      - name: Chờ app sống lại
+        if: ${{ github.event.inputs.cho_phut != '' && github.event.inputs.cho_phut != '0' }}
+        env:
+          CHO: ${{ github.event.inputs.cho_phut }}
+        run: |
+          case "$CHO" in *[!0-9]*) echo "cho_phut phai la so"; exit 1;; esac
+          [ "$CHO" -gt 40 ] && CHO=40
+          HET=$(( $(date +%s) + CHO * 60 )); LIEN=0
+          while [ "$(date +%s)" -lt "$HET" ]; do
+            CODE=$(curl -s -o /tmp/h.json -w '%{http_code}' --max-time 30 "$BASE/api/health?cb=$(date +%s)") || CODE=000
+            [ "$CODE" = "200" ] && LIEN=$((LIEN + 1)) || LIEN=0
+            echo "$(TZ=Asia/Ho_Chi_Minh date '+%T') HTTP $CODE (lien tiep 200: $LIEN)"
+            if [ "$LIEN" -ge 3 ]; then head -c 400 /tmp/h.json; echo; echo "APP DA SONG LAI."; exit 0; fi
+            sleep 30
+          done
+          echo "Het $CHO phut, app van chua on dinh."
           exit 1
