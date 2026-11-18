@@ -54,3 +54,4 @@ jobs:
           python test_today_by_sum.py
           python test_kiem_tra_nhat_quan.py
           python test_429.py
+          python test_truoc_tong_tin.py
