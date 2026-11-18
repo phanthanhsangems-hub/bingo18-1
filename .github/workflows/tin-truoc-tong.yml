@@ -1,0 +1,44 @@
+name: Tin bộ ra trước tổng 4 & 17
+
+# P292: hệ thống tự gửi tin này mỗi 20 kỳ (kỳ thứ 20, 40, ..., 140 trong ngày =
+# 08:00 ... 20:00 VN) từ vòng dự đoán. Job này để XEM TRƯỚC nội dung hoặc GỬI
+# NGAY một tin (gửi tay không làm lệch lịch tự động).
+on:
+  workflow_dispatch:
+    inputs:
+      gui:
+        description: 'Gửi ngay lên Telegram? yes/no (no = chỉ xem trước)'
+        required: false
+        default: 'no'
+
+permissions:
+  contents: read
+
+jobs:
+  tin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Xem trước / gửi
+        env:
+          TRIGGER_SECRET: ${{ secrets.TRIGGER_SECRET }}
+          GUI: ${{ github.event.inputs.gui }}
+        run: |
+          BASE="https://bingo18-633959711537.asia-southeast1.run.app/api/truoc-tong/tin"
+          if [ "$GUI" = "yes" ]; then
+            curl -s --max-time 60 -X POST -d '' -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE?gui=1" > /tmp/t.json || true
+          else
+            curl -s --max-time 60 -H "X-Trigger-Secret: $TRIGGER_SECRET" "$BASE?cb=$(date +%s)" > /tmp/t.json || true
+          fi
+          python3 -c "
+          import json
+          try:
+              d = json.load(open('/tmp/t.json'))
+          except Exception:
+              print('LOI:', open('/tmp/t.json').read()[:300]); raise SystemExit(1)
+          if 'error' in d: print('LOI:', d['error']); raise SystemExit(1)
+          print(d['tin']); print()
+          print('do dai:', d['do_dai'], '| da gui:', d['da_gui'], '| moc tu dong da gui:', d['moc_da_gui'])
+          print('loi gan nhat:', d['loi_gan_nhat'])
+          if d['da_gui'] is False: raise SystemExit(1)
+          "

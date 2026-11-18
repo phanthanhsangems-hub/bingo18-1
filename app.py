@@ -111,7 +111,7 @@ _PROCESSED_MAX = 1000
 import _thread as _threading_mod
 _TG_CMD_COOLDOWN: dict = {}   # chat_id → last_command_ts (monotonic)
 _TG_CMD_COOLDOWN_SEC = 3      # min seconds between commands per user
-_TG_SLOW_CMDS = {"/compare", "/voters", "/calibration", "/votertrend", "/top", "/wincal"}
+_TG_SLOW_CMDS = {"/compare", "/voters", "/calibration", "/votertrend", "/top", "/wincal", "/truoctong"}
 _TG_SLOW_COOLDOWN_SEC = 8     # heavier commands get longer cooldown
 
 # ── P0 Alert throttle ─────────────────────────────────────────
@@ -512,6 +512,122 @@ def _check_vang_tong_alert(nguon: str = '?'):
             conn2.commit(); conn2.close()
         except Exception:
             pass
+
+
+# ── P292: cứ 20 kỳ gửi tin "kỳ NGAY TRƯỚC tổng 4 / tổng 17 ra bộ nào" ──────
+# Mốc = kỳ thứ 20, 40, ..., 140 trong ngày (08:00 ... 20:00 VN). Mốc đã gửi lưu ở
+# system_config, giành bằng INSERT/UPDATE có điều kiện như P248 -> hai đường gọi
+# (cron /api/predict + watcher /api/trigger-prediction) không gửi trùng. Bỏ lỡ
+# mốc (app chết, cron trễ) thì chỉ gửi MỐC HIỆN TẠI, không dồn tin bù.
+_TT_MOC_KEY = 'tin_truoc_tong_moc'
+_TT_LOI_KEY = 'tin_truoc_tong_loi'
+
+
+def _gio_vn_str(dt) -> str:
+    """draw_time (UTC, datetime hoặc chuỗi) -> 'HH:MM dd/mm' giờ VN."""
+    try:
+        if isinstance(dt, str):
+            dt = datetime.strptime(dt[:19], '%Y-%m-%d %H:%M:%S')
+        return (dt + timedelta(hours=7)).strftime('%H:%M %d/%m')
+    except Exception:
+        return ''
+
+
+def _tin_truoc_tong(cur, nam: int) -> str:
+    """Soạn tin P292 từ DB: mọi kỳ từ 01/01/<nam> (giờ VN) + 1 kỳ liền trước."""
+    import ast as _ast
+    import truoc_tong_tin as _tt
+    ph = '%s' if USE_POSTGRES else '?'
+    tu_utc = f"{nam - 1}-12-31 17:00:00"
+    cur.execute(f"SELECT MIN(draw_number) FROM draw_history WHERE draw_time >= {ph}", (tu_utc,))
+    r = cur.fetchone()
+    tu_dn = int(r[0]) if r and r[0] is not None else None
+    if tu_dn is None:
+        return _tt.soan_tin({'den_dn': None}, f"01/01/{nam}")
+    cur.execute(f"SELECT draw_number, numbers, draw_time FROM draw_history "
+                f"WHERE draw_number >= {ph} AND numbers IS NOT NULL ORDER BY draw_number",
+                (tu_dn - 1,))
+    rows = []
+    for dn, ns, dt in cur.fetchall():
+        try:
+            ns = ns if isinstance(ns, (list, tuple)) else _ast.literal_eval(ns)
+            bo = tuple(sorted(int(x) for x in ns))
+        except Exception:
+            continue
+        if len(bo) == 3:
+            rows.append((int(dn), bo, _gio_vn_str(dt)))
+    return _tt.soan_tin(_tt.thong_ke(rows, tu_dn), f"01/01/{nam}")
+
+
+def _check_truoc_tong_tin(nguon: str = '?', bay_gio=None) -> bool:
+    """P292: tới mốc 20 kỳ mới thì gửi một tin. Trả True nếu đã gửi."""
+    try:
+        import truoc_tong_tin as _tt
+        if bay_gio is None:
+            from zoneinfo import ZoneInfo
+            bay_gio = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh"))
+        if bay_gio.hour < 6 or bay_gio.hour >= 22:
+            return False
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT MAX(draw_number) FROM draw_history WHERE numbers IS NOT NULL")
+            r = cur.fetchone()
+            moc = _tt.moc_tin(int(r[0])) if r and r[0] is not None else None
+            if moc is None:
+                return False
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}",
+                        (_TT_MOC_KEY,))
+            r = cur.fetchone()
+            cu = r[0] if r else None
+            try:
+                if cu is not None and moc <= int(cu):
+                    return False
+            except ValueError:
+                pass                                   # giá trị hỏng -> ghi đè
+            if cu is None:
+                if USE_POSTGRES:
+                    cur.execute("INSERT INTO system_config (config_key, config_value, description) "
+                                "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO NOTHING",
+                                (_TT_MOC_KEY, str(moc), 'P292: moc 20 ky da gui tin truoc tong'))
+                else:
+                    cur.execute("INSERT OR IGNORE INTO system_config "
+                                "(config_key, config_value, description) VALUES (?,?,?)",
+                                (_TT_MOC_KEY, str(moc), 'P292: moc 20 ky da gui tin truoc tong'))
+            else:
+                cur.execute(f"UPDATE system_config SET config_value = {ph} "
+                            f"WHERE config_key = {ph} AND config_value = {ph}",
+                            (str(moc), _TT_MOC_KEY, cu))
+            if (cur.rowcount or 0) <= 0:
+                conn.rollback()
+                return False                           # đường kia vừa giành mốc này
+            conn.commit()
+            tin = _tin_truoc_tong(cur, bay_gio.year)
+        finally:
+            conn.close()
+        from telegram_bot import TelegramBot
+        return bool(TelegramBot().send_message(tin))
+    except Exception as e:
+        logger.warning("P292 tin truoc tong (%s) loi: %s", nguon, e)
+        try:
+            conn2 = db.get_connection()
+            c2 = conn2.cursor()
+            gt = json.dumps({'luc': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                             'nguon': nguon, 'loi': repr(e)[:300]}, ensure_ascii=False)
+            if USE_POSTGRES:
+                c2.execute("INSERT INTO system_config (config_key, config_value, description) "
+                           "VALUES (%s, %s, %s) ON CONFLICT (config_key) DO UPDATE "
+                           "SET config_value = EXCLUDED.config_value, updated_at = NOW()",
+                           (_TT_LOI_KEY, gt, 'P292'))
+            else:
+                c2.execute("INSERT OR REPLACE INTO system_config "
+                           "(config_key, config_value, description) VALUES (?,?,?)",
+                           (_TT_LOI_KEY, gt, 'P292'))
+            conn2.commit(); conn2.close()
+        except Exception:
+            pass
+        return False
 
 
 # ── Rate Limiting ─────────────────────────────────────────────
@@ -982,6 +1098,7 @@ def auto_predict_cron():
         _check_sync_lag()
         _check_draw_gap_alert()
         _check_vang_tong_alert('predict')
+        _check_truoc_tong_tin('predict')
         return jsonify({"status": "success", "cycles": 1, "data": [result]})
     except Exception as e:
         import traceback as _tb
@@ -1001,9 +1118,39 @@ def trigger_prediction():
         from prediction_service import run_prediction_cycle
         result = run_prediction_cycle()
         _check_vang_tong_alert('trigger')
+        _check_truoc_tong_tin('trigger')
         return jsonify({"success": True, "prediction": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/truoc-tong/tin', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
+def truoc_tong_tin_api():
+    """P292: GET = xem trước tin "bộ ra trước tổng 4/17"; POST ?gui=1 = gửi ngay.
+    Gửi tay KHÔNG đụng mốc tự động (mốc 20 kỳ vẫn gửi đúng lịch)."""
+    if not _trigger_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    from zoneinfo import ZoneInfo
+    nam = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).year
+    ph = '%s' if USE_POSTGRES else '?'
+    conn = db.get_connection()
+    try:
+        cur = conn.cursor()
+        tin = _tin_truoc_tong(cur, nam)
+        trang_thai = {}
+        for k in (_TT_MOC_KEY, _TT_LOI_KEY):
+            cur.execute(f"SELECT config_value FROM system_config WHERE config_key = {ph}", (k,))
+            r = cur.fetchone()
+            trang_thai[k] = r[0] if r else None
+    finally:
+        conn.close()
+    da_gui = None
+    if request.method == 'POST' and request.args.get('gui') == '1':
+        from telegram_bot import TelegramBot
+        da_gui = bool(TelegramBot().send_message(tin))
+    return jsonify({"tin": tin, "do_dai": len(tin), "da_gui": da_gui,
+                    "moc_da_gui": trang_thai[_TT_MOC_KEY], "loi_gan_nhat": trang_thai[_TT_LOI_KEY]})
 
 
 @app.route('/api/last-draw-id', methods=['GET'])
@@ -11102,6 +11249,7 @@ def telegram_webhook():
                 "/dow [N]   — Win rate theo thứ trong tuần + tỉ lệ HÒA theo giờ (mặc định 500)\n"
                 "/wincal [N] — Lịch WR N ngày qua dạng lưới 7 cột (mặc định 28 ngày)\n"
                 "/next       — Preview N+1 (hiện tại) + N+2/N+3 theo Markov\n"
+                "/truoctong  — Từ 01/01: kỳ ngay trước tổng 4 và tổng 17 ra bộ nào (tự gửi mỗi 20 kỳ)\n"
                 "/votertrend [n] [batch] — WR từng voter qua 5 batch gần nhất (mặc định n=500 batch=25)\n"
                 "/checkpoint  — Trạng thái validation checkpoint (X/200 kỳ, WR, z-score ML)\n"
                 "/new_checkpoint [N] — ⚠️ ĐẶT LẠI checkpoint từ bây giờ, /checkpoint đếm lại từ 0 (mặc định N=200)\n"
@@ -11111,7 +11259,7 @@ def telegram_webhook():
             )
             return jsonify({"ok": True})
 
-        if cmd in ("/predict", "/winrate", "/stats", "/status", "/history", "/voters", "/abstain", "/compare", "/trend", "/dow", "/hourly", "/calibration", "/explain", "/health", "/top", "/recap", "/autotune", "/alerts", "/wincal", "/next", "/votertrend", "/checkpoint", "/new_checkpoint"):
+        if cmd in ("/predict", "/winrate", "/stats", "/status", "/history", "/voters", "/abstain", "/compare", "/trend", "/dow", "/hourly", "/calibration", "/explain", "/health", "/top", "/recap", "/autotune", "/alerts", "/wincal", "/next", "/votertrend", "/checkpoint", "/new_checkpoint", "/truoctong"):
             conn2 = None
             try:
                 conn2 = db.get_connection()
@@ -11179,6 +11327,10 @@ def telegram_webhook():
                     _tg_cmd_wincal(conn2, reply, n_wc)
                 elif cmd == "/next":
                     _tg_cmd_next(conn2, reply)
+                elif cmd == "/truoctong":
+                    from zoneinfo import ZoneInfo
+                    reply(_tin_truoc_tong(conn2.cursor(),
+                                          datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).year))
                 elif cmd == "/votertrend":
                     parts = text_msg.split()
                     n_vt    = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 500
