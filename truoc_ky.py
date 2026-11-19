@@ -11,6 +11,7 @@ rõ đây là thống kê tham khảo, kỳ trước KHÔNG báo hiệu trip / t
 """
 import math
 from collections import Counter
+from datetime import datetime, timedelta
 
 W = Counter(a + b + c for a in range(1, 7) for b in range(1, 7) for c in range(1, 7))
 TAT_CA_BO = sorted({(a, b, c) for a in range(1, 7) for b in range(a, 7) for c in range(b, 7)})
@@ -117,6 +118,14 @@ def _tom_tat(lan: list, p_nhom: float, n_ky: int, chu_so=None, dieu_kien=None) -
     return tom
 
 
+def thang_vn(luc: str) -> str:
+    """'YYYY-MM-DD HH:MM:SS' (UTC) -> 'YYYY-MM' theo giờ VN; hỏng thì '????-??'."""
+    try:
+        return (datetime.strptime(str(luc)[:19], '%Y-%m-%d %H:%M:%S') + timedelta(hours=7)).strftime('%Y-%m')
+    except ValueError:
+        return '????-??'
+
+
 def phan_tich(rows: list, tu_dn: int, loai: str) -> dict:
     """rows: [(dn, bo_sorted_tuple, luc_utc 'YYYY-MM-DD HH:MM:SS')] tăng dần theo dn,
     được phép có kỳ trước tu_dn (làm "kỳ trước" cho kỳ đầu năm). Chỉ đếm kỳ >= tu_dn.
@@ -128,6 +137,8 @@ def phan_tich(rows: list, tu_dn: int, loai: str) -> dict:
            'tu_ky': trong[0][0] if trong else None,
            'den_ky': trong[-1][0] if trong else None,
            'den_luc': trong[-1][2] if trong else None,
+           # P295: số kỳ CÓ trong DB mỗi tháng — thẻ dùng để báo tháng nào DB thiếu kỳ
+           'so_ky_thang': dict(sorted(Counter(thang_vn(luc) for _, _, luc in trong).items())),
            'nhom': {}}
     gop = []
     for khoa, dk, p, chu_so in nhom:

@@ -108,7 +108,7 @@ for loai, khoa in (('trip', 'truoc-trip'), ('tong', 'truoc-tong')):
     kiem(f"HTML co the data-the=\"{khoa}\"", f'data-the="{khoa}"' in H)
     kiem(f"khoa {khoa} trong _THE_DASHBOARD", khoa in A._THE_DASHBOARD)
     kiem(f"JS co ten the {khoa}", f"'{khoa}':" in JS)
-    ids = ['sub', 'chon', 'sum', 'top', 'body', 'them', 'note']
+    ids = ['sub', 'chon', 'sum', 'nhan', 'top', 'ds', 'note']
     kiem(f"HTML du id tk-{loai}-*", all(f'id="tk-{loai}-{x}"' in H for x in ids),
          [x for x in ids if f'id="tk-{loai}-{x}"' not in H])
 kiem("JS goi /api/truoc-ky", "/api/truoc-ky?loai=" in JS)
@@ -116,11 +116,20 @@ kiem("JS lam moi cung refreshThongKe", re.search(r"function refreshThongKe\(\)[^
 kiem("the ghi ro 'không báo hiệu'", 'không báo hiệu' in JS)
 print("=== 4. P294: CHE DO 'TUNG TRIP' (6 CUM RIENG) ===")
 kiem("HTML co khung cum tk-trip-nhom", 'id="tk-trip-nhom"' in H)
-kiem("HTML: bang chung co id de an khi xem tung cum", 'id="tk-trip-bang"' in H)
+kiem("HTML: khung danh sach co id de an khi xem tung cum", 'id="tk-trip-ds"' in H)
 kiem("nut mac dinh la 'Từng trip'", "'Từng trip'" in JS)
 kiem("moi cum la <details> rieng, nho cum da thu gon", 'data-khoi=' in JS and "addEventListener('toggle'" in JS)
-kiem("'Hien tat ca' rieng tung cum", 'data-mo=' in JS and 'st.moNhom[k]' in JS)
-kiem("cum mac dinh 5 lan moi nhat", 'TK_NHOM_GOI_Y = 5' in JS)
+print("=== 5. P295: DANH SACH TACH RIENG TUNG THANG ===")
+kiem("JS dung tkThangHtml cho ca 3 danh sach (cum trip, 1 trip, tong)", JS.count('tkThangHtml(') >= 3, JS.count('tkThangHtml('))
+kiem("moi thang la <details data-thang> rieng", 'data-thang=' in JS and 'class="tk-thang"' in JS)
+kiem("mac dinh chi mo thang moi nhat", 'm === moiNhat' in JS)
+kiem("nho thang da mo / thu gon qua lan lam moi", '_tkThang[el.dataset.thang] = el.open' in JS)
+kiem("khong con nut 'Hien tat ca' cuon chung", 'id="tk-trip-them"' not in H and 'id="tk-tong-them"' not in H and 'moHet' not in JS)
+kiem("thang_vn: 17:00 UTC 31/01 -> thang 2 gio VN", T.thang_vn('2026-01-31 17:00:00') == '2026-02', T.thang_vn('2026-01-31 17:00:00'))
+kiem("thang_vn: chuoi hong -> '????-??'", T.thang_vn('abc') == '????-??')
+sk = T.phan_tich([(1, (1, 1, 2), '2026-01-31 16:59:00'), (2, (2, 3, 4), '2026-01-31 17:00:00'),
+                  (3, (1, 1, 2), '2026-02-01 03:00:00')], 1, 'tong')['so_ky_thang']
+kiem("so_ky_thang dem theo thang VN", sk == {'2026-01': 1, '2026-02': 2}, sk)
 
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
