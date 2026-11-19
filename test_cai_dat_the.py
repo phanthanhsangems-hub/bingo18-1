@@ -68,8 +68,8 @@ import re
 khoa_html = set(re.findall(r'data-the="([^"]+)"', HTML))
 khoa_js   = set(re.findall(r"^\s*'([a-z0-9-]+)':\s*'", JS, re.M))
 khoa_app  = set(A._THE_DASHBOARD)
-kiem(f"app.py co dung 15 khoa", len(khoa_app) == 15, str(len(khoa_app)))
-kiem("HTML gan du 15 the", len(khoa_html) == 15, str(sorted(khoa_html)))
+kiem(f"app.py co dung 17 khoa", len(khoa_app) == 17, str(len(khoa_app)))
+kiem("HTML gan du 17 the", len(khoa_html) == 17, str(sorted(khoa_html)))
 kiem("HTML khop app.py", khoa_html == khoa_app,
      f"thieu {khoa_app - khoa_html} / thua {khoa_html - khoa_app}")
 kiem("JS co ten hien thi cho DU moi khoa", khoa_app <= khoa_js,

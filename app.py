@@ -3009,6 +3009,75 @@ def _trip_lich_su(rows: list, tu_utc) -> dict:
     }
 
 
+# ── P293: thẻ "kỳ NGAY TRƯỚC trip / tổng 4 & 17 ra bộ nào" (từ 01/01) ──────
+# Đọc ~48k kỳ của năm một lần rồi giữ 5 phút trong RAM: hai thẻ (trip, tổng)
+# gọi cùng lúc thì chỉ một lượt đọc Supabase.
+_TRUOC_KY_TTL = 300
+_truoc_ky_cache = {'luc': 0.0, 'nam': None, 'tu_dn': None, 'rows': None}
+_truoc_ky_khoa = _threading.Lock()
+
+
+def _truoc_ky_rows(nam: int):
+    """(kỳ đầu năm, [(dn, bo_sorted, luc_utc 'YYYY-MM-DD HH:MM:SS')]) — gồm cả
+    1 kỳ liền trước kỳ đầu năm để kỳ đó cũng có "kỳ trước"."""
+    import ast as _ast
+    with _truoc_ky_khoa:
+        c = _truoc_ky_cache
+        if c['rows'] is not None and c['nam'] == nam and _time.monotonic() - c['luc'] < _TRUOC_KY_TTL:
+            return c['tu_dn'], c['rows']
+        ph = '%s' if USE_POSTGRES else '?'
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT MIN(draw_number) FROM draw_history WHERE draw_time >= {ph} "
+                        f"AND numbers IS NOT NULL", (f"{nam - 1}-12-31 17:00:00",))
+            r = cur.fetchone()
+            tu_dn = int(r[0]) if r and r[0] is not None else None
+            rows = []
+            if tu_dn is not None:
+                cur.execute(f"SELECT draw_number, numbers, draw_time FROM draw_history "
+                            f"WHERE draw_number >= {ph} AND numbers IS NOT NULL ORDER BY draw_number",
+                            (tu_dn - 1,))
+                for dn, ns, dt in cur.fetchall():
+                    try:
+                        ns = ns if isinstance(ns, (list, tuple)) else _ast.literal_eval(ns)
+                        bo = tuple(sorted(int(x) for x in ns))
+                    except Exception:
+                        continue
+                    if len(bo) != 3:
+                        continue
+                    luc = dt.strftime('%Y-%m-%d %H:%M:%S') if hasattr(dt, 'strftime') else str(dt)[:19]
+                    rows.append((int(dn), bo, luc))
+        finally:
+            conn.close()
+        c.update(luc=_time.monotonic(), nam=nam, tu_dn=tu_dn, rows=rows)
+        return tu_dn, rows
+
+
+@app.route('/api/truoc-ky')
+@limiter.limit("30 per minute")
+@cache_resp(ttl=120)
+def truoc_ky_api():
+    """P293: ?loai=trip | tong. Từ 01/01 năm nay (giờ VN): mỗi lần ra trip
+    111..666 / tổng 4, 17 thì kỳ ngay trước ra bộ nào + phân bố so với kỳ vọng."""
+    import truoc_ky as _tk
+    loai = request.args.get('loai', 'tong')
+    if loai not in ('trip', 'tong'):
+        return jsonify({'error': "loai phai la 'trip' hoac 'tong'"}), 400
+    from zoneinfo import ZoneInfo
+    nam = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).year
+    try:
+        tu_dn, rows = _truoc_ky_rows(nam)
+    except Exception as e:
+        logger.warning("P293 truoc-ky loi doc DB: %s", e)
+        return jsonify({'error': 'khong doc duoc du lieu'}), 503
+    if tu_dn is None:
+        return jsonify({'loai': loai, 'tu_ngay': f'01/01/{nam}', 'so_ky': 0, 'nhom': {}})
+    kq = _tk.phan_tich(rows, tu_dn, loai)
+    kq['tu_ngay'] = f'01/01/{nam}'
+    return jsonify(kq)
+
+
 @app.route('/api/trip/lich-su')
 @limiter.limit("30 per minute")
 @cache_resp(ttl=120)
@@ -3060,6 +3129,7 @@ def trip_lich_su():
 _THE_DASHBOARD = (
     'winrate', 'size-today', 'nong-lanh', 'bo-hom-nay', 'luoi',
     'trip', 'doi', 'tong', 'con-bao-nhieu', 'kc-tong', 'kc-trip', 'trip-ngay',
+    'truoc-trip', 'truoc-tong',
     'cau', 'canh-bao', 'nhat-ky',
 )
 _THE_STATE_KEY = 'dashboard_the_an'

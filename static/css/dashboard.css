@@ -676,3 +676,21 @@ html.hep-640 #tn-table .mini-die{width:17px;height:17px;font-size:10px}
 
 /* P268: ghi chú rủi ro trên thẻ dự đoán */
 .rui-ro{margin:10px 0 0; font-size:12px; color:var(--muted)}
+
+/* ── P293: thẻ "bộ ra ngay trước trip / tổng 4 & 17" ─────────────────── */
+.tk-chon{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.tk-nut{display:inline-flex;align-items:center;gap:4px;min-width:0;padding:5px 9px}
+.tk-nut.on{background:var(--ink);color:var(--card);border-color:var(--ink)}
+.tk-nut .mini-die{width:17px;height:17px;font-size:10px}
+.tk-nhan{margin:0 0 6px}
+.tk-mo{font-size:11px;color:var(--muted)}
+.tn-chip .tk-mo{margin-left:-2px}
+.tk-t{display:block;font-size:11px;color:var(--muted);white-space:nowrap;margin-top:2px;font-family:inherit}
+@media (max-width:640px){
+  .tk-bang th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
+  .tk-bang td{padding:8px 3px;font-size:12.5px}
+  .tk-bang .mini-die{width:17px;height:17px;font-size:10px}
+}
+html.hep-640 .tk-bang th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
+html.hep-640 .tk-bang td{padding:8px 3px;font-size:12.5px}
+html.hep-640 .tk-bang .mini-die{width:17px;height:17px;font-size:10px}

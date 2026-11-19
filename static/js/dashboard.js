@@ -766,6 +766,84 @@ async function loadTripNgay() {
     'Mỗi kỳ vẫn chỉ 1/36 ra trip dù vừa ra hay đã lâu chưa ra.';
 }
 
+// ── P293: kỳ NGAY TRƯỚC trip 111-666 / tổng 4 & 17 (từ 01/01) ──────────
+// Máy chủ tính sẵn (/api/truoc-ky). Bấm nút chọn chỉ vẽ lại từ dữ liệu đã có,
+// không gọi mạng lại.
+const TK_GOI_Y = 15;
+const TK_KHOA = { trip: ['tat_ca', '111', '222', '333', '444', '555', '666'], tong: ['4', '17'] };
+const _tk = { trip: { chon: 'tat_ca', moHet: false, d: null }, tong: { chon: '4', moHet: false, d: null } };
+const tkSo = s => String(s).split('').map(Number);
+async function loadTruocKy(loai) {
+  if (!$(`tk-${loai}-sub`)) return;
+  let d;
+  try { d = await J('/api/truoc-ky?loai=' + loai); } catch (e) { d = null; }
+  if (!d || !d.nhom) {
+    if (!_tk[loai].d) $(`tk-${loai}-sub`).textContent = 'Chưa tải được dữ liệu — sẽ thử lại.';
+    return;
+  }
+  _tk[loai].d = d;
+  veTruocKy(loai);
+}
+function veTruocKy(loai) {
+  const st = _tk[loai], d = st.d;
+  if (!d || !$(`tk-${loai}-sub`)) return;
+  const fmt = v => v == null ? '—' : Number(v).toLocaleString('vi-VN');
+  const pct = (a, b) => b ? (a / b * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + '%' : '—';
+  const ten = k => k === 'tat_ca' ? 'tất cả trip' : (loai === 'trip' ? `trip ${k}` : `tổng ${k}`);
+  $(`tk-${loai}-chon`).innerHTML = TK_KHOA[loai].map(k => {
+    const nhan = k === 'tat_ca' ? 'Tất cả' : (loai === 'trip' ? miniDice(tkSo(k)) : `Tổng ${k}`);
+    return `<button type="button" class="cd-nut tk-nut${k === st.chon ? ' on' : ''}" data-k="${k}" ` +
+      `aria-pressed="${k === st.chon}">${nhan}</button>`;
+  }).join('');
+  const g = st.chon === 'tat_ca' ? d.tat_ca : (d.nhom || {})[st.chon];
+  if (!g) return;
+  $(`tk-${loai}-sub`).innerHTML =
+    `<b class="num">${fmt(d.so_ky)}</b> kỳ từ ${d.tu_ngay} đến <b class="num">#${fmt(d.den_ky)}</b> ` +
+    `(${tnGio(d.den_luc)}) · ${ten(st.chon)} ra <b class="num">${fmt(g.so_lan)}</b> lần, ` +
+    `kỳ vọng ngẫu nhiên ~<b class="num">${fmt(Math.round(g.ky_vong))}</b>`;
+  const o = (nhan, val, phu) => `<div class="tn-o"><span class="tn-v num">${val}</span>` +
+    `<span class="tn-l">${nhan}</span>${phu ? `<span class="tn-p">${phu}</span>` : ''}</div>`;
+  const sz = g.size || {}, kv = g.size_kv || {};
+  let hop = o('Số lần ra', fmt(g.so_lan), `kỳ vọng ~${fmt(Math.round(g.ky_vong))}`);
+  if (g.truoc_co_so != null)
+    hop += o(st.chon === 'tat_ca' ? 'Kỳ trước có số của trip' : `Kỳ trước có số ${st.chon[0]}`,
+      pct(g.truoc_co_so, g.co_truoc), 'kỳ vọng 42,1%');
+  if (loai === 'tong' && g.truoc_cung_nhom != null)
+    hop += o(`Kỳ trước cũng tổng ${st.chon}`, fmt(g.truoc_cung_nhom), `kỳ vọng ${fmt(g.kv_truoc_cung_nhom)}`);
+  hop += o('Kỳ trước là trip', fmt(g.truoc_la_trip), `kỳ vọng ${fmt(g.kv_truoc_trip)}`);
+  hop += o('Kỳ trước Nhỏ · Hòa · Lớn', `${fmt(sz.NHO)} · ${fmt(sz.HOA)} · ${fmt(sz.LON)}`,
+    `kỳ vọng ${fmt(Math.round(kv.NHO))} · ${fmt(Math.round(kv.HOA))} · ${fmt(Math.round(kv.LON))}`);
+  $(`tk-${loai}-sum`).innerHTML = hop;
+  $(`tk-${loai}-top`).innerHTML = (g.top_bo || []).slice(0, 10).map(([b, c, k]) =>
+    `<span class="tn-chip" title="kỳ vọng ${fmt(k)} lần">${miniDice(tkSo(b))}<b class="num">×${c}</b>` +
+    `<span class="tk-mo">· kv ${fmt(k)}</span></span>`).join('') || '<span class="sub">Chưa có lần nào.</span>';
+
+  const ds = st.chon === 'tat_ca'
+    ? Object.values(d.nhom).flatMap(x => x.ds || []).sort((a, b) => b[0] - a[0])
+    : (g.ds || []);
+  const hien = st.moHet ? ds : ds.slice(0, TK_GOI_Y);
+  const hang = ([ky, luc, bo, tr]) => `<tr>
+      <td class="mono">#${fmt(ky)}<span class="tk-t">${tnGio(luc)}</span></td>
+      <td>${tr ? `${miniDice(tkSo(tr))}<span class="tk-t">tổng ${tkSo(tr).reduce((a, b) => a + b, 0)}</span>`
+               : '<span class="tk-mo">thiếu dữ liệu</span>'}</td>
+      <td>${miniDice(tkSo(bo))}</td>
+    </tr>`;
+  $(`tk-${loai}-body`).innerHTML = ds.length ? hien.map(hang).join('')
+    : '<tr><td colspan="3" class="skeleton">Chưa có lần nào từ 01/01.</td></tr>';
+  const them = $(`tk-${loai}-them`);
+  if (them) {
+    them.hidden = ds.length <= TK_GOI_Y;
+    them.textContent = st.moHet ? 'Thu gọn' : `Hiện tất cả ${fmt(ds.length)} lần`;
+  }
+  const p = v => v == null ? '—' : Number(v).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+  $(`tk-${loai}-note`).innerHTML =
+    '<b>Kỳ ngay trước</b> = kỳ có số liền trước (#kỳ − 1); mới nhất ở trên. ' +
+    `Kiểm định: tổng của kỳ trước p = ${p(g.p_tong)}, bộ số p = ${p(g.p_bo)} — trên 0,05 là không khác ` +
+    'các kỳ bình thường. Vài bộ ra nhiều hơn kỳ vọng là chuyện thường khi so cùng lúc 56 bộ: ' +
+    `kỳ trước <b>không báo hiệu</b> ${loai === 'trip' ? 'trip' : 'tổng 4 / tổng 17'}, chỉ để tham khảo.` +
+    (g.thieu_truoc ? ` ${fmt(g.thieu_truoc)} lần không có dữ liệu kỳ trước (DB thiếu kỳ, chủ yếu tháng 1).` : '');
+}
+
 // ── P226: bảng BỘ 2 SỐ TRÙNG NHAU ───────────────────────────
 // Dựng y hệt bảng trip ở trên để người dùng không phải học lại cách đọc —
 // cùng cột, cùng quy tắc tô đậm ô "chưa về", dùng lại luôn CSS .tr-*.
@@ -1033,6 +1111,8 @@ function refreshThongKe() {
   safe(loadNumberGaps);
   safe(loadAlerts);
   safe(loadBetSignal);
+  safe(() => loadTruocKy('trip'));   // P293
+  safe(() => loadTruocKy('tong'));
 }
 function refreshAll() {
   refreshKetQua();
@@ -1084,6 +1164,16 @@ safe(loadTripNgay);
   const _tnSel = $('tn-ngay'), _tnThem = $('tn-them');
   if (_tnSel) _tnSel.addEventListener('change', () => safe(loadTripNgay));
   if (_tnThem) _tnThem.addEventListener('click', () => { _tnMoHet = !_tnMoHet; safe(loadTripNgay); });
+  // P293: nút chọn trip / tổng và "hiện tất cả" — vẽ lại từ dữ liệu đã tải
+  ['trip', 'tong'].forEach(loai => {
+    const chon = $(`tk-${loai}-chon`), them = $(`tk-${loai}-them`);
+    if (chon) chon.addEventListener('click', e => {
+      const b = e.target.closest('[data-k]');
+      if (!b) return;
+      _tk[loai].chon = b.dataset.k; _tk[loai].moHet = false; veTruocKy(loai);
+    });
+    if (them) them.addEventListener('click', () => { _tk[loai].moHet = !_tk[loai].moHet; veTruocKy(loai); });
+  });
 }
 // P286: tab ẩn (thu nhỏ, chuyển tab, khoá máy) thì KHÔNG gọi máy chủ — mỗi
 // request làm Cloud Run tính tiền. Hiện lại thì visibilitychange nạp ngay.
@@ -1127,6 +1217,8 @@ const CD_TEN = {
   'kc-tong':       'Khoảng cách các kỳ theo tổng',
   'kc-trip':       'Khoảng cách các kỳ theo bộ 3 số trùng',
   'trip-ngay':     'Trip theo ngày · cách nhau bao nhiêu kỳ',
+  'truoc-trip':    'Bộ ra ngay trước trip 111 → 666',
+  'truoc-tong':    'Bộ ra ngay trước tổng 4 & tổng 17',
   'cau':           'Cầu đang theo dõi',
   'canh-bao':      'Cảnh báo thông minh',
   'nhat-ky':       'Nhật ký dự đoán',

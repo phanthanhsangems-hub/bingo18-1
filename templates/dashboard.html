@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/css/dashboard.css?v=p286">
+<link rel="stylesheet" href="/static/css/dashboard.css?v=p293">
 <script>
 (function(){var t=localStorage.getItem('bingo18-theme');
 if(t){document.documentElement.setAttribute('data-theme',t);}
@@ -321,6 +321,42 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
     <p class="sub" id="tn-note"></p>
   </div>
 
+  <!-- ═══ P293: KỲ NGAY TRƯỚC TRIP 111 → 666 ═══ -->
+  <div class="card" style="margin-top:16px" data-the="truoc-trip">
+    <h2>Bộ ra ngay trước trip 111 → 666 · từ 01/01</h2>
+    <p class="sub" id="tk-trip-sub">Đang tải...</p>
+    <div class="tk-chon" id="tk-trip-chon" role="group" aria-label="Chọn trip"></div>
+    <div class="tn-sum" id="tk-trip-sum"></div>
+    <p class="sub tk-nhan">Bộ ra ngay trước nhiều nhất <span class="tk-mo">(số lần · kv = kỳ vọng)</span></p>
+    <div class="tn-bo" id="tk-trip-top"></div>
+    <div class="tbl-scroll">
+      <table class="log-table tk-bang" id="tk-trip-table">
+        <thead><tr><th>Kỳ · giờ</th><th>Kỳ ngay trước</th><th>Ra</th></tr></thead>
+        <tbody id="tk-trip-body"><tr><td colspan="3" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <button type="button" class="cd-nut tn-them" id="tk-trip-them" hidden></button>
+    <p class="sub" id="tk-trip-note"></p>
+  </div>
+
+  <!-- ═══ P293: KỲ NGAY TRƯỚC TỔNG 4 & TỔNG 17 ═══ -->
+  <div class="card" style="margin-top:16px" data-the="truoc-tong">
+    <h2>Bộ ra ngay trước tổng 4 & tổng 17 · từ 01/01</h2>
+    <p class="sub" id="tk-tong-sub">Đang tải...</p>
+    <div class="tk-chon" id="tk-tong-chon" role="group" aria-label="Chọn tổng"></div>
+    <div class="tn-sum" id="tk-tong-sum"></div>
+    <p class="sub tk-nhan">Bộ ra ngay trước nhiều nhất <span class="tk-mo">(số lần · kv = kỳ vọng)</span></p>
+    <div class="tn-bo" id="tk-tong-top"></div>
+    <div class="tbl-scroll">
+      <table class="log-table tk-bang" id="tk-tong-table">
+        <thead><tr><th>Kỳ · giờ</th><th>Kỳ ngay trước</th><th>Ra</th></tr></thead>
+        <tbody id="tk-tong-body"><tr><td colspan="3" class="skeleton">Đang tải...</td></tr></tbody>
+      </table>
+    </div>
+    <button type="button" class="cd-nut tn-them" id="tk-tong-them" hidden></button>
+    <p class="sub" id="tk-tong-note"></p>
+  </div>
+
   <!-- ═══ WATCH PAIRS (dự báo cầu) ═══ -->
   <div class="card" style="margin-top:16px" data-the="cau">
     <h2>Cầu đang theo dõi</h2>
@@ -364,6 +400,6 @@ if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catc
 </div>
 
 <div class="tooltip" id="tooltip"></div>
-<script src="/static/js/dashboard.js?v=p286"></script>
+<script src="/static/js/dashboard.js?v=p293"></script>
 </body>
 </html>
