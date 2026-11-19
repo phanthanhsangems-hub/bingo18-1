@@ -771,7 +771,10 @@ async function loadTripNgay() {
 // không gọi mạng lại.
 const TK_GOI_Y = 15;
 const TK_KHOA = { trip: ['tat_ca', '111', '222', '333', '444', '555', '666'], tong: ['4', '17'] };
-const _tk = { trip: { chon: 'tat_ca', moHet: false, d: null }, tong: { chon: '4', moHet: false, d: null } };
+const _tk = { trip: { chon: 'tat_ca', moHet: false, d: null, moNhom: {}, dong: [] },
+              tong: { chon: '4', moHet: false, d: null } };
+const TK_NHOM_GOI_Y = 5;          // P294: mỗi cụm trip mặc định 5 lần mới nhất
+const TK_SZ = { NHO: 'Nhỏ', HOA: 'Hòa', LON: 'Lớn' };
 const tkSo = s => String(s).split('').map(Number);
 async function loadTruocKy(loai) {
   if (!$(`tk-${loai}-sub`)) return;
@@ -789,9 +792,9 @@ function veTruocKy(loai) {
   if (!d || !$(`tk-${loai}-sub`)) return;
   const fmt = v => v == null ? '—' : Number(v).toLocaleString('vi-VN');
   const pct = (a, b) => b ? (a / b * 100).toLocaleString('vi-VN', { maximumFractionDigits: 1 }) + '%' : '—';
-  const ten = k => k === 'tat_ca' ? 'tất cả trip' : (loai === 'trip' ? `trip ${k}` : `tổng ${k}`);
+  const ten = k => k === 'tat_ca' ? 'cả 6 trip' : (loai === 'trip' ? `trip ${k}` : `tổng ${k}`);
   $(`tk-${loai}-chon`).innerHTML = TK_KHOA[loai].map(k => {
-    const nhan = k === 'tat_ca' ? 'Tất cả' : (loai === 'trip' ? miniDice(tkSo(k)) : `Tổng ${k}`);
+    const nhan = k === 'tat_ca' ? 'Từng trip' : (loai === 'trip' ? miniDice(tkSo(k)) : `Tổng ${k}`);
     return `<button type="button" class="cd-nut tk-nut${k === st.chon ? ' on' : ''}" data-k="${k}" ` +
       `aria-pressed="${k === st.chon}">${nhan}</button>`;
   }).join('');
@@ -818,9 +821,39 @@ function veTruocKy(loai) {
     `<span class="tn-chip" title="kỳ vọng ${fmt(k)} lần">${miniDice(tkSo(b))}<b class="num">×${c}</b>` +
     `<span class="tk-mo">· kv ${fmt(k)}</span></span>`).join('') || '<span class="sub">Chưa có lần nào.</span>';
 
-  const ds = st.chon === 'tat_ca'
-    ? Object.values(d.nhom).flatMap(x => x.ds || []).sort((a, b) => b[0] - a[0])
-    : (g.ds || []);
+  // P294: "Từng trip" = tách 6 cụm 111..666, mỗi cụm một bảng riêng (không trộn chung)
+  const nhomMode = loai === 'trip' && st.chon === 'tat_ca';
+  [['bang', nhomMode], ['top', nhomMode], ['nhan', nhomMode], ['nhom', !nhomMode]].forEach(([id, an]) => {
+    const el = $(`tk-${loai}-${id}`); if (el) el.hidden = an;
+  });
+  const tongSz = tr => { const s = tkSo(tr).reduce((a, b) => a + b, 0); return `tổng ${s} · ${TK_SZ[s <= 9 ? 'NHO' : s <= 11 ? 'HOA' : 'LON']}`; };
+  if (nhomMode) {
+    $(`tk-${loai}-nhom`).innerHTML = TK_KHOA.trip.slice(1).map(k => {
+      const x = d.nhom[k] || {}, v = +k[0], dsk = x.ds || [], mo = !!st.moNhom[k];
+      const hienk = mo ? dsk : dsk.slice(0, TK_NHOM_GOI_Y);
+      const top = (x.top_bo || []).slice(0, 5).map(([b, c, kk]) =>
+        `<span class="tn-chip" title="kỳ vọng ${fmt(kk)} lần">${miniDice(tkSo(b))}<b class="num">×${c}</b>` +
+        `<span class="tk-mo">· kv ${fmt(kk)}</span></span>`).join('');
+      const hangk = ([ky, luc, , tr]) => `<tr>
+          <td class="mono">#${fmt(ky)}<span class="tk-t">${tnGio(luc)}</span></td>
+          <td>${tr ? `${miniDice(tkSo(tr))}<span class="tk-t">${tongSz(tr)}</span>` : '<span class="tk-mo">thiếu dữ liệu</span>'}</td>
+        </tr>`;
+      return `<details class="tk-khoi" data-khoi="${k}"${st.dong.includes(k) ? '' : ' open'}>
+        <summary>${miniDice([v, v, v])}<b class="num">${fmt(x.so_lan)}</b> lần
+          <span class="tk-mo">kv ${fmt(Math.round(x.ky_vong))} · kỳ trước có số ${v}: ${pct(x.truoc_co_so, x.co_truoc)}</span></summary>
+        <p class="sub tk-nhan">5 bộ ra ngay trước nhiều nhất</p>
+        <div class="tn-bo">${top || '<span class="sub">Chưa có lần nào.</span>'}</div>
+        <div class="tbl-scroll"><table class="log-table tk-bang">
+          <thead><tr><th>Kỳ · giờ ra ${k}</th><th>Kỳ ngay trước ra</th></tr></thead>
+          <tbody>${dsk.length ? hienk.map(hangk).join('') : '<tr><td colspan="2" class="skeleton">Chưa ra lần nào từ 01/01.</td></tr>'}</tbody>
+        </table></div>
+        ${dsk.length > TK_NHOM_GOI_Y ? `<button type="button" class="cd-nut tn-them" data-mo="${k}">` +
+          `${mo ? 'Thu gọn' : `Hiện tất cả ${fmt(dsk.length)} lần ra ${k}`}</button>` : ''}
+      </details>`;
+    }).join('');
+  }
+
+  const ds = nhomMode ? [] : (g.ds || []);
   const hien = st.moHet ? ds : ds.slice(0, TK_GOI_Y);
   const hang = ([ky, luc, bo, tr]) => `<tr>
       <td class="mono">#${fmt(ky)}<span class="tk-t">${tnGio(luc)}</span></td>
@@ -832,7 +865,7 @@ function veTruocKy(loai) {
     : '<tr><td colspan="3" class="skeleton">Chưa có lần nào từ 01/01.</td></tr>';
   const them = $(`tk-${loai}-them`);
   if (them) {
-    them.hidden = ds.length <= TK_GOI_Y;
+    them.hidden = nhomMode || ds.length <= TK_GOI_Y;
     them.textContent = st.moHet ? 'Thu gọn' : `Hiện tất cả ${fmt(ds.length)} lần`;
   }
   const p = v => v == null ? '—' : Number(v).toLocaleString('vi-VN', { maximumFractionDigits: 2 });
@@ -1174,6 +1207,24 @@ safe(loadTripNgay);
     });
     if (them) them.addEventListener('click', () => { _tk[loai].moHet = !_tk[loai].moHet; veTruocKy(loai); });
   });
+  // P294: cụm trip — "Hiện tất cả" riêng từng cụm; nhớ cụm nào đã thu gọn để
+  // lần làm mới 5 phút không mở bung lại. 'toggle' không nổi bọt nên bắt ở pha capture.
+  const _tkNhom = $('tk-trip-nhom');
+  if (_tkNhom) {
+    _tkNhom.addEventListener('click', e => {
+      const b = e.target.closest('[data-mo]');
+      if (!b) return;
+      const k = b.dataset.mo, st = _tk.trip;
+      st.moNhom[k] = !st.moNhom[k]; veTruocKy('trip');
+    });
+    _tkNhom.addEventListener('toggle', e => {
+      const k = e.target && e.target.dataset ? e.target.dataset.khoi : null;
+      if (!k) return;
+      const st = _tk.trip;
+      st.dong = st.dong.filter(x => x !== k);
+      if (!e.target.open) st.dong.push(k);
+    }, true);
+  }
 }
 // P286: tab ẩn (thu nhỏ, chuyển tab, khoá máy) thì KHÔNG gọi máy chủ — mỗi
 // request làm Cloud Run tính tiền. Hiện lại thì visibilitychange nạp ngay.
