@@ -79,8 +79,10 @@ jobs:
             for p in /api/next_prediction /api/board-stats /api/today-draws /api/draw-grid /api/sum-stats \
                      /api/triple-stats /api/pair-stats /api/number_frequency /api/learning-status /api/wl-streak \
                      /api/watch-scoreboard /api/cold-streaks /api/recent-outcomes /api/today-wr /api/today-combos \
-                     /api/daily-trend /api/bet-signal /api/alert-log /api/trip/lich-su /api/cai-dat/the; do
-              OUT=$(curl -s -o /dev/null -w '%{time_total} %{http_code}' --max-time 30 -H "$H" "$BASE$p?cb=$TS$LUOT") || true
+                     /api/daily-trend /api/bet-signal /api/alert-log /api/trip/lich-su /api/cai-dat/the \
+                     "/api/truoc-ky?loai=trip" "/api/truoc-ky?loai=tong"; do
+              SEP='?'; case "$p" in *\?*) SEP='&';; esac
+              OUT=$(curl -s -o /dev/null -w '%{time_total} %{http_code}' --max-time 30 -H "$H" "$BASE$p${SEP}cb=$TS$LUOT") || true
               T=${OUT%% *}; C=${OUT##* }
               DAU=""; awk "BEGIN{exit !($T > 5)}" && DAU="  <<< CHAM"
               [ "$C" = "000" ] && DAU="  <<< TREO (qua 30s)"
