@@ -694,3 +694,13 @@ html.hep-640 #tn-table .mini-die{width:17px;height:17px;font-size:10px}
 html.hep-640 .tk-bang th{font-size:9.5px;letter-spacing:0;padding:8px 3px}
 html.hep-640 .tk-bang td{padding:8px 3px;font-size:12.5px}
 html.hep-640 .tk-bang .mini-die{width:17px;height:17px;font-size:10px}
+
+/* ── P294: thẻ trip chế độ "Từng trip" — 6 cụm riêng ───────────────────── */
+.tk-nhom{display:grid;gap:8px;margin:0 0 6px}
+.tk-khoi{background:var(--card2);border-radius:12px;padding:0 10px}
+.tk-khoi>summary{cursor:pointer;padding:10px 2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:600}
+.tk-khoi[open]>summary{border-bottom:1px solid var(--line)}
+.tk-khoi .tk-nhan{margin:8px 0 6px}
+.tk-khoi .tn-bo{margin:0 0 8px}
+.tk-khoi .tbl-scroll{margin:0 -4px}
+.tk-khoi .tn-them{margin:8px 0 10px}

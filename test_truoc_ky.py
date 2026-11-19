@@ -114,6 +114,13 @@ for loai, khoa in (('trip', 'truoc-trip'), ('tong', 'truoc-tong')):
 kiem("JS goi /api/truoc-ky", "/api/truoc-ky?loai=" in JS)
 kiem("JS lam moi cung refreshThongKe", re.search(r"function refreshThongKe\(\)[^}]*loadTruocKy\('trip'\)", JS) is not None)
 kiem("the ghi ro 'không báo hiệu'", 'không báo hiệu' in JS)
+print("=== 4. P294: CHE DO 'TUNG TRIP' (6 CUM RIENG) ===")
+kiem("HTML co khung cum tk-trip-nhom", 'id="tk-trip-nhom"' in H)
+kiem("HTML: bang chung co id de an khi xem tung cum", 'id="tk-trip-bang"' in H)
+kiem("nut mac dinh la 'Từng trip'", "'Từng trip'" in JS)
+kiem("moi cum la <details> rieng, nho cum da thu gon", 'data-khoi=' in JS and "addEventListener('toggle'" in JS)
+kiem("'Hien tat ca' rieng tung cum", 'data-mo=' in JS and 'st.moNhom[k]' in JS)
+kiem("cum mac dinh 5 lan moi nhat", 'TK_NHOM_GOI_Y = 5' in JS)
 
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)
