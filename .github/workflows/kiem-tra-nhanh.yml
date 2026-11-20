@@ -81,6 +81,14 @@ jobs:
                   print(f"    {vn:%d/%m %H:%M} ky #{x.get('den')} {'OK  ' if x.get('ok') else 'HONG'} ({x.get('nguon')})")
               hong = sum(1 for x in nk if not x.get('ok'))
               print(f"  {len(nk)} tin gan nhat: {hong} tin HONG")
+              tat = [x for x in (cb.get('nhat_ky') or []) if isinstance(x, dict) and x.get('luc')]
+              ok_cuoi = next((x for x in reversed(tat) if x.get('ok')), None)
+              if ok_cuoi and hong:
+                  sau = [x for x in tat if x['luc'] > ok_cuoi['luc']]
+                  vn = datetime.datetime.strptime(ok_cuoi['luc'], '%Y-%m-%d %H:%M:%S') + datetime.timedelta(hours=7)
+                  print(f"  tin OK cuoi cung: ky #{ok_cuoi.get('den')} luc {vn:%d/%m %H:%M} VN -> sau do {len(sau)} tin HONG lien tiep")
+              elif hong:
+                  print(f"  ca nhat ky ({len(tat)} tin) khong co tin nao OK")
           PYEOF
           echo
           echo "=== THOI GIAN TRA LOI CAC ENDPOINT DASHBOARD GOI (giay, ma) ==="
