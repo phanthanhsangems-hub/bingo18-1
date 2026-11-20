@@ -2328,21 +2328,34 @@ def _chan_hoa(numbers, vote_info, banned: set):
 
 
 # ── Main: 1 chu kỳ dự đoán ───────────────────────────────────
-def chon_ky_du_doan(last: int, last_time, bay_gio_vn=None) -> int:
-    """P297: kỳ cần dự đoán. Bình thường = last + 2 (như cũ). DB trễ vì watcher mất
-    mạng (20/11 07:00-08:19) thì theo LỊCH QUAY để kỳ nào cũng có dự đoán trước giờ
-    quay — dùng dữ liệu tới kỳ cuối đang có. Lịch không tin được -> last + 2."""
+def chon_ky_du_doan(last: int, last_time, bay_gio_vn=None, last_pred=None) -> int:
+    """Kỳ cần dự đoán. Bình thường = last + 2 (như cũ).
+
+    P297: DB trễ vì watcher mất mạng (20/11 07:00-08:19) -> theo LỊCH QUAY, dự đoán kỳ ngay
+    sau kỳ sắp quay, dùng dữ liệu tới kỳ cuối đang có.
+    P298c: kỳ SẮP QUAY chưa có dự đoán (watcher vừa khởi động lại, chèn 2 kỳ một lúc: 20/11
+    #197081, #197089) mà còn >= 2 phút tới giờ quay -> dự đoán NÓ trước; vòng sau lo kỳ kế.
+    Lịch không tin được -> last + 2."""
     next_draw = last + 2
     try:
         import gio_ky
+        if not last or not gio_ky.lich_khop(last, last_time):
+            return next_draw
         if bay_gio_vn is None:
             from zoneinfo import ZoneInfo
             bay_gio_vn = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).replace(tzinfo=None)
-        k = gio_ky.ky_can_du_doan(bay_gio_vn, last, last_time)
-        if k is not None and k > next_draw:
-            logger.warning("DB tre: ky cuoi #%d nhung theo lich sap quay toi #%d -> du doan #%d "
-                           "(thay vi #%d)", last, k - 1, k, next_draw)
-            next_draw = k
+        sap = gio_ky.ky_sap_quay(bay_gio_vn)
+        if sap <= last or (sap + 1) - next_draw > gio_ky.TRE_TOI_DA:
+            return next_draw
+        con = gio_ky.giay_toi_gio_quay(sap, bay_gio_vn)
+        if last_pred is not None and last_pred < sap and con >= gio_ky.GIAY_TOI_THIEU:
+            logger.warning("Ky sap quay #%d (con %.0f giay) chua co du doan -> du doan no truoc (ky cuoi #%d)",
+                           sap, con, last)
+            return sap
+        if sap + 1 > next_draw:
+            logger.warning("DB tre: ky cuoi #%d nhung theo lich sap quay toi #%d -> du doan #%d (thay vi #%d)",
+                           last, sap, sap + 1, next_draw)
+            return sap + 1
     except Exception as e:                       # lịch hỏng gì cũng không được chặn dự đoán
         logger.warning("chon_ky_du_doan theo lich loi: %s", e)
     return next_draw
@@ -2515,7 +2528,7 @@ def run_prediction_cycle() -> dict:
 
     # Predict cho last+2: buffer 1 kỳ bù sync lag ~6 phút
     # Nếu đã predict >= last+2 → đủ rồi, skip
-    next_draw = chon_ky_du_doan(last, last_time)
+    next_draw = chon_ky_du_doan(last, last_time, last_pred=last_pred)
 
     if last_pred >= next_draw:
         logger.info("Draw #%d already predicted ahead – skip", next_draw)

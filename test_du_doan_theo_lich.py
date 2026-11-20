@@ -78,7 +78,7 @@ kiem("binh thuong -> cuoi + 2", P.chon_ky_du_doan(197022, D(2026, 11, 20, 0, 12,
 kiem("gio hong -> cuoi + 2, khong loi", P.chon_ky_du_doan(197019, object(), D(2026, 11, 20, 7, 15)) == 197021)
 kiem("DB rong -> 2", P.chon_ky_du_doan(0, None, D(2026, 11, 20, 7, 15)) == 2)
 src = open('prediction_service.py', encoding='utf-8').read()
-kiem("vong du doan dung chon_ky_du_doan", 'next_draw = chon_ky_du_doan(last, last_time)' in src)
+kiem("vong du doan dung chon_ky_du_doan", 'next_draw = chon_ky_du_doan(last, last_time' in src)
 
 print("=== 6. CHE TOKEN TELEGRAM TRONG LOG ===")
 gia = 'bot1234567890:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'      # token GIA, dung de test
@@ -97,6 +97,63 @@ kiem("watcher: moi handler deu co bo loc", all(any(isinstance(x, S._CheBiMat) fo
 rec = logging.LogRecord('x', logging.INFO, __file__, 1, "Khong co ky moi (last=#%d)", (197019,), None)
 f.filter(rec)
 kiem("dong log thuong khong bi doi", rec.getMessage() == "Khong co ky moi (last=#197019)", rec.getMessage())
+
+
+print("=== 7. P298c: KY SAP QUAY CHUA CO DU DOAN -> DU DOAN NO TRUOC ===")
+def utc_lich(dn):
+    return G.gio_lich(dn, G.NGAY_MOC + timedelta(days=G.khoi(dn)))
+CK = P.chon_ky_du_doan
+kiem("giay_toi_gio_quay: 13:49:50 -> #197089 (13:54) con 250 giay",
+     G.giay_toi_gio_quay(197089, D(2026, 11, 20, 13, 49, 50)) == 250, G.giay_toi_gio_quay(197089, D(2026, 11, 20, 13, 49, 50)))
+kiem("20/11 13:49:50 watcher vua chay lai chen #197087, #197089 chua co -> du doan #197089 (truoc day bo qua)",
+     CK(197087, utc_lich(197087), D(2026, 11, 20, 13, 49, 50), last_pred=197088) == 197089)
+kiem("13:50:20 chen tiep #197088, #197089 da co -> #197090",
+     CK(197088, utc_lich(197088), D(2026, 11, 20, 13, 50, 20), last_pred=197089) == 197090)
+kiem("20/11 13:03:24 chen #197080 (ghi 13:03), #197081 chua co -> du doan #197081",
+     CK(197080, D(2026, 11, 20, 6, 3, 0), D(2026, 11, 20, 13, 3, 24), last_pred=197080) == 197081)
+kiem("con < 2 phut toi gio quay -> KHONG du doan ky sap quay (de khoi muon), lam ky sau",
+     CK(197087, utc_lich(197087), D(2026, 11, 20, 13, 53, 10), last_pred=197088) == 197090)
+kiem("binh thuong (ky cuoi vua quay, ky sap quay da co) -> cuoi + 2 nhu cu",
+     CK(197092, utc_lich(197092) + timedelta(seconds=70), D(2026, 11, 20, 14, 13, 30), last_pred=197093) == 197094)
+kiem("goi kieu cu (khong co last_pred) -> nhu P297",
+     CK(197092, utc_lich(197092), D(2026, 11, 20, 14, 13, 30)) == 197094)
+kiem("da du doan toi sap+1 -> tra sap+1 (vong du doan tu skip)",
+     CK(197092, utc_lich(197092), D(2026, 11, 20, 14, 13, 30), last_pred=197094) == 197094)
+kiem("neo hong -> cuoi + 2, khong dung lich",
+     CK(197087, utc_lich(197087) + timedelta(hours=1), D(2026, 11, 20, 13, 49, 50), last_pred=197088) == 197089)
+kiem("cuoi ngay 21:55: ky sap quay la 06:06 mai, da co -> cuoi + 2",
+     CK(197169, utc_lich(197169) + timedelta(seconds=60), D(2026, 11, 20, 21, 55, 30), last_pred=197170) == 197171)
+kiem("vong du doan truyen last_pred", 'chon_ky_du_doan(last, last_time, last_pred=last_pred)' in src)
+
+def mo_phong(co_hen_gio: bool):
+    """20/11 13:30-14:40: watcher chen moi ky sau 60 giay, MAT tu 13:36 toi 13:49:50 (luc cai dat)."""
+    def T(dn): return utc_lich(dn) + timedelta(hours=7)          # gio quay VN
+    chen = {dn: T(dn) + timedelta(seconds=60) for dn in range(197084, 197100)}
+    chen[197087] = D(2026, 11, 20, 13, 49, 50); chen[197088] = D(2026, 11, 20, 13, 50, 20)
+    su_kien = [(t, 'chen', dn) for dn, t in chen.items()]
+    if co_hen_gio:
+        t = D(2026, 11, 20, 13, 30, 5)
+        while t < D(2026, 11, 20, 14, 40):
+            if t.minute % 6 == 3: su_kien.append((t, 'hen_gio', None))
+            t += timedelta(minutes=1)
+    su_kien.sort()
+    db = {dn: chen[dn] for dn in chen if chen[dn] < D(2026, 11, 20, 13, 30)}
+    du = {dn: None for dn in range(197080, 197089)}               # da co truoc 13:36
+    for t, loai, dn in su_kien:
+        if loai == 'chen': db[dn] = t
+        co = [k for k in db if db[k] <= t]
+        if not co: continue
+        cuoi = max(co)
+        lp = max(du)
+        k = CK(cuoi, utc_lich(cuoi) + timedelta(seconds=60), t, last_pred=lp)
+        if lp < k: du[k] = t
+    return {dn: (T(dn) - du[dn]).total_seconds() for dn in range(197089, 197098) if du.get(dn)}, \
+           [dn for dn in range(197089, 197098) if dn not in du]
+for co in (False, True):
+    som, thieu = mo_phong(co)
+    ten = 'co hen gio tren may' if co else 'KHONG co hen gio (chi watcher, nhu chieu 20/11)'
+    kiem(f"mo phong {ten}: #197089-#197097 deu co du doan", not thieu, thieu)
+    kiem(f"mo phong {ten}: moi du doan som >= 2 phut truoc gio quay", min(som.values()) >= 120, som)
 
 print(f"\nDAT: {DAT}   HONG: {HONG}")
 sys.exit(1 if HONG else 0)

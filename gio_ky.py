@@ -183,3 +183,12 @@ def ky_can_du_doan(bay_gio_vn, cuoi: int, gio_cuoi_utc, tre_toi_da: int = TRE_TO
     if k <= cuoi + 2 or k - (cuoi + 2) > tre_toi_da:
         return None
     return k
+
+
+GIAY_TOI_THIEU = 120     # P298c: còn >= 2 phút trước giờ quay mới dự đoán kỳ sắp quay (vòng chạy ~5-25 giây)
+
+
+def giay_toi_gio_quay(dn: int, bay_gio_vn) -> float:
+    """Số giây từ bay_gio_vn (giờ VN, naive) tới giờ quay theo lịch của kỳ dn (âm = đã quay)."""
+    gio_vn = gio_lich(dn, NGAY_MOC + timedelta(days=khoi(dn))) + LECH_VN
+    return (gio_vn - bay_gio_vn).total_seconds()
