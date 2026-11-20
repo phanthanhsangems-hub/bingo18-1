@@ -8608,6 +8608,27 @@ def _load_dashboard() -> str:
     return _fallback_dashboard()
 
 
+_PHIEN_BAN = {}
+
+
+def _phien_ban_giao_dien() -> str:
+    """P298h: phiên bản tài sản (?v=...) của dashboard đang phục vụ. Trang để mở lâu
+    so với nó để tự tải lại — 20/11 phải đi tìm từng tab Cloud Run bị quên."""
+    if 'v' not in _PHIEN_BAN:
+        import re as _re
+        m = _re.search(r'dashboard\.js\?v=([\w.-]+)', _load_dashboard())
+        _PHIEN_BAN['v'] = m.group(1) if m else ''
+    return _PHIEN_BAN['v']
+
+
+@app.route('/api/phien-ban')
+@limiter.limit("60 per minute")
+def phien_ban_giao_dien():
+    resp = jsonify({'v': _phien_ban_giao_dien()})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 def _fallback_dashboard() -> str:
     return '''<!DOCTYPE html>
 <html lang="vi">
