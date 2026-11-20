@@ -9,6 +9,11 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const SZ_VI = { LON: 'LỚN', HOA: 'HÒA', NHO: 'NHỎ' };
 
+// P298h: phiên bản của chính file này (?v=... trong thẻ <script>) — so với máy chủ để tự tải lại
+const JS_VER = (() => {
+  try { return new URL(document.currentScript.src).searchParams.get('v') || ''; } catch (e) { return ''; }
+})();
+
 async function J(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`${url} -> ${r.status}`);
@@ -1236,12 +1241,61 @@ safe(loadTripNgay);
 }
 // P286: tab ẩn (thu nhỏ, chuyển tab, khoá máy) thì KHÔNG gọi máy chủ — mỗi
 // request làm Cloud Run tính tiền. Hiện lại thì visibilitychange nạp ngay.
-const khiHien = fn => () => { if (document.visibilityState === 'visible') fn(); };
+// P298h: mở qua link Cloud Run (*.run.app) rồi để QUÊN trên màn hình — tab vẫn "hiện" nên
+// vẫn gọi máy chủ mỗi phút, Cloud Run tính tiền (20/11 chiều: 2 trang trên Windows + 1 điện
+// thoại gọi suốt). 10 phút không chạm / di chuột / gõ phím -> tạm dừng tới khi dùng lại.
+// Máy nhà (localhost, 192.168.x.x) miễn phí -> không tạm dừng.
+const TREN_CLOUD = /\.run\.app$/i.test(location.hostname);
+const NGHI_SAU_MS = 10 * 60 * 1000;
+let _lanDungCuoi = Date.now();
+let _dangNghi = false;
+function _bangNghi(hien) {
+  let el = $('bang-nghi');
+  if (!el && hien) {
+    el = document.createElement('div');
+    el.id = 'bang-nghi';
+    el.className = 'bang-nghi';
+    el.setAttribute('role', 'status');
+    el.textContent = '⏸ Đã tạm dừng tự cập nhật: 10 phút không dùng, mà đang xem qua Cloud Run ' +
+      'nên mỗi lần cập nhật đều tốn phí. Chạm hoặc di chuột để tiếp tục.';
+    document.body.appendChild(el);
+  }
+  if (el) el.hidden = !hien;
+}
+function _danhThuc() {
+  _lanDungCuoi = Date.now();
+  if (!_dangNghi) return;
+  _dangNghi = false;
+  _bangNghi(false);
+  refreshAllVaGhiMoc();
+  if (Date.now() - _lanCuoiTaiBangTong > 120000) loadBangLichSu();
+}
+['pointerdown', 'pointermove', 'keydown', 'touchstart', 'wheel', 'scroll'].forEach(ev =>
+  window.addEventListener(ev, _danhThuc, { passive: true }));
+function duocGoiMayChu() {
+  if (document.visibilityState !== 'visible') return false;
+  if (!TREN_CLOUD || Date.now() - _lanDungCuoi < NGHI_SAU_MS) return true;
+  if (!_dangNghi) { _dangNghi = true; _bangNghi(true); }
+  return false;
+}
+const khiHien = fn => () => { if (duocGoiMayChu()) fn(); };
 setInterval(khiHien(() => safe(loadTripNgay)), 120000);
 setInterval(khiHien(refreshAllVaGhiMoc), 60000);
 setInterval(khiHien(refreshThongKe), 300000);   // P267: thống kê nặng 5 phút/lần
 setInterval(khiHien(() => safe(loadTrend)), 600000);
 setInterval(khiHien(loadBangLichSu), 300000);
+
+// P298h: trang để mở lâu không bao giờ nhận JS mới (sửa gì cũng phải đi tìm từng tab để tải
+// lại). Mỗi 10 phút hỏi máy chủ phiên bản giao diện; khác -> tự tải lại, nhưng chỉ khi không
+// ai đang thao tác (1 phút không chạm) để khỏi giật trang giữa lúc đang xem.
+async function kiemTraPhienBan() {
+  if (!JS_VER) return;
+  try {
+    const d = await J('/api/phien-ban');
+    if (d && d.v && d.v !== JS_VER && Date.now() - _lanDungCuoi > 60000) location.reload();
+  } catch (e) { /* máy chủ cũ chưa có endpoint / mất mạng -> lần sau */ }
+}
+setInterval(khiHien(kiemTraPhienBan), 600000);
 
 // P204: trình duyệt điện thoại ĐÓNG BĂNG setInterval khi tab chạy nền hoặc
 // khoá máy. Mở lại app là thấy dữ liệu của lúc rời đi — có thể cũ hàng chục
@@ -1251,6 +1305,8 @@ setInterval(khiHien(loadBangLichSu), 300000);
 // Nạp lại ngay khi tab hiện trở lại.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
+  _lanDungCuoi = Date.now();                       // P298h: quay lại tab = đang dùng
+  if (_dangNghi) { _dangNghi = false; _bangNghi(false); }
   refreshAllVaGhiMoc();
   // Bảng lịch sử nặng hơn và server cache 300s — chỉ nạp lại khi đã quá cũ
   if (Date.now() - _lanCuoiTaiBangTong > 120000) loadBangLichSu();

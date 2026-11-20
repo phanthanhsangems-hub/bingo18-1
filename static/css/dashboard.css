@@ -712,3 +712,10 @@ html.hep-640 .tk-bang .mini-die{width:17px;height:17px;font-size:10px}
 .tk-thang[open]>summary{border-bottom:1px solid var(--line)}
 .tk-thang .tbl-scroll{margin:0 -4px}
 .tk-khoi .tk-ds{margin:0 0 10px}
+
+/* P298h: băng báo tạm dừng tự cập nhật (mở qua Cloud Run rồi để quên) */
+.bang-nghi{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:210;
+  width:max-content;max-width:min(92vw,560px);padding:10px 14px;border-radius:12px;
+  background:var(--amber-soft);color:var(--ink);border:1px solid var(--amber);
+  box-shadow:var(--shadow);font-size:14px;line-height:1.45;text-align:center}
+.bang-nghi[hidden]{display:none}

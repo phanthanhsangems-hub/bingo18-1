@@ -57,3 +57,4 @@ jobs:
           python test_truoc_ky.py
           python test_du_doan_theo_lich.py
           python test_chay_may.py
+          python test_tam_dung_cloud.py
