@@ -256,6 +256,26 @@ kiem("APP_MAY_URL rong -> tat che do may nha", not S._app_may_song())
 src = open('sync_to_supabase.py', encoding='utf-8').read()
 kiem("watcher van goi trigger trong luong rieng (khong chan vong lap)", 'threading.Thread(target=trigger_prediction' in src)
 
+print("=== 4b. P298d: TELEGRAM TRA LOI HTTP -> GHI LOG (TRUOC DAY IM LANG) ===")
+class _R:
+    def __init__(s, ma, j): s.status_code, s.ok, s._j, s.text = ma, ma == 200, j, str(j)
+    def json(s): return s._j
+_goc_post, _goc_tok, _goc_chat, _goc_gap = S.requests.post, S.TELEGRAM_TOKEN, S.TELEGRAM_CHAT, S._MIN_TG_INTERVAL
+_goi_tg = []
+S.requests.post = lambda url, json=None, timeout=None: (_goi_tg.append(url), _R(401, {'ok': False, 'description': 'Unauthorized'}))[1]
+S.TELEGRAM_TOKEN, S.TELEGRAM_CHAT, S._MIN_TG_INTERVAL = '1234567890:' + 'A' * 35, '1', 0
+_buf = __import__('io').StringIO(); _h = logging.StreamHandler(_buf); _h.addFilter(S._CheBiMat())
+logging.getLogger().addHandler(_h)
+try:
+    _kq = S._tg_html('<b>x</b>')
+finally:
+    logging.getLogger().removeHandler(_h)
+    S.requests.post, S.TELEGRAM_TOKEN, S.TELEGRAM_CHAT, S._MIN_TG_INTERVAL = _goc_post, _goc_tok, _goc_chat, _goc_gap
+_log = _buf.getvalue()
+kiem("token bi thu hoi (401): tra False, thu lai ban chu thuong", _kq is False and len(_goi_tg) == 2, (_kq, len(_goi_tg)))
+kiem("log ghi 'HTTP 401: Unauthorized' + goi y sua token", 'HTTP 401: Unauthorized' in _log and 'TOKEN SAI' in _log, _log)
+kiem("log KHONG chua token", 'A' * 20 not in _log, _log)
+
 print("=== 5. FILE .BAT ===")
 BAT = ('scripts/chay_app_may.bat', 'scripts/cai_dat_may.bat', 'scripts/chon_python.bat')
 for ten in BAT:
