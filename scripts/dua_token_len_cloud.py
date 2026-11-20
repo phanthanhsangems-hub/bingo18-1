@@ -25,11 +25,32 @@ def doc_token(duong_dan: str) -> str:
     return (dotenv_values(duong_dan).get('TELEGRAM_BOT_TOKEN') or '').strip().strip('"').strip("'").strip()
 
 
+def token_hop_le(tok: str):
+    """(True, ten bot) nếu Telegram nhận token (getMe), ngược lại (False, lý do — không chứa token)."""
+    import requests
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{tok}/getMe", timeout=15)
+        j = r.json()
+    except Exception as e:
+        return False, f"khong ket noi duoc Telegram: {type(e).__name__}"
+    if j.get('ok'):
+        return True, '@' + str((j.get('result') or {}).get('username'))
+    return False, f"HTTP {r.status_code} {j.get('description')}"
+
+
 def main() -> int:
     tok = doc_token(os.path.join(GOC, '.env'))
     if not re.fullmatch(r'\d{5,}:[A-Za-z0-9_-]{30,}', tok or ''):
         print("[LOI] TELEGRAM_BOT_TOKEN trong .env trong hoac sai dang -> sua .env truoc "
               "(chay py -3.11 scripts\\kiem_tra_telegram.py de kiem tra)")
+        return 1
+    # P298g: 20/11 đưa lên cả token đã bị thu hồi (kiem_tra_telegram báo 401) -> Cloud Run
+    # cũng hỏng theo. Hỏi Telegram trước; token không dùng được thì KHÔNG đưa lên.
+    hop_le, ly_do = token_hop_le(tok)
+    if not hop_le:
+        print(f"[LOI] Telegram khong nhan token trong .env ({ly_do}) -> KHONG dua len Cloud Run.")
+        print("      Lay token dang dung: Telegram -> @BotFather -> /mybots -> chon bot -> API Token,")
+        print("      sua .env, chay py -3.11 scripts\\kiem_tra_telegram.py thay [OK] roi moi chay lai file nay.")
         return 1
     gcloud = shutil.which('gcloud') or shutil.which('gcloud.cmd')
     if not gcloud:

@@ -17,13 +17,38 @@ def che(s) -> str:
 
 
 def main() -> int:
+    co_san = {k: os.environ.get(k) for k in ('TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID')}
     try:
-        from dotenv import load_dotenv
+        from dotenv import load_dotenv, dotenv_values
+        trong_file = dotenv_values(os.path.join(GOC, '.env'))
         load_dotenv(os.path.join(GOC, '.env'))
+        # load_dotenv KHÔNG ghi đè biến môi trường Windows có sẵn (setx...) -> sửa .env vô ích
+        for k, v in co_san.items():
+            if v is not None and (trong_file.get(k) or '').strip() != v.strip():
+                print(f"[LOI] Windows co san bien moi truong {k} (khac .env) -> watcher/app dung gia tri "
+                      f"CU do, khong doc .env. Xoa: chay  reg delete HKCU\\Environment /v {k} /f  "
+                      "roi DANG XUAT Windows va dang nhap lai")
     except ImportError:
         print("Thieu python-dotenv -> chay scripts\\cai_dat_may.bat")
         return 2
     import requests
+    from datetime import datetime
+    env = os.path.join(GOC, '.env')
+    # P298g: lỗi hay gặp khi sửa .env bằng Notepad (20/11 sửa xong vẫn 401)
+    if os.path.exists(env):
+        print(f"[OK] .env sua lan cuoi luc {datetime.fromtimestamp(os.path.getmtime(env)):%d/%m %H:%M}")
+        with open(env, encoding='utf-8-sig', errors='replace') as f:
+            dong = [l for l in f if re.match(r'\s*(export\s+)?TELEGRAM_BOT_TOKEN\s*=', l)]
+        if len(dong) > 1:
+            print(f"[LOI] .env co {len(dong)} dong TELEGRAM_BOT_TOKEN - chi giu MOT dong (token moi), xoa cac dong kia")
+        elif not dong:
+            print("[LOI] .env khong co dong TELEGRAM_BOT_TOKEN=")
+    else:
+        print("[LOI] Khong thay file .env trong thu muc bingo18")
+    for ten in ('.env.txt', '.env.env'):
+        if os.path.exists(os.path.join(GOC, ten)):
+            print(f"[LOI] Co file {ten} - Notepad luu nham ten. Token moi nam trong {ten}, khong phai .env:"
+                  f" mo {ten}, copy dong token sang .env roi xoa {ten}")
     tok = (os.environ.get('TELEGRAM_BOT_TOKEN') or '').strip().strip('"').strip("'")
     chat = (os.environ.get('TELEGRAM_CHAT_ID') or '').strip().strip('"').strip("'")
     if not tok:
