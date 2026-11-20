@@ -55,3 +55,4 @@ jobs:
           python test_kiem_tra_nhat_quan.py
           python test_429.py
           python test_truoc_ky.py
+          python test_du_doan_theo_lich.py

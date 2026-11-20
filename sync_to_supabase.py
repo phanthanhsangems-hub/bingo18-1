@@ -29,6 +29,22 @@ from vietlott_fetcher import fetch_from_github
 import lap_lai
 import gio_ky
 
+class _CheBiMat(logging.Filter):
+    """P297: 20/11 dong 'Telegram html: ... /bot<TOKEN>/sendMessage' ghi nguyen token
+    bot vao sync.log (requests dua URL vao loi). Che token o MOI dong log."""
+    _MAU = re.compile(r'bot\d{5,}:[A-Za-z0-9_-]{20,}')
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+            sach = self._MAU.sub('bot***', msg)
+            if sach != msg:
+                record.msg, record.args = sach, ()
+        except Exception:
+            pass
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -37,6 +53,8 @@ logging.basicConfig(
         logging.FileHandler('sync.log', encoding='utf-8'),
     ]
 )
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_CheBiMat())
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────

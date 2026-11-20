@@ -2,6 +2,7 @@
 Telegram Bot - Gửi thông báo dự đoán và kết quả
 """
 import logging
+import re
 import requests
 from datetime import datetime, timezone, timedelta
 from typing import List
@@ -9,6 +10,25 @@ from typing import List
 import config
 
 logger = logging.getLogger(__name__)
+
+
+class _CheToken(logging.Filter):
+    """P297: loi requests chua URL .../bot<TOKEN>/sendMessage -> che token truoc khi
+    ghi log (log Cloud Run gio doc duoc qua github-deploy / workflow doc-log)."""
+    _MAU = re.compile(r'bot\d{5,}:[A-Za-z0-9_-]{20,}')
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+            sach = self._MAU.sub('bot***', msg)
+            if sach != msg:
+                record.msg, record.args = sach, ()
+        except Exception:
+            pass
+        return True
+
+
+logger.addFilter(_CheToken())
 
 SEP = "────────────────────"
 

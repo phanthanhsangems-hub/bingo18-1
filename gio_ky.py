@@ -129,3 +129,57 @@ def gio_cho_ky_bu(dn: int, truoc, sau):
             if ke and khoi(ke[0]) == khoi(dn):
                 return gio_lich(dn, (ke[1] + LECH_VN).date())
     return noi_suy(truoc, sau, dn)
+
+
+# ── P297: DỰ ĐOÁN THEO LỊCH khi watcher trễ ─────────────────────────────────
+# 20/11 07:00-08:19 máy người dùng mất HTTPS -> DB đứng ở #197019. Vòng dự đoán chỉ
+# dự đoán "kỳ cuối trong DB + 2" nên suốt 1 tiếng toàn "already predicted - skip";
+# watcher hồi lại thì các kỳ ở giữa đã quay xong -> mất dự đoán 16 kỳ. Lịch quay cố
+# định (159 kỳ/ngày, 06:06, 6 phút) cho biết kỳ nào SẮP quay dù DB đang trễ.
+from datetime import date as _date, datetime as _datetime
+
+NGAY_MOC = _date(2026, 10, 28)          # ngày VN của MOC_KY
+TRE_TOI_DA = 40                         # DB trễ quá 40 kỳ (4 giờ) -> không tin lịch nữa
+LECH_LICH_TOI_DA_PHUT = 15              # giờ thật của kỳ cuối lệch lịch quá ngần này -> neo hỏng
+
+
+def ky_sap_quay(bay_gio_vn) -> int:
+    """Kỳ KẾ TIẾP chưa quay theo lịch (giờ quay > bay_gio_vn, datetime giờ VN naive)."""
+    dau = MOC_KY + (bay_gio_vn.date() - NGAY_MOC).days * KY_MOI_NGAY
+    h, m = GIO_KY_DAU_VN
+    phut = (bay_gio_vn.hour * 60 + bay_gio_vn.minute + bay_gio_vn.second / 60) - (h * 60 + m)
+    if phut < 0:
+        return dau
+    i = int(phut // KHOANG_PHUT) + 1
+    return dau + i if i < KY_MOI_NGAY else dau + KY_MOI_NGAY
+
+
+def lich_khop(dn: int, gio_utc, nguong_phut: int = LECH_LICH_TOI_DA_PHUT) -> bool:
+    """Giờ ghi THẬT của kỳ dn (UTC naive hoặc chuỗi) có khớp lịch theo neo không.
+    Sai = neo hỏng (ví dụ nghỉ Tết làm lệch ngày) -> đừng dùng lịch để đoán kỳ."""
+    if dn is None or dn < KY_HIEU_LUC or gio_utc is None:
+        return False
+    try:
+        if isinstance(gio_utc, str):
+            gio_utc = _datetime.strptime(gio_utc[:19], '%Y-%m-%d %H:%M:%S')
+        if getattr(gio_utc, 'tzinfo', None) is not None:
+            gio_utc = gio_utc.replace(tzinfo=None)
+        du_kien = gio_lich(dn, NGAY_MOC + timedelta(days=khoi(dn)))
+    except Exception:
+        return False
+    return abs((gio_utc - du_kien).total_seconds()) <= nguong_phut * 60
+
+
+def ky_can_du_doan(bay_gio_vn, cuoi: int, gio_cuoi_utc, tre_toi_da: int = TRE_TOI_DA):
+    """Kỳ cần dự đoán THEO LỊCH khi DB trễ, hoặc None nếu cứ dùng 'cuối + 2' như cũ.
+
+    Bình thường (watcher kịp) lịch cho đúng 'cuối + 2' -> None, không đổi gì.
+    DB trễ: dự đoán kỳ ngay SAU kỳ sắp quay (luôn đi trước 1 kỳ như khi bình thường).
+    An toàn: neo lịch phải khớp giờ thật của kỳ cuối, và trễ không quá `tre_toi_da`
+    kỳ — lịch sai mà vẫn dùng thì sẽ dự đoán vọt lên xa, chặn mọi dự đoán thật."""
+    if not cuoi or not lich_khop(cuoi, gio_cuoi_utc):
+        return None
+    k = ky_sap_quay(bay_gio_vn) + 1
+    if k <= cuoi + 2 or k - (cuoi + 2) > tre_toi_da:
+        return None
+    return k
