@@ -73,6 +73,18 @@ jobs:
           [ -n "$LOC" ] && F="$F AND ($LOC)"
           echo "BO LOC: $F"
           echo
-          gcloud logging read "$F" --project bingo18-predictor --limit "$SO" --order=asc \
-            --format="value(timestamp, severity, httpRequest.requestMethod, httpRequest.requestUrl, httpRequest.status, httpRequest.latency, resource.labels.revision_name, textPayload, jsonPayload.message)" \
-            | sed 's/\t\t*/ | /g' | cut -c1-600
+          FMT="value(timestamp, severity, httpRequest.requestMethod, httpRequest.requestUrl, httpRequest.status, httpRequest.latency, resource.labels.revision_name, textPayload, jsonPayload.message)"
+          # P296c: chi co roles/logging.viewer thi doc chung "moi view" co the bi tu choi
+          # (thieu logging.views.access) -> thu doc thang bucket _Default theo tung view.
+          for CACH in "" "--bucket=_Default --location=global --view=_AllLogs" "--bucket=_Default --location=global --view=_Default"; do
+            echo "=== cach doc: ${CACH:-mac dinh} ==="
+            if gcloud logging read "$F" --project bingo18-predictor --limit "$SO" --order=asc $CACH \
+                 --format="$FMT" > /tmp/log.txt 2> /tmp/loi.txt; then
+              sed 's/\t\t*/ | /g' /tmp/log.txt | cut -c1-600
+              echo "=== $(wc -l < /tmp/log.txt) dong ==="
+              exit 0
+            fi
+            head -c 300 /tmp/loi.txt; echo
+          done
+          echo "Khong doc duoc log bang cach nao."
+          exit 1
