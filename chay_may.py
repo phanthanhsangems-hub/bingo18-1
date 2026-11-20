@@ -213,6 +213,24 @@ def cho_app_len(cong: int, giay: float = 180) -> bool:
     return False
 
 
+def la_app_cua_minh(cong: int) -> bool:
+    """Cổng đang bận là app Bingo18 (healthz trả JSON có 'status'), không phải chương trình khác."""
+    try:
+        r = _phien().get(f"http://127.0.0.1:{cong}/healthz", timeout=15)
+        return r.status_code in (200, 503) and 'status' in (r.json() or {})
+    except Exception:
+        return False
+
+
+def nap_app():
+    """(module app, None) hoặc (None, tên thư viện thiếu) — báo dễ hiểu thay vì traceback."""
+    try:
+        import app as A
+        return A, None
+    except ImportError as e:
+        return None, getattr(e, 'name', None) or str(e)
+
+
 def phuc_vu(app, cong: int) -> None:
     try:
         from waitress import serve
@@ -227,7 +245,13 @@ def phuc_vu(app, cong: int) -> None:
 def kiem_tra_cai_dat(env) -> list:
     """[(mục, mức 'OK'|'CANH BAO'|'LOI', ghi chú)]."""
     kq = []
-    kq.append(('Python', 'OK' if sys.version_info >= (3, 9) else 'LOI', sys.version.split()[0]))
+    v = sys.version_info
+    # P298b: máy nhà có cả 3.14 (lệnh "python") lẫn 3.11. Thư viện ghim trong requirements.txt
+    # (scikit-learn 1.6.1, numpy 1.26.4...) không có bản dựng sẵn cho >= 3.13 -> pip phải biên
+    # dịch C++ và hỏng. File .bat tự chọn "py -3.11" (scripts/chon_python.bat).
+    kq.append(('Python', 'OK' if (3, 9) <= v[:2] <= (3, 12) else ('LOI' if v < (3, 9) else 'CANH BAO'),
+               sys.version.split()[0] + ('' if v[:2] <= (3, 12) else
+                                         ' - nen dung Python 3.11 (py -3.11): thu vien ghim chua co ban cho ban nay')))
     lech = lech_gio_phut()
     kq.append(('Gio tien trinh = UTC', 'OK' if lech == 0 else 'LOI', f'lech {lech} phut'))
     try:
@@ -294,12 +318,20 @@ def main(argv) -> int:
         print("Con muc LOI o tren -> sua .env / cai thu vien roi chay lai.", flush=True)
         return 2
     if cong_dang_ban(cong):
-        print(f"LOI: cong {cong} dang co chuong trinh khac (app dang chay o cua so khac, hoac "
-              "'python app.py' cu?). Dong cua so do roi chay lai.", flush=True)
+        if la_app_cua_minh(cong):
+            print(f"App Bingo18 DA CHAY SAN o cong {cong} (cua so 'Bingo18 App' khac) -> khong chay them.",
+                  flush=True)
+            return 0 if thu else 3
+        print(f"LOI: cong {cong} dang co chuong trinh khac (vd 'python app.py' cu?). "
+              "Dong chuong trinh do roi chay lai.", flush=True)
         return 3
     cai_log()          # sau khi chắc chỉ có MỘT app: 2 tiến trình cùng xoay vòng 1 file log trên Windows sẽ lỗi
 
-    import app as A
+    A, thieu = nap_app()
+    if A is None:
+        print(f"LOI: Python {sys.version.split()[0]} thieu thu vien '{thieu}' -> chay scripts\\cai_dat_may.bat "
+              "(tu cai bang Python 3.11).", flush=True)
+        return 2
     ung_dung = A.create_app()
     secret = os.environ.get('TRIGGER_SECRET', '')
     goi = tao_goi(cong, secret)

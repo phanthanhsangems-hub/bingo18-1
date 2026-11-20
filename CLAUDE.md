@@ -4,7 +4,11 @@ Hệ thống ML dự đoán kết quả xổ số Bingo18 với real-time learni
 
 ## Platform
 
-- **Windows 11** with Python 3.11
+- **Windows 11**, thư mục `C:\Users\ACER\bingo18-moi`. Lệnh `python` là **3.14** (watcher chạy bằng nó);
+  app chạy bằng **3.11** (`py -3.11`, chọn trong `scripts\chon_python.bat`) vì thư viện ghim trong
+  requirements.txt (scikit-learn 1.6.1, numpy 1.26.4...) không có bản dựng sẵn cho 3.14.
+- CMD thường KHÔNG tạo được `schtasks /SC ONLOGON` (Access is denied) — cần Run as administrator;
+  `cai_dat_may.bat` tự chuyển sang thư mục Startup.
 - Terminal: CMD or PowerShell (NOT bash/Linux syntax)
 - **Avoid `&` for background processes** — use `start /b python app.py` instead
 - **Avoid `taskkill /F /IM python.exe`** — kills sync_to_supabase.py watcher too.

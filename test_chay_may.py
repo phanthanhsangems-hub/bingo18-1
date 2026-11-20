@@ -6,7 +6,7 @@ Phần 3: chạy THẬT app bằng waitress trên SQLite + bộ hẹn giờ gọ
 Phần 4: watcher: app trong máy sống -> gọi trong máy; chết / lỗi -> Cloud Run.
 Phần 5: file .bat (CRLF, TZ=UTC0, không taskkill /IM python.exe).
 """
-import json, logging, os, socket, subprocess, sys, tempfile, threading
+import json, logging, os, re, socket, subprocess, sys, tempfile, threading
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -173,6 +173,35 @@ finally:
             logging.getLogger().removeHandler(h)
 kiem("python chay_may.py --kiem-tra -> DAT (ma 0)", ma_kt == 0, ma_kt)
 kiem("log ghi vao logs/app_may.log", os.path.exists(os.path.join(GOC, 'logs', 'app_may.log')))
+# P298b: cai dat lai khi app DA chay (cong ban boi chinh app minh)
+kiem("cong ban boi app Bingo18 -> nhan ra", C.la_app_cua_minh(CONG))
+C.kiem_tra_cai_dat = lambda env: [('gia lap', 'OK', '')]
+os.environ['PORT'] = str(CONG)
+try:
+    ma_kt2 = C.main(['--kiem-tra'])
+    ma_chay2 = C.main([])
+finally:
+    C.kiem_tra_cai_dat = _kt
+    os.environ.pop('PORT', None)
+kiem("--kiem-tra khi app da chay san -> DAT (cai_dat_may.bat di tiep)", ma_kt2 == 0, ma_kt2)
+kiem("chay them app thu 2 -> ma 3 (cua so .bat dung, khong chay chong)", ma_chay2 == 3, ma_chay2)
+_app_goc = sys.modules['app']
+sys.modules['app'] = None                      # gia lap thieu thu vien khi import app
+try:
+    A2, thieu = C.nap_app()
+finally:
+    sys.modules['app'] = _app_goc
+kiem("thieu thu vien -> bao ten, khong traceback", A2 is None and thieu == 'app', (A2, thieu))
+_v = C.sys.version_info
+class _V(tuple):
+    def __lt__(s, o): return tuple(s) < tuple(o)
+for ver, muc in (((3, 14, 6), 'CANH BAO'), ((3, 11, 9), 'OK'), ((3, 12, 1), 'OK'), ((3, 8, 0), 'LOI')):
+    C.sys.version_info = _V(ver)
+    try:
+        lv = dict((m, l) for m, l, _ in C.kiem_tra_cai_dat({}))['Python']
+    finally:
+        C.sys.version_info = _v
+    kiem(f"Python {ver[0]}.{ver[1]} -> {muc}", lv == muc, lv)
 
 print("=== 4. WATCHER: GOI APP TRONG MAY, CHET THI CLOUD RUN ===")
 import sync_to_supabase as S
@@ -225,17 +254,34 @@ src = open('sync_to_supabase.py', encoding='utf-8').read()
 kiem("watcher van goi trigger trong luong rieng (khong chan vong lap)", 'threading.Thread(target=trigger_prediction' in src)
 
 print("=== 5. FILE .BAT ===")
-for ten in ('scripts/chay_app_may.bat', 'scripts/cai_dat_may.bat'):
+BAT = ('scripts/chay_app_may.bat', 'scripts/cai_dat_may.bat', 'scripts/chon_python.bat')
+for ten in BAT:
     b = open(ten, 'rb').read()
     kiem(f"{ten}: CRLF (cmd doc nhan :loop dung)", b.count(b'\r\n') == b.count(b'\n') and b.count(b'\n') > 5)
     t = b.decode('ascii')
-    kiem(f"{ten}: ASCII, dat TZ=UTC0", 'set TZ=UTC0' in t)
-    kiem(f"{ten}: khong taskkill /IM python.exe", 'taskkill' not in t.lower() or '/im python' not in t.lower().split('khong dung')[0])
+    lenh = [l for l in t.splitlines() if not l.lstrip().upper().startswith('REM')]
+    kiem(f"{ten}: khong chay taskkill (chi duoc nhac trong REM)", not any('taskkill' in l.lower() for l in lenh))
+    # "echo ... ma 2>> file": CMD hieu "2>>" la chuyen huong luong 2 -> mat dong log
+    xau = [l for l in t.splitlines() if l.lstrip().lower().startswith('echo') and re.search(r'[0-9%]>>', l)]
+    kiem(f"{ten}: khong co 'echo ...<so>>> file'", not xau, xau)
+    kiem(f"{ten}: moi ( deu dong )", t.count('(') == t.count(')'))
+for ten in BAT[:2]:
+    t = open(ten, encoding='ascii').read()
+    kiem(f"{ten}: dat TZ=UTC0, chon Python 3.11", 'set TZ=UTC0' in t and 'call "%~dp0chon_python.bat"' in t)
+p = open('scripts/chon_python.bat', encoding='ascii').read()
+kiem("chon_python.bat: uu tien py -3.11, roi Python311, cuoi cung python",
+     p.index('py -3.11 -c') < p.index('Python311\\python.exe') < p.index('set PY=python'), p)
 b = open('scripts/chay_app_may.bat', encoding='ascii').read()
-kiem("chay_app_may.bat: chay chay_may.py va tu chay lai", 'python chay_may.py' in b and 'goto loop' in b)
+kiem("chay_app_may.bat: %PY% chay_may.py + tu chay lai + ma 3 thi dung",
+     '%PY% chay_may.py' in b and 'goto loop' in b and 'if "%MA%"=="3" goto het' in b)
 c = open('scripts/cai_dat_may.bat', encoding='ascii').read()
-kiem("cai_dat_may.bat: cai thu vien, kiem tra, dang ky tu chay", all(x in c for x in
-     ('requirements-may.txt', 'chay_may.py --kiem-tra', 'schtasks /Create /TN Bingo18App')))
+kiem("cai_dat_may.bat: cai thu vien + kiem tra bang %PY%", '%PY% -m pip install -r requirements-may.txt' in c
+     and '%PY% chay_may.py --kiem-tra' in c)
+kiem("cai_dat_may.bat: schtasks, khong co quyen thi thu muc Startup", 'schtasks /Create /TN Bingo18App' in c
+     and 'if errorlevel 1 goto startup' in c and 'Start Menu\\Programs\\Startup' in c and ':startup' in c)
+kiem("cai_dat_may.bat: chay app ngay khi xong", 'start "Bingo18 App"' in c.split(':tuong_lua')[1])
+kiem("cai_dat_may.bat: nhan :startup / :tuong_lua deu co", ':startup\r' in open('scripts/cai_dat_may.bat', 'rb').read().decode()
+     and ':tuong_lua\r' in open('scripts/cai_dat_may.bat', 'rb').read().decode())
 r = open('requirements-may.txt', encoding='ascii').read()
 kiem("requirements-may.txt: requirements.txt + waitress + tzdata", all(x in r for x in ('-r requirements.txt', 'waitress', 'tzdata')))
 
