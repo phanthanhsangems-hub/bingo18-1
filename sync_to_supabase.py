@@ -781,10 +781,25 @@ def _tg_send(text: str) -> bool:
             timeout=5,
         )
         _tg_last_sent = time.time()
+        if not r.ok:
+            _bao_loi_tg('text', r)
         return bool(r.ok)
     except Exception as e:
         logger.warning(f"Telegram send: {e}")
         return False
+
+
+def _bao_loi_tg(kieu: str, r) -> None:
+    """P298d: Telegram trả lỗi HTTP (401 = token sai/đã thu hồi, 400 = chat_id sai...) trước
+    đây bị nuốt im lặng — 20/11 đổi token lúc ~12:15, 37 tin hỏng mà sync.log không có dòng nào.
+    Chỉ ghi mã + mô tả của Telegram (không có token)."""
+    try:
+        mo_ta = (r.json() or {}).get('description', '')
+    except Exception:
+        mo_ta = (getattr(r, 'text', '') or '')[:120]
+    goi_y = ' -> TOKEN SAI hoac da thu hoi: sua TELEGRAM_BOT_TOKEN trong .env roi chay lai watcher' \
+        if r.status_code == 401 else ''
+    logger.warning("Telegram %s HTTP %d: %s%s", kieu, r.status_code, mo_ta, goi_y)
 
 
 def _tg_html(text: str) -> bool:
@@ -804,6 +819,7 @@ def _tg_html(text: str) -> bool:
         _tg_last_sent = time.time()
         if r.ok:
             return True
+        _bao_loi_tg('html', r)
         import re as _re
         return _tg_send(_re.sub(r'<[^>]+>', '', text))
     except Exception as e:
