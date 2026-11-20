@@ -18,6 +18,7 @@ on:
       # P298: chi dung khi chay app tren may nha, khong vao image Cloud Run
       - 'chay_may.py'
       - 'requirements-may.txt'
+      - 'sau_bo.py'           # P299: chi watcher dung (tin moi ky), khong vao app
 
 jobs:
   deploy:
