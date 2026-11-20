@@ -27,6 +27,7 @@ from bs4 import BeautifulSoup
 import psycopg2
 from vietlott_fetcher import fetch_from_github
 import lap_lai
+import sau_bo
 import gio_ky
 
 class _CheBiMat(logging.Filter):
@@ -543,8 +544,26 @@ def doc_du_lieu_tin_ky(conn, dn: int) -> dict:
             seen[d] = (_cat(a) == _cat(b))
         if len(seen) >= 7:
             break
+    out = {'ky': ky, 'du_doan': du, 'trail': [seen[d] for d in sorted(seen)]}
+    # P299: "các lần trước bộ này ra, kỳ ngay sau có về Tổng 4 / 17 / trip nào" — lỗi gì
+    # cũng chỉ bỏ phần này, tin kỳ vẫn gửi đủ phần còn lại
+    if sau_bo.bat():
+        try:
+            _BO_NHO_KY.cap_nhat(cur)
+            b = (_BO_NHO_KY.ky.get(dn) or (None,))[0] or next((b for d, b, _ in ky if d == dn), None)
+            if b:
+                out['sau_bo'] = _BO_NHO_KY.tin(b, dn)
+        except Exception as e:
+            logger.warning("tin ky #%s: phan 'sau bo' loi (%s) — bo qua", dn, e)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
     cur.close()
-    return {'ky': ky, 'du_doan': du, 'trail': [seen[d] for d in sorted(seen)]}
+    return out
+
+
+_BO_NHO_KY = sau_bo.BoNhoKy()
 
 
 def soan_tin_ky(dn: int, nums, dl: dict):
@@ -567,6 +586,7 @@ def soan_tin_ky(dn: int, nums, dl: dict):
     info = lap_lai.ra_lai_cua_ky(dl['ky'], dn)
     if info:
         dong.append(lap_lai.dong_ra_lai(info))
+    dong.extend(dl.get('sau_bo') or [])          # P299
     toi = [(d, du[d]) for d in (dn + 1, dn + 2) if d in du and len(du[d][0]) == 3]
     if toi:
         for i, (d, (pn, wp)) in enumerate(toi):
