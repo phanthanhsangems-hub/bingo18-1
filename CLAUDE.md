@@ -9,6 +9,11 @@ Hệ thống ML dự đoán kết quả xổ số Bingo18 với real-time learni
   requirements.txt (scikit-learn 1.6.1, numpy 1.26.4...) không có bản dựng sẵn cho 3.14.
 - CMD thường KHÔNG tạo được `schtasks /SC ONLOGON` (Access is denied) — cần Run as administrator;
   `cai_dat_may.bat` tự chuyển sang thư mục Startup.
+- **Bật / tắt / xem hệ thống trên máy nhà** (CMD hoặc PowerShell, trong thư mục bingo18):
+  `scripts\bat_he_thong.bat` · `scripts\tat_he_thong.bat [app|watcher]` · `scripts\trang_thai.bat`.
+  Tắt theo dòng lệnh (cửa sổ vòng lặp .bat trước, rồi Python) — không bao giờ `taskkill /IM python.exe`.
+- Người dùng hay gõ trong **PowerShell** (dấu nhắc `PS`): `start "x" file.bat` và `powershell -c "...$_..."`
+  KHÔNG chạy ở đó — đưa lệnh dạng file .bat hoặc lệnh PowerShell thuần.
 - Terminal: CMD or PowerShell (NOT bash/Linux syntax)
 - **Avoid `&` for background processes** — use `start /b python app.py` instead
 - **Avoid `taskkill /F /IM python.exe`** — kills sync_to_supabase.py watcher too.

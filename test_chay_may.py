@@ -277,10 +277,11 @@ kiem("log ghi 'HTTP 401: Unauthorized' + goi y sua token", 'HTTP 401: Unauthoriz
 kiem("log KHONG chua token", 'A' * 20 not in _log, _log)
 
 print("=== 5. FILE .BAT ===")
-BAT = ('scripts/chay_app_may.bat', 'scripts/cai_dat_may.bat', 'scripts/chon_python.bat')
+BAT = ('scripts/chay_app_may.bat', 'scripts/cai_dat_may.bat', 'scripts/chon_python.bat',
+       'scripts/bat_he_thong.bat', 'scripts/tat_he_thong.bat', 'scripts/trang_thai.bat', 'scripts/dem_tien_trinh.bat')
 for ten in BAT:
     b = open(ten, 'rb').read()
-    kiem(f"{ten}: CRLF (cmd doc nhan :loop dung)", b.count(b'\r\n') == b.count(b'\n') and b.count(b'\n') > 5)
+    kiem(f"{ten}: CRLF (cmd doc nhan :loop dung)", b.count(b'\r\n') == b.count(b'\n') and b.count(b'\n') >= 3)
     t = b.decode('ascii')
     lenh = [l for l in t.splitlines() if not l.lstrip().upper().startswith('REM')]
     kiem(f"{ten}: khong chay taskkill (chi duoc nhac trong REM)", not any('taskkill' in l.lower() for l in lenh))
@@ -288,6 +289,10 @@ for ten in BAT:
     xau = [l for l in t.splitlines() if l.lstrip().lower().startswith('echo') and re.search(r'[0-9%]>>', l)]
     kiem(f"{ten}: khong co 'echo ...<so>>> file'", not xau, xau)
     kiem(f"{ten}: moi ( deu dong )", t.count('(') == t.count(')'))
+    # moi 'goto X' / 'call :X' phai co nhan ':X'
+    nhan = set(re.findall(r'^:(\w+)', t, re.M))
+    dich = set(re.findall(r'\bgoto\s+(\w+)', t, re.I)) | set(re.findall(r'\bcall\s+:(\w+)', t, re.I))
+    kiem(f"{ten}: moi goto/call :nhan deu co nhan", dich <= nhan, dich - nhan)
 for ten in BAT[:2]:
     t = open(ten, encoding='ascii').read()
     kiem(f"{ten}: dat TZ=UTC0, chon Python 3.11", 'set TZ=UTC0' in t and 'call "%~dp0chon_python.bat"' in t)
@@ -305,6 +310,28 @@ kiem("cai_dat_may.bat: schtasks, khong co quyen thi thu muc Startup", 'schtasks 
 kiem("cai_dat_may.bat: chay app ngay khi xong", 'start "Bingo18 App"' in c.split(':tuong_lua')[1])
 kiem("cai_dat_may.bat: nhan :startup / :tuong_lua deu co", ':startup\r' in open('scripts/cai_dat_may.bat', 'rb').read().decode()
      and ':tuong_lua\r' in open('scripts/cai_dat_may.bat', 'rb').read().decode())
+print("=== 5b. P300: BAT / TAT / TRANG THAI ===")
+b = open('scripts/bat_he_thong.bat', encoding='ascii').read()
+kiem("bat_he_thong: kiem tra dang chay roi moi mo (khong mo chong)",
+     'call "%~dp0dem_tien_trinh.bat" chay_may.py' in b and 'call "%~dp0dem_tien_trinh.bat" sync_to_supabase' in b)
+kiem("bat_he_thong: mo app bang chay_app_may.bat, watcher bang schtasks (khong co thi start)",
+     'start "Bingo18 App" "%~dp0chay_app_may.bat"' in b and 'schtasks /Run /TN Bingo18Watcher' in b
+     and 'if errorlevel 1 start "Bingo18 Watcher" "%~dp0start_watcher.bat"' in b)
+d = open('scripts/dem_tien_trinh.bat', encoding='ascii').read()
+kiem("dem_tien_trinh: tim theo dong lenh, ten py* (khong khop powershell.exe)",
+     "$_.Name -like 'py*' -and $_.CommandLine -like '*%~1*'" in d and 'exit 1' in d)
+t = open('scripts/tat_he_thong.bat', encoding='ascii').read()
+kiem("tat_he_thong: chi tat cmd.exe chay dung file .bat + python chay dung chuong trinh",
+     "($_.Name -eq 'cmd.exe' -and $_.CommandLine -like '*%~1*') -or ($_.Name -like 'py*' -and $_.CommandLine -like '*%~2*')" in t)
+kiem("tat_he_thong: tat cua so vong lap TRUOC python (khoi tu chay lai)", "Sort-Object { if ($_.Name -eq 'cmd.exe') { 0 } else { 1 } }" in t)
+kiem("tat_he_thong: app / watcher / ca hai", all(x in t for x in ('call :tat chay_app_may.bat chay_may.py',
+     'call :tat start_watcher.bat sync_to_supabase', 'if /i "%AI%"=="app"', 'if /i "%AI%"=="watcher"')))
+kiem("chuoi PowerShell trong .bat khong co % la (chi %~1 %~2)",
+     all(re.sub(r'%~[12]', '', l).count('%') == 0 for f in ('scripts/tat_he_thong.bat', 'scripts/dem_tien_trinh.bat', 'scripts/trang_thai.bat')
+         for l in open(f, encoding='ascii') if 'powershell' in l.lower()))
+tt = open('scripts/trang_thai.bat', encoding='ascii').read()
+kiem("trang_thai: tien trinh + app tra loi + 3 lan goi du doan", "'chay_may.py', 'sync_to_supabase'" in tt
+     and 'curl -s -m 5 http://127.0.0.1:8080/whoami' in tt and "Select-String 'Trigger prediction'" in tt)
 r = open('requirements-may.txt', encoding='ascii').read()
 kiem("requirements-may.txt: requirements.txt + waitress + tzdata", all(x in r for x in ('-r requirements.txt', 'waitress', 'tzdata')))
 
