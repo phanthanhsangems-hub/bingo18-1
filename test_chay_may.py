@@ -214,11 +214,11 @@ class Gia(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(b)
     def do_GET(self):
         self.server.ghi.append(('GET', self.path))
-        self._tra(*self.server.healthz) if self.path == '/healthz' else self._tra(404, {})
+        self._tra(*self.server.healthz) if self.path == '/whoami' else self._tra(404, {})
     def do_POST(self):
         self.server.ghi.append(('POST', self.path, self.headers.get('X-Trigger-Secret')))
         self._tra(self.server.ma_trigger, {'success': self.server.ma_trigger == 200})
-def gia(healthz=(200, {'status': 'ok'}), ma_trigger=200):
+def gia(healthz=(200, {'ip_may_chu_thay': '127.0.0.1'}), ma_trigger=200):
     sv = ThreadingHTTPServer(('127.0.0.1', 0), Gia)
     sv.ghi, sv.healthz, sv.ma_trigger = [], healthz, ma_trigger
     threading.Thread(target=sv.serve_forever, daemon=True).start()
@@ -242,7 +242,10 @@ S.APP_MAY_URL = khac_url
 kiem("chuong trinh KHAC chiem cong 8080 -> khong coi la app", not S._app_may_song())
 yeu, yeu_url = gia(healthz=(503, {'status': 'error', 'db': 'timeout'}))
 S.APP_MAY_URL = yeu_url
-kiem("app trong may 503 (DB chap chon) van la app cua minh", S._app_may_song())
+kiem("/whoami khong tra 200 -> khong coi la app", not S._app_may_song())
+src_w = open('sync_to_supabase.py', encoding='utf-8').read()
+kiem("watcher nhan app bang /whoami (khong dung DB), cho 10 giay",
+     '/whoami", timeout=10)' in src_w and '/healthz", timeout' not in src_w)
 S.APP_MAY_URL = cloud_url.rstrip('/')
 S.CLOUD_RUN_URL = cloud_url + '/'
 n = len(cloud.ghi)

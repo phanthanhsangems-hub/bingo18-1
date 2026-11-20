@@ -202,22 +202,20 @@ def cong_dang_ban(cong: int) -> bool:
 
 
 def cho_app_len(cong: int, giay: float = 180) -> bool:
-    s, het = _phien(), time.time() + giay
+    het = time.time() + giay
     while time.time() < het:
-        try:
-            if s.get(f"http://127.0.0.1:{cong}/healthz", timeout=10).status_code in (200, 503):
-                return True
-        except Exception:
-            pass
+        if la_app_cua_minh(cong):
+            return True
         time.sleep(1)
     return False
 
 
 def la_app_cua_minh(cong: int) -> bool:
-    """Cổng đang bận là app Bingo18 (healthz trả JSON có 'status'), không phải chương trình khác."""
+    """Cổng đang bận là app Bingo18 (/whoami trả JSON có 'ip_may_chu_thay' — không đụng DB,
+    giống cách watcher nhận ra app), không phải chương trình khác."""
     try:
-        r = _phien().get(f"http://127.0.0.1:{cong}/healthz", timeout=15)
-        return r.status_code in (200, 503) and 'status' in (r.json() or {})
+        r = _phien().get(f"http://127.0.0.1:{cong}/whoami", timeout=10)
+        return r.status_code == 200 and 'ip_may_chu_thay' in (r.json() or {})
     except Exception:
         return False
 

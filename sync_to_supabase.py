@@ -455,12 +455,14 @@ def _phien(qua_proxy: bool) -> requests.Session:
 
 
 def _app_may_song() -> bool:
-    """/healthz trả JSON có 'status' (200, hoặc 503 khi DB chập chờn) = app của mình đang chạy."""
+    """/whoami trả JSON có 'ip_may_chu_thay' = app Bingo18 của mình đang chạy.
+    P298c: KHÔNG dùng /healthz — nó truy vấn DB, máy nhà hay chập chờn SSL tới Supabase
+    thì quá 5 giây -> tưởng app chết -> 20/11 chiều watcher cứ gọi Cloud Run."""
     if not APP_MAY_URL:
         return False
     try:
-        r = _phien(False).get(f"{APP_MAY_URL}/healthz", timeout=5)
-        return r.status_code in (200, 503) and 'status' in (r.json() or {})
+        r = _phien(False).get(f"{APP_MAY_URL}/whoami", timeout=10)
+        return r.status_code == 200 and 'ip_may_chu_thay' in (r.json() or {})
     except Exception:
         return False
 
