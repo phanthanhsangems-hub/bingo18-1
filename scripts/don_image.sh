@@ -2,9 +2,11 @@
 # P287: xoa image cu trong Artifact Registry, moi image (package) GIU N ban moi nhat.
 # Dung quyen deleteArtifacts (vai tro Repository Administrator) — khong can quyen
 # dat cleanup policy. Khong bao gio xoa image dang chay tren Cloud Run.
-#   bash scripts/don_image.sh thu|that [N]
+#   bash scripts/don_image.sh thu|that [N] [N_KHO_CU]
+# P298: N_KHO_CU = so ban giu o cac kho CU khong con dung (cloud-run-source-deploy,
+# gcr.io, asia.gcr.io — dich vu chay image tu bingo18-images). 0 = xoa sach.
 set -u
-CHE_DO="${1:-thu}"; GIU="${2:-10}"
+CHE_DO="${1:-thu}"; GIU="${2:-10}"; GIU_CU="${3:-$GIU}"
 P=bingo18-predictor
 DANG_CHAY=$(gcloud run services describe bingo18 --region asia-southeast1 --project $P \
   --format='value(spec.template.spec.containers[0].image)' 2>/dev/null)
@@ -13,11 +15,12 @@ TONG_XOA=0
 for KHO in asia-southeast1-docker.pkg.dev/$P/bingo18-images \
            asia-southeast1-docker.pkg.dev/$P/cloud-run-source-deploy \
            us-docker.pkg.dev/$P/gcr.io asia-docker.pkg.dev/$P/asia.gcr.io; do
-  echo "=== $KHO ==="
+  N="$GIU"; case "$KHO" in */bingo18-images) ;; *) N="$GIU_CU";; esac
+  echo "=== $KHO (giu $N) ==="
   gcloud artifacts docker images list "$KHO" --include-tags --sort-by=~updateTime \
     --format='value(package,version,tags)' --project $P > /tmp/ds.txt 2>/tmp/loi.txt || { head -3 /tmp/loi.txt; continue; }
   # giu N ban dau tien (moi nhat) cua moi package
-  awk -v n="$GIU" '{ dem[$1]++; if (dem[$1] > n) print $1"@"$2"\t"$3 }' /tmp/ds.txt > /tmp/xoa.txt
+  awk -v n="$N" '{ dem[$1]++; if (dem[$1] > n) print $1"@"$2"\t"$3 }' /tmp/ds.txt > /tmp/xoa.txt
   echo "  co $(wc -l < /tmp/ds.txt) ban, se xoa $(wc -l < /tmp/xoa.txt)"
   TONG_XOA=$((TONG_XOA + $(wc -l < /tmp/xoa.txt)))
   [ "$CHE_DO" = "that" ] || { head -3 /tmp/xoa.txt | sed 's/^/    vd: /'; continue; }

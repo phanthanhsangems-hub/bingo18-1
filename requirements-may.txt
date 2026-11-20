@@ -1,0 +1,5 @@
+# P298: thu vien de chay app tren may nha (Windows).
+# Cai: python -m pip install -r requirements-may.txt
+-r requirements.txt
+waitress==3.0.2
+tzdata>=2024.1

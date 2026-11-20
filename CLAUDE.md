@@ -14,7 +14,17 @@ Hệ thống ML dự đoán kết quả xổ số Bingo18 với real-time learni
 
 - Database: Supabase PostgreSQL (~64k draws, 30k+ predictions)
 - Backend: Flask Python 3.11 on Google Cloud Run (region asia-southeast1)
-- Scheduler: Cloud Scheduler jobs (predict every 6min, sync-github daily, daily-summary 23:55, daily-summary-evening 22:05)
+- **P298 (20/11/2026): app chạy TRÊN MÁY NHÀ để hết tiền Google Cloud.**
+  `scripts\chay_app_may.bat` → `chay_may.py`: waitress :8080 + bộ hẹn giờ thay Cloud
+  Scheduler (`/api/predict` phút chia 6 dư 3, 06:03–21:57 VN; `/api/daily-summary?bu=1`
+  23:55 VN). **Bắt buộc TZ=UTC0** — mã lưu `datetime.now()` như giờ UTC; Windows để giờ VN
+  là lệch 7 tiếng (chay_may.py tự kiểm, lệch thì dừng). Cài lần đầu: `scripts\cai_dat_may.bat`.
+  Watcher gọi dự đoán ở app trong máy trước (`APP_MAY_URL`, mặc định http://127.0.0.1:8080),
+  app trong máy chết thì gọi `CLOUD_RUN_URL`.
+- Cloud Run giữ làm DỰ PHÒNG (không ai gọi = 0đ): GitHub Actions (sync-draws, gửi bù báo cáo,
+  sửa giờ kỳ, kiểm tra hằng ngày, morning-digest) vẫn gọi nó; xem dashboard khi ra ngoài.
+  Cloud Scheduler jobs (predict 6 phút, fetch-latest, sync-github, daily-summary...) đã TẠM DỪNG
+  — đừng bật lại khi app trên máy đang chạy (chỉ tốn tiền; khoá advisory chặn được dự đoán trùng).
 - Login gate: `_require_login` in `app.py` runs on **every** request when `APP_USER` is set.
   Machine callers get through only via `X-Trigger-Secret`/`X-Admin-Key` (`_machine_caller`)
   or by being listed in `_PUBLIC_PATHS`/`_CRON_PATHS`. **Adding a new cron endpoint means

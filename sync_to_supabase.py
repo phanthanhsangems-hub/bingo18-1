@@ -442,20 +442,50 @@ def insert_draw(conn, draw: dict) -> bool:
 #  TRIGGER PREDICTION (Cloud Run)
 # ══════════════════════════════════════════════════════════════
 
-def trigger_prediction():
-    """Gọi Cloud Run tạo dự đoán mới và gửi Telegram."""
+# P298: app chạy TRÊN MÁY NHÀ (chay_may.py) thì gọi dự đoán ở đó — không đánh thức
+# Cloud Run (tốn tiền). App trong máy không trả lời / lỗi thì gọi Cloud Run như cũ.
+# Không cần sửa .env: không có app trong máy thì mọi thứ y như trước.
+APP_MAY_URL = os.environ.get('APP_MAY_URL', 'http://127.0.0.1:8080').strip().rstrip('/')
+
+
+def _phien(qua_proxy: bool) -> requests.Session:
+    s = requests.Session()
+    s.trust_env = qua_proxy          # gọi 127.0.0.1 thì KHÔNG đi qua proxy hệ thống
+    return s
+
+
+def _app_may_song() -> bool:
+    """/healthz trả JSON có 'status' (200, hoặc 503 khi DB chập chờn) = app của mình đang chạy."""
+    if not APP_MAY_URL:
+        return False
     try:
-        r = requests.post(
-            f"{CLOUD_RUN_URL}/api/trigger-prediction",
-            headers={"X-Trigger-Secret": TRIGGER_SECRET},
-            timeout=30,
-        )
-        if r.status_code == 200:
-            logger.info("🤖 Trigger prediction ✅")
-            return True
-        logger.warning(f"Trigger prediction HTTP {r.status_code}: {r.text[:100]}")
-    except Exception as e:
-        logger.warning(f"Trigger prediction lỗi: {e}")
+        r = _phien(False).get(f"{APP_MAY_URL}/healthz", timeout=5)
+        return r.status_code in (200, 503) and 'status' in (r.json() or {})
+    except Exception:
+        return False
+
+
+def trigger_prediction():
+    """Gọi app tạo dự đoán mới: app trong máy nếu đang chạy, không thì Cloud Run."""
+    dich = []
+    if _app_may_song():
+        dich.append(('may nha', APP_MAY_URL, 120, False))
+    cloud = CLOUD_RUN_URL.strip().rstrip('/')
+    if cloud and cloud != APP_MAY_URL:
+        dich.append(('Cloud Run', cloud, 30, True))
+    for ten, url, cho, qua_proxy in dich:
+        try:
+            r = _phien(qua_proxy).post(
+                f"{url}/api/trigger-prediction",
+                headers={"X-Trigger-Secret": TRIGGER_SECRET},
+                timeout=cho,
+            )
+            if r.status_code == 200:
+                logger.info("🤖 Trigger prediction (%s) ✅", ten)
+                return True
+            logger.warning("Trigger prediction (%s) HTTP %d: %s", ten, r.status_code, r.text[:100])
+        except Exception as e:
+            logger.warning("Trigger prediction (%s) lỗi: %s", ten, e)
     return False
 
 
