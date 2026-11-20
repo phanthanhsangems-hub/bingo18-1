@@ -13,6 +13,10 @@ on:
         description: 'thu = dry run, that = áp dụng'
         required: true
         default: 'thu'
+      xoa_kho_cu:
+        description: 'P298: xoá SẠCH các kho cũ không dùng (cloud-run-source-deploy, gcr.io)? yes/no'
+        required: false
+        default: 'no'
 
 permissions:
   contents: read
@@ -29,4 +33,10 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: Xoá image cũ
-        run: bash scripts/don_image.sh "${{ github.event.inputs.che_do }}" 10
+        env:
+          CHE_DO: ${{ github.event.inputs.che_do }}
+          XOA_CU: ${{ github.event.inputs.xoa_kho_cu }}
+        run: |
+          case "$CHE_DO" in thu|that) ;; *) echo "che_do phai la thu/that"; exit 1;; esac
+          if [ "$XOA_CU" = "yes" ]; then bash scripts/don_image.sh "$CHE_DO" 10 0
+          else bash scripts/don_image.sh "$CHE_DO" 10; fi

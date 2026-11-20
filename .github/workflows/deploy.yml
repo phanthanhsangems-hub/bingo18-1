@@ -15,6 +15,9 @@ on:
       - '.github/workflows/**'
       - 'test_*.py'
       - 'scripts/**'
+      # P298: chi dung khi chay app tren may nha, khong vao image Cloud Run
+      - 'chay_may.py'
+      - 'requirements-may.txt'
 
 jobs:
   deploy:

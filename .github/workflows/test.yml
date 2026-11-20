@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-may.txt   # P298: requirements.txt + waitress + tzdata
 
       - name: Seed local SQLite test DB
         run: python scripts/seed_test_db.py 200
@@ -56,3 +56,4 @@ jobs:
           python test_429.py
           python test_truoc_ky.py
           python test_du_doan_theo_lich.py
+          python test_chay_may.py
