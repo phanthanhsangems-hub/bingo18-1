@@ -1,0 +1,64 @@
+name: Đọc log Cloud Run
+
+# P296: tra lỗi theo KHOẢNG THỜI GIAN (vd 20/11 07:12-09:07 VN mất dự đoán 16 kỳ).
+# Cần github-deploy có roles/logging.viewer (người dùng đã cấp 20/11).
+# Giờ nhập là UTC (giờ VN - 7). `loc` là bộ lọc Cloud Logging thêm vào, ví dụ:
+#   httpRequest.requestUrl:"/api/predict"
+#   textPayload:"predict"
+on:
+  workflow_dispatch:
+    inputs:
+      tu:
+        description: 'Từ (UTC, vd 2026-11-20T00:00:00Z)'
+        required: true
+      den:
+        description: 'Đến (UTC, vd 2026-11-20T02:15:00Z)'
+        required: true
+      loc:
+        description: 'Bộ lọc thêm (bỏ trống = tất cả)'
+        required: false
+        default: ''
+      muc:
+        description: 'Mức tối thiểu: DEFAULT / INFO / WARNING / ERROR'
+        required: false
+        default: 'DEFAULT'
+      so_dong:
+        description: 'Số dòng tối đa (<= 2000)'
+        required: false
+        default: '400'
+
+permissions:
+  contents: read
+
+jobs:
+  log:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Đọc log
+        env:
+          TU: ${{ github.event.inputs.tu }}
+          DEN: ${{ github.event.inputs.den }}
+          LOC: ${{ github.event.inputs.loc }}
+          MUC: ${{ github.event.inputs.muc }}
+          SO: ${{ github.event.inputs.so_dong }}
+        run: |
+          case "$TU$DEN" in *[!0-9TZ:.-]*) echo "tu/den phai la thoi gian UTC dang 2026-11-20T00:00:00Z"; exit 1;; esac
+          case "$MUC" in DEFAULT|DEBUG|INFO|NOTICE|WARNING|ERROR|CRITICAL) ;; *) echo "muc khong hop le"; exit 1;; esac
+          case "$SO" in ''|*[!0-9]*) SO=400;; esac
+          [ "$SO" -gt 2000 ] && SO=2000
+          F="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"bingo18\" AND timestamp>=\"$TU\" AND timestamp<=\"$DEN\" AND severity>=$MUC"
+          [ -n "$LOC" ] && F="$F AND ($LOC)"
+          echo "BO LOC: $F"
+          echo
+          gcloud logging read "$F" --project bingo18-predictor --limit "$SO" --order=asc \
+            --format="value(timestamp, severity, httpRequest.requestMethod, httpRequest.requestUrl, httpRequest.status, httpRequest.latency, resource.labels.revision_name, textPayload, jsonPayload.message)" \
+            | sed 's/\t\t*/ | /g' | cut -c1-600
