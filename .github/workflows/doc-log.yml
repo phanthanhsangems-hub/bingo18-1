@@ -43,6 +43,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      # P296b: báo đúng tài khoản đang có quyền gì — 20/11 người dùng "đã cấp Logs
+      # Viewer" mà gcloud vẫn PERMISSION_DENIED, cần biết là chưa hiệu lực hay cấp nhầm chỗ.
+      - name: Tài khoản đang có những quyền nào
+        run: |
+          gcloud config list account --format="value(core.account)"
+          TOKEN=$(gcloud auth print-access-token)
+          curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            "https://cloudresourcemanager.googleapis.com/v1/projects/bingo18-predictor:testIamPermissions" \
+            -d '{"permissions":["logging.logEntries.list","logging.views.access","logging.views.list","logging.buckets.list","run.services.get","resourcemanager.projects.getIamPolicy"]}' || true
+          echo
+          echo "--- vai tro cua github-deploy trong IAM du an (neu doc duoc) ---"
+          gcloud projects get-iam-policy bingo18-predictor --flatten="bindings[].members" \
+            --filter="bindings.members:github-deploy@" --format="value(bindings.role)" 2>&1 | head -20 || true
+
       - name: Đọc log
         env:
           TU: ${{ github.event.inputs.tu }}
