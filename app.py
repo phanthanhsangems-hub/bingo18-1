@@ -138,6 +138,7 @@ _GAP_ALERT_WINDOW       = 300    # soi 300 kỳ gần nhất (~1,9 ngày)
 
 # P260: 'bộ ra lại' nằm trong tin mỗi kỳ do watcher gửi; hàm thuần ở lap_lai.py
 import lap_lai
+import thong_ke_tin_cay as _tk_tin_cay
 from lap_lai import (tong_sau_cac_lan as _tong_sau_cac_lan, tim_bo_ra_lai as _tim_bo_ra_lai,
                      LAPLAI_ALERT_GAP as _LAPLAI_ALERT_GAP, LAPLAI_CUA_SO_SAU as _LAPLAI_CUA_SO_SAU,
                      NK_KEY as _LAPLAI_NK_KEY, WAYS_COMBO as _WAYS_COMBO)
@@ -2361,6 +2362,11 @@ def get_statistics():
         stats['today_win_rate']    = today_win_rate
         stats['win_rate_multiset'] = round(wins_ms   / total_r, 4) if total_r else None
         stats['win_rate_size']     = round(wins_size / total_r, 4) if total_r else None
+        # Kèm khoảng tin cậy + p-value so với nền 37,5% để không đọc nhiễu thành tín hiệu.
+        dg = _tk_tin_cay.danh_gia(int(wins_size), int(total_r))
+        stats['win_rate_size_ktc95'] = [dg['ktc_duoi'], dg['ktc_tren']] if total_r else None
+        stats['win_rate_size_p']     = dg['p_hai_phia']
+        stats['win_rate_size_ket_luan'] = dg['ket_luan']
         return jsonify(stats)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -8037,7 +8043,76 @@ def analytics_accuracy_by_time():
             })
 
         return jsonify({"days": days, "timeline": timeline, "by_model": by_model,
-                        "baseline": 87.5})
+                        "baseline": 37.5})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/danh-gia-ngoai-mau')
+@limiter.limit("20 per minute")
+@cache_resp(ttl=300)
+def danh_gia_ngoai_mau():
+    """Tỷ lệ thắng SIZE kèm khoảng tin cậy 95% và p-value so với tỷ lệ nền.
+
+    Chỉ dự đoán ghi TRƯỚC giờ quay (prediction_time < draw_time) mới tính là ngoài mẫu;
+    dự đoán bù tạo sau khi đã có kết quả được tách riêng. Xem thong_ke_tin_cay.py.
+    Tham số: days (mặc định 30, 0 = toàn bộ), since=YYYY-MM-DD (nếu có thì thay days).
+    """
+    try:
+        days = max(0, min(int(request.args.get('days', 30)), 3650))
+        since = (request.args.get('since') or '').strip()
+        if since:
+            cutoff = datetime.strptime(since, '%Y-%m-%d')
+        elif days:
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+        else:
+            cutoff = None
+        ph = db._ph()
+        sql = ("SELECT p.prediction_time, d.draw_time, p.predicted_numbers, pr.is_win_size "
+               "FROM predictions p "
+               "JOIN prediction_results pr ON pr.prediction_id = p.id "
+               "JOIN draw_history d ON d.draw_number = p.draw_number "
+               "WHERE pr.is_win_size IS NOT NULL")
+        params: tuple = ()
+        if cutoff is not None:
+            sql += f" AND d.draw_time >= {ph}"
+            params = (cutoff.strftime('%Y-%m-%d %H:%M:%S'),)
+        sql += " ORDER BY d.draw_time DESC LIMIT 60000"
+        conn = db.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            raw_rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        rows = []
+        for pred_t, draw_t, nums, win in raw_rows:
+            try:
+                size = db.get_size_category([int(x) for x in json.loads(nums)])
+            except Exception:
+                continue
+            rows.append((pred_t, draw_t, size, bool(win)))
+
+        out = _tk_tin_cay.tong_hop_ngoai_mau(rows)
+        out.update({
+            'days': days, 'since': since or None,
+            'dinh_nghia': 'Ngoài mẫu = dự đoán được ghi trước giờ quay của kỳ đó '
+                          '(prediction_time < draw_time).',
+            'ghi_chu': [
+                'Tỷ lệ nền = xác suất đoán trúng SIZE nếu quay ngẫu nhiên: NHỎ/LỚN 37,5%, '
+                'HÒA 25%. Nền của nhóm là trung bình theo SIZE đã dự đoán.',
+                'KTC 95% theo Wilson; p-value nhị thức chính xác hai phía. Xem nhiều cửa sổ / '
+                'nhiều nhóm thì thế nào cũng có cái vượt nền do ngẫu nhiên (đa phép thử).',
+                'Dự đoán bù (tạo sau khi đã có kết quả) bị tách riêng và không dùng để kết luận.',
+                'Giờ quay lấy từ draw_history.draw_time; nếu giờ kỳ bị sửa muộn thì một số '
+                'dự đoán có thể bị xếp nhầm nhóm.',
+            ],
+            'so_dong_doc': len(rows),
+        })
+        return jsonify(out)
+    except ValueError:
+        return jsonify({"error": "tham số since phải dạng YYYY-MM-DD, days là số nguyên"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -236,6 +236,7 @@
   <button class="tab active" onclick="switchTab('freq')">Frequency</button>
   <button class="tab" onclick="switchTab('patterns')">Patterns</button>
   <button class="tab" onclick="switchTab('accuracy')">Accuracy</button>
+  <button class="tab" onclick="switchTab('oos')">Ngoài mẫu</button>
   <button class="tab" onclick="switchTab('export')">Export</button>
 </div>
 
@@ -321,6 +322,38 @@
   </div>
 </div>
 
+<!-- ═══ OUT-OF-SAMPLE ═══ -->
+<div id="tab-oos" class="panel">
+  <div class="controls">
+    <label>Khoảng thời gian</label>
+    <select id="oos-days" onchange="loadOos()">
+      <option value="7">7 ngày</option>
+      <option value="30" selected>30 ngày</option>
+      <option value="90">90 ngày</option>
+      <option value="0">Toàn bộ</option>
+    </select>
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <h3>Cách đọc trang này</h3>
+    <p style="font-size:12px;line-height:1.6;color:var(--text)">
+      Chỉ tính các dự đoán được <strong>ghi trước giờ quay</strong> của kỳ đó. Dự đoán bù, tạo sau khi đã có kết quả, bị tách riêng.
+      Mỗi tỷ lệ kèm <strong>khoảng tin cậy 95%</strong> và <strong>p-value</strong> so với tỷ lệ nền ngẫu nhiên (đoán NHỎ/LỚN trúng 37,5%).
+      Nếu khoảng tin cậy còn chứa mốc nền thì tỷ lệ này chưa khác may rủi.
+    </p>
+  </div>
+  <div class="stat-row" id="oos-stats"></div>
+  <div class="card" id="oos-verdict" style="margin-bottom:16px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <h3>Tỷ lệ thắng theo tuần (ngoài mẫu) với khoảng tin cậy 95%</h3>
+    <div class="chart-wrap"><canvas id="oosChart"></canvas></div>
+  </div>
+  <div class="card">
+    <h3>Chi tiết các nhóm</h3>
+    <div id="oos-table"></div>
+  </div>
+  <div id="oos-notes" style="margin-top:14px;font-size:11px;color:var(--muted);line-height:1.6"></div>
+</div>
+
 <!-- ═══ EXPORT ═══ -->
 <div id="tab-export" class="panel">
   <div class="export-grid">
@@ -387,12 +420,13 @@ function mkChart(id, type, data, opts={}) {
 }
 
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['freq','patterns','accuracy','export'][i] === name));
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['freq','patterns','accuracy','oos','export'][i] === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'freq')     loadFreq();
   if (name === 'patterns') loadPatterns();
   if (name === 'accuracy') loadAccuracy();
+  if (name === 'oos')      loadOos();
 }
 
 // ── FREQUENCY ──
@@ -478,6 +512,16 @@ async function loadPatterns() {
     </table>`;
 }
 
+// ── KHOẢNG TIN CẬY (Wilson 95%) ──
+function wilson(w, n) {
+  if (!n) return [null, null];
+  const z = 1.959964, p = w / n, z2 = z * z, m = 1 + z2 / n;
+  const c = (p + z2 / (2 * n)) / m;
+  const b = z * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / m;
+  return [Math.max(0, c - b), Math.min(1, c + b)];
+}
+const pct1 = x => (x == null ? '–' : (x * 100).toFixed(1) + '%');
+
 // ── ACCURACY ──
 async function loadAccuracy() {
   const days = document.getElementById('acc-days').value;
@@ -494,7 +538,7 @@ async function loadAccuracy() {
   document.getElementById('acc-stats').innerHTML = `
     <div class="stat"><div class="val">${ov_rate}%</div><div class="lbl">Win Rate (multiset)</div></div>
     <div class="stat"><div class="val">${ov_total.toLocaleString()}</div><div class="lbl">Predictions Evaluated</div></div>
-    <div class="stat"><div class="val">87.5%</div><div class="lbl">Random Baseline</div></div>
+    <div class="stat"><div class="val">37.5%</div><div class="lbl">Random Baseline</div></div>
   `;
 
   mkChart('accTimeChart', 'line', {
@@ -506,7 +550,7 @@ async function loadAccuracy() {
       { label: 'Size Win Rate %', data: timeline.map(x => x.win_rate_size),
         borderColor: MAGENTA, backgroundColor: 'rgba(255,0,170,.05)',
         fill: false, tension: .3, pointRadius: 3 },
-      { label: 'Baseline 87.5%', data: timeline.map(() => 87.5),
+      { label: 'Baseline 37.5%', data: timeline.map(() => 37.5),
         borderColor: AMBER, borderDash: [4,4], pointRadius: 0 },
     ]
   }, { plugins: { legend: { display: true } } });
@@ -521,19 +565,82 @@ async function loadAccuracy() {
 
   document.getElementById('model-table').innerHTML = `
     <table>
-      <tr><th>Model</th><th>Total</th><th>Wins (multiset)</th><th>Win Rate</th><th>Size Wins</th><th>Size Rate</th></tr>
+      <tr><th>Model</th><th>Total</th><th>Wins (multiset)</th><th>Win Rate</th><th>Size Wins</th><th>Size Rate</th><th>KTC 95% (Size)</th></tr>
       ${byModel.map(m => {
-        const ok = m.win_rate >= 87.5;
+        const ok = m.win_rate >= 37.5;
         return `<tr>
           <td><strong>${m.model_name}</strong></td>
           <td>${m.total.toLocaleString()}</td>
           <td>${m.wins.toLocaleString()}</td>
           <td style="color:${ok?'var(--green)':'var(--magenta)'}">${m.win_rate}%</td>
           <td>${m.wins_size.toLocaleString()}</td>
-          <td style="color:${m.win_rate_size>=30?'var(--green)':'var(--amber)'}">${m.win_rate_size}%</td>
+          <td style="color:${m.win_rate_size>=37.5?'var(--green)':'var(--amber)'}">${m.win_rate_size}%</td>
+          <td>${(() => { const [lo, hi] = wilson(m.wins_size, m.total); return pct1(lo) + ' – ' + pct1(hi); })()}</td>
         </tr>`;
       }).join('')}
     </table>`;
+}
+
+// ── NGOÀI MẪU ──
+function oosCard(tieuDe, g) {
+  const lo = g.ktc_duoi, hi = g.ktc_tren, nen = g.nen;
+  const sig = g.n && g.p_hai_phia != null && g.p_hai_phia < 0.05;
+  const mau = !g.n ? 'var(--muted)' : (!sig ? 'var(--amber)' : (g.ty_le > nen ? 'var(--green)' : 'var(--red)'));
+  return `<div class="stat">
+    <div class="val" style="color:${mau}">${g.n ? pct1(g.ty_le) : '–'}</div>
+    <div class="lbl">${tieuDe}</div>
+    <div class="lbl" style="margin-top:8px">${g.n.toLocaleString()} kỳ · KTC 95% ${pct1(lo)} – ${pct1(hi)}</div>
+    <div class="lbl">Nền ${pct1(nen)} · p = ${g.p_hai_phia == null ? '–' : g.p_hai_phia}</div>
+  </div>`;
+}
+
+async function loadOos() {
+  const days = document.getElementById('oos-days').value;
+  const stats = document.getElementById('oos-stats');
+  stats.innerHTML = '<div class="loader">Đang tải</div>';
+  let d;
+  try {
+    d = await (await fetch(`/api/danh-gia-ngoai-mau?days=${days}`)).json();
+  } catch (e) { stats.innerHTML = `<div class="err">${e}</div>`; return; }
+  if (d.error) { stats.innerHTML = `<div class="err">${d.error}</div>`; return; }
+
+  const om = d.ngoai_mau, bu = d.bu, tc = d.tat_ca;
+  stats.innerHTML = oosCard('Ngoài mẫu (ghi trước giờ quay)', om)
+                  + oosCard('Dự đoán bù (ghi sau khi có kết quả)', bu)
+                  + oosCard('Tất cả', tc);
+  document.getElementById('oos-verdict').innerHTML =
+    `<h3>Kết luận cho nhóm ngoài mẫu</h3><p style="font-size:13px;line-height:1.6">${om.ket_luan}</p>`;
+
+  const tuan = d.theo_tuan || [];
+  try { mkChart('oosChart', 'line', {
+    labels: tuan.map(x => x.tuan),
+    datasets: [
+      { label: 'Thắng %', data: tuan.map(x => +(x.ty_le * 100).toFixed(2)),
+        borderColor: CYAN, backgroundColor: 'rgba(0,245,255,.1)', tension: .3, pointRadius: 3, fill: false },
+      { label: 'KTC trên', data: tuan.map(x => +(x.ktc_tren * 100).toFixed(2)),
+        borderColor: 'rgba(0,245,255,.3)', borderDash: [2,3], pointRadius: 0, fill: '+1',
+        backgroundColor: 'rgba(0,245,255,.08)' },
+      { label: 'KTC dưới', data: tuan.map(x => +(x.ktc_duoi * 100).toFixed(2)),
+        borderColor: 'rgba(0,245,255,.3)', borderDash: [2,3], pointRadius: 0, fill: false },
+      { label: 'Nền ngẫu nhiên', data: tuan.map(x => +(x.nen * 100).toFixed(2)),
+        borderColor: AMBER, borderDash: [4,4], pointRadius: 0, fill: false },
+    ]
+  }, { plugins: { legend: { display: true } } }); } catch (e) { console.error('Không vẽ được biểu đồ', e); }
+
+  const dong = (ten, g) => `<tr>
+    <td><strong>${ten}</strong></td><td>${g.n.toLocaleString()}</td><td>${g.thang.toLocaleString()}</td>
+    <td>${pct1(g.ty_le)}</td><td>${pct1(g.ktc_duoi)} – ${pct1(g.ktc_tren)}</td>
+    <td>${pct1(g.nen)}</td><td>${g.p_hai_phia == null ? '–' : g.p_hai_phia}</td></tr>`;
+  document.getElementById('oos-table').innerHTML = `<table>
+    <tr><th>Nhóm</th><th>Số kỳ</th><th>Thắng</th><th>Tỷ lệ</th><th>KTC 95%</th><th>Nền</th><th>p</th></tr>
+    ${dong('Ngoài mẫu', om)}${dong('Dự đoán bù', bu)}${dong('Tất cả', tc)}
+  </table>
+  <table style="margin-top:14px">
+    <tr><th>Tuần</th><th>Số kỳ</th><th>Thắng</th><th>Tỷ lệ</th><th>KTC 95%</th></tr>
+    ${tuan.map(x => `<tr><td>${x.tuan}</td><td>${x.n.toLocaleString()}</td><td>${x.thang.toLocaleString()}</td>
+      <td>${pct1(x.ty_le)}</td><td>${pct1(x.ktc_duoi)} – ${pct1(x.ktc_tren)}</td></tr>`).join('')}
+  </table>`;
+  document.getElementById('oos-notes').innerHTML = (d.ghi_chu || []).map(t => '• ' + t).join('<br>');
 }
 
 // ── EXPORT HELPER ──

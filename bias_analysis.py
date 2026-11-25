@@ -32,7 +32,9 @@ from database import DatabaseManager
 
 VN_TZ   = timezone(timedelta(hours=7))
 SIZES   = ['NHO', 'HOA', 'LON']
-THEO_SZ = {'NHO': 81/216, 'HOA': 48/216, 'LON': 87/216}
+# 3 viên xúc xắc 1-6 (216 khả năng): tổng 3-9 = 81, tổng 10-11 = 54, tổng 12-18 = 81.
+# (Trước đây ghi nhầm HOA 48/216 và LON 87/216 nên mọi so sánh "lệch so với lý thuyết" đều sai.)
+THEO_SZ = {'NHO': 81/216, 'HOA': 54/216, 'LON': 81/216}
 
 
 # ── Statistical helpers ───────────────────────────────────────────────────────
