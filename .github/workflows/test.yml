@@ -39,6 +39,7 @@ jobs:
           python test_cache_skew.py
           python test_gap_healing.py
           python test_danh_gia_ngoai_mau.py
+          python test_kiem_duyet_luat.py
           python test_median.py
           python test_chuoi_kc.py
           python test_win_prob.py
