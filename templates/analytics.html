@@ -538,7 +538,7 @@ async function loadAccuracy() {
   document.getElementById('acc-stats').innerHTML = `
     <div class="stat"><div class="val">${ov_rate}%</div><div class="lbl">Win Rate (multiset)</div></div>
     <div class="stat"><div class="val">${ov_total.toLocaleString()}</div><div class="lbl">Predictions Evaluated</div></div>
-    <div class="stat"><div class="val">87.5%</div><div class="lbl">Random Baseline</div></div>
+    <div class="stat"><div class="val">37.5%</div><div class="lbl">Random Baseline</div></div>
   `;
 
   mkChart('accTimeChart', 'line', {
@@ -550,7 +550,7 @@ async function loadAccuracy() {
       { label: 'Size Win Rate %', data: timeline.map(x => x.win_rate_size),
         borderColor: MAGENTA, backgroundColor: 'rgba(255,0,170,.05)',
         fill: false, tension: .3, pointRadius: 3 },
-      { label: 'Baseline 87.5%', data: timeline.map(() => 87.5),
+      { label: 'Baseline 37.5%', data: timeline.map(() => 37.5),
         borderColor: AMBER, borderDash: [4,4], pointRadius: 0 },
     ]
   }, { plugins: { legend: { display: true } } });
@@ -567,14 +567,14 @@ async function loadAccuracy() {
     <table>
       <tr><th>Model</th><th>Total</th><th>Wins (multiset)</th><th>Win Rate</th><th>Size Wins</th><th>Size Rate</th><th>KTC 95% (Size)</th></tr>
       ${byModel.map(m => {
-        const ok = m.win_rate >= 87.5;
+        const ok = m.win_rate >= 37.5;
         return `<tr>
           <td><strong>${m.model_name}</strong></td>
           <td>${m.total.toLocaleString()}</td>
           <td>${m.wins.toLocaleString()}</td>
           <td style="color:${ok?'var(--green)':'var(--magenta)'}">${m.win_rate}%</td>
           <td>${m.wins_size.toLocaleString()}</td>
-          <td style="color:${m.win_rate_size>=30?'var(--green)':'var(--amber)'}">${m.win_rate_size}%</td>
+          <td style="color:${m.win_rate_size>=37.5?'var(--green)':'var(--amber)'}">${m.win_rate_size}%</td>
           <td>${(() => { const [lo, hi] = wilson(m.wins_size, m.total); return pct1(lo) + ' – ' + pct1(hi); })()}</td>
         </tr>`;
       }).join('')}

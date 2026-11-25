@@ -8043,7 +8043,7 @@ def analytics_accuracy_by_time():
             })
 
         return jsonify({"days": days, "timeline": timeline, "by_model": by_model,
-                        "baseline": 87.5})
+                        "baseline": 37.5})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
