@@ -69,6 +69,12 @@ def p_value(wins: int, total: int, p0: float = NEN_MAC_DINH) -> Dict[str, Option
     return {'p_hai_phia': min(1.0, hai), 'p_cao_hon': tren}
 
 
+def _so_quan_trong(x: float, so: int = 4) -> float:
+    """Làm tròn theo CHỮ SỐ QUAN TRỌNG (không phải số lẻ): p-value rất nhỏ như 3e-17 không bị
+    làm tròn về 0, nếu không thì p x K (hiệu chỉnh đa phép thử) cũng thành 0 và vô nghĩa."""
+    return float('%.*g' % (so, x))
+
+
 def danh_gia(wins: int, total: int, p0: float = NEN_MAC_DINH, min_mau: int = MIN_MAU) -> Dict:
     """Gói đánh giá một tỷ lệ thắng: tỷ lệ, KTC 95%, p-value, kết luận bằng lời."""
     out: Dict = {
@@ -85,7 +91,7 @@ def danh_gia(wins: int, total: int, p0: float = NEN_MAC_DINH, min_mau: int = MIN
     out.update({
         'ty_le': round(rate, 4), 'ktc_duoi': round(lo, 4), 'ktc_tren': round(hi, 4),
         'chenh_nen': round(rate - p0, 4),
-        'p_hai_phia': round(pv['p_hai_phia'], 4), 'p_cao_hon': round(pv['p_cao_hon'], 4),
+        'p_hai_phia': _so_quan_trong(pv['p_hai_phia']), 'p_cao_hon': _so_quan_trong(pv['p_cao_hon']),
     })
     if total < min_mau:
         out['ket_luan'] = ('Chưa đủ mẫu để kết luận (%d kỳ, cần ít nhất %d). '
